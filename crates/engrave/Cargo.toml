@@ -1,0 +1,15 @@
+[package]
+name = "scoreart-engrave"
+description = "ScoreArt engraver: spacing, system and page breaking, stems, beams, accidentals, ties"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+scoreart-model = { workspace = true }
+
+[dev-dependencies]
+scoreart-musicxml = { workspace = true }

@@ -1,0 +1,60 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*", "xtask"]
+default-members = ["crates/*", "apps/scoreart", "apps/scoreart-cli", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.90"
+repository = "https://github.com/ManuelDell/scoreart"
+
+[workspace.dependencies]
+# internal
+scoreart-model = { path = "crates/model" }
+scoreart-musicxml = { path = "crates/musicxml" }
+scoreart-midi = { path = "crates/midi" }
+scoreart-engrave = { path = "crates/engrave" }
+scoreart-render = { path = "crates/render" }
+scoreart-engine = { path = "crates/engine" }
+scoreart-ui-egui = { path = "crates/ui-egui" }
+
+# foundation
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+quick-xml = "0.38"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+midly = { version = "0.5", default-features = false, features = ["alloc", "std"] }
+ttf-parser = { version = "0.25", default-features = false, features = ["std", "opentype-layout"] }
+
+# ui
+egui = "0.37"
+eframe = { version = "0.37", default-features = false }
+egui_kittest = "0.37"
+rfd = "0.15"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+[profile.dev]
+opt-level = 1
+debug = "line-tables-only"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+debug = 0

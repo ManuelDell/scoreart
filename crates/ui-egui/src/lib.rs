@@ -1,0 +1,279 @@
+//! The ScoreArt egui front end. Thin: it reads [`Session`] state and runs commands by id.
+//! The platform (native or web) plugs in through [`Host`] for file dialogs and saving.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable
+)]
+
+mod canvas;
+pub mod glyph;
+mod panels;
+pub mod theme;
+
+use egui::{Key, Modifiers};
+use serde_json::{Value, json};
+
+use scoreart_engine::Session;
+
+/// Platform services.
+pub trait Host {
+    /// Ask the user for a score to open; the result arrives through [`Host::take_opened`].
+    fn request_open(&mut self);
+    /// A file the user picked (or the host page sent), if any arrived.
+    fn take_opened(&mut self) -> Option<(String, Vec<u8>)>;
+    /// Store `bytes`. `name` is a file name; `save_as` asks for a location. Returns the name it
+    /// was saved under once saving finished (synchronously), or `None` if pending/cancelled.
+    fn save(&mut self, name: &str, bytes: Vec<u8>, save_as: bool) -> Option<String>;
+    /// Whether the app runs inside a host page that owns files (no New/Open in that case).
+    fn embedded(&self) -> bool {
+        false
+    }
+}
+
+/// A host that does nothing (tests, screenshots).
+#[derive(Default)]
+pub struct NoHost;
+
+impl Host for NoHost {
+    fn request_open(&mut self) {}
+    fn take_opened(&mut self) -> Option<(String, Vec<u8>)> {
+        None
+    }
+    fn save(&mut self, _: &str, _: Vec<u8>, _: bool) -> Option<String> {
+        None
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Dialog {
+    NewScore(panels::NewScore),
+    Shortcuts,
+    About,
+    Text {
+        title: &'static str,
+        command: &'static str,
+        key: &'static str,
+        value: String,
+    },
+}
+
+pub struct ScoreApp {
+    pub session: Session,
+    pub host: Box<dyn Host>,
+    /// Pixels per staff space.
+    pub zoom: f32,
+    pub(crate) dialog: Option<Dialog>,
+    pub(crate) scroll_to_cursor: bool,
+    pub(crate) fields: panels::Fields,
+    fonts_ready: bool,
+    pub show_palette: bool,
+    pub show_properties: bool,
+}
+
+impl ScoreApp {
+    pub fn new(ctx: &egui::Context, session: Session, host: Box<dyn Host>) -> ScoreApp {
+        glyph::install_fonts(ctx);
+        ScoreApp {
+            session,
+            host,
+            zoom: 7.5,
+            dialog: None,
+            scroll_to_cursor: false,
+            fields: panels::Fields::default(),
+            fonts_ready: true,
+            show_palette: true,
+            show_properties: true,
+        }
+    }
+
+    /// Runs a command and reports failures in the status bar.
+    pub fn run(&mut self, id: &str, params: Value) {
+        match self.session.execute(id, &params) {
+            Ok(_) => {
+                self.scroll_to_cursor = true;
+                if !id.starts_with("select.") && !id.starts_with("cursor.") {
+                    self.session.status.clear();
+                }
+            }
+            Err(e) => self.session.status = e.to_string(),
+        }
+    }
+
+    /// Title for the window: file name, dirty marker, app name.
+    pub fn title(&self) -> String {
+        format!(
+            "{}{} — ScoreArt",
+            if self.session.dirty { "• " } else { "" },
+            self.session.file_name
+        )
+    }
+
+    pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) {
+        match self.session.open_bytes(name, bytes) {
+            Ok(()) => {
+                self.fields = panels::Fields::default();
+                self.scroll_to_cursor = true;
+            }
+            Err(e) => self.session.status = e.to_string(),
+        }
+    }
+
+    pub fn save(&mut self, save_as: bool) {
+        let mut name = self.session.file_name.clone();
+        if scoreart_engine::Format::from_name(&name).is_none_or(|f| {
+            !matches!(
+                f,
+                scoreart_engine::Format::MusicXml | scoreart_engine::Format::Mxl
+            )
+        }) {
+            name = format!(
+                "{}.musicxml",
+                name.rsplit_once('.').map(|(a, _)| a).unwrap_or(&name)
+            );
+        }
+        self.export(&name, save_as);
+    }
+
+    pub fn export(&mut self, name: &str, save_as: bool) {
+        match self.session.save_bytes(name) {
+            Ok(bytes) => {
+                if let Some(saved) = self.host.save(name, bytes, save_as) {
+                    self.session.mark_saved(&saved);
+                    self.session.status = format!("Saved {saved}");
+                }
+            }
+            Err(e) => self.session.status = e.to_string(),
+        }
+    }
+
+    /// The whole UI for one frame.
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
+        if !self.fonts_ready {
+            return;
+        }
+        let ctx = ui.ctx().clone();
+        if let Some((name, bytes)) = self.host.take_opened() {
+            self.open_bytes(&name, &bytes);
+        }
+        self.keyboard(&ctx);
+        panels::menu_bar(self, ui);
+        panels::toolbar(self, ui);
+        panels::status_bar(self, ui);
+        if self.show_palette {
+            panels::palette(self, ui);
+        }
+        if self.show_properties {
+            panels::properties(self, ui);
+        }
+        let t = theme::Tokens::get(&ctx);
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(t.canvas))
+            .show(ui, |ui| {
+                canvas::show(self, ui);
+            });
+        panels::dialogs(self, &ctx);
+        // Ctrl + mouse wheel zooms.
+        let (zoom_delta, cmd) = ctx.input(|i| (i.zoom_delta(), i.modifiers.command));
+        if (zoom_delta - 1.0).abs() > 1e-3 {
+            self.set_zoom(self.zoom * zoom_delta);
+        }
+        let _ = cmd;
+    }
+
+    pub fn set_zoom(&mut self, z: f32) {
+        if z.is_finite() {
+            self.zoom = z.clamp(2.0, 40.0);
+        }
+    }
+
+    fn keyboard(&mut self, ctx: &egui::Context) {
+        if ctx.egui_wants_keyboard_input() || self.dialog.is_some() {
+            return;
+        }
+        let events = ctx.input(|i| i.events.clone());
+        for ev in events {
+            let egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers: m,
+                ..
+            } = ev
+            else {
+                continue;
+            };
+            self.key(key, m);
+        }
+    }
+
+    /// Keyboard shortcuts → commands.
+    pub fn key(&mut self, key: Key, m: Modifiers) {
+        let plain = !m.command && !m.alt && !m.shift;
+        let shift_only = m.shift && !m.command && !m.alt;
+        let cmd_only = m.command && !m.alt && !m.shift;
+        let letter = match key {
+            Key::A => Some("a"),
+            Key::B => Some("b"),
+            Key::C => Some("c"),
+            Key::D => Some("d"),
+            Key::E => Some("e"),
+            Key::F => Some("f"),
+            Key::G => Some("g"),
+            _ => None,
+        };
+        let digit = match key {
+            Key::Num1 => Some(1),
+            Key::Num2 => Some(2),
+            Key::Num3 => Some(3),
+            Key::Num4 => Some(4),
+            Key::Num5 => Some(5),
+            Key::Num6 => Some(6),
+            Key::Num7 => Some(7),
+            Key::Num8 => Some(8),
+            _ => None,
+        };
+        match (key, letter, digit) {
+            (_, Some(l), _) if plain => self.run("note.enter", json!({ "step": l })),
+            (_, Some(l), _) if shift_only => self.run("note.add", json!({ "step": l })),
+            (Key::B, _, _) if cmd_only => self.run("measure.append", json!({})),
+            (Key::A, _, _) if cmd_only => self.run("select.all", json!({})),
+            (_, _, Some(d)) if plain => self.run("input.duration", json!({ "value": d })),
+            (_, _, Some(d)) if m.command && m.alt && d <= 4 => self.run("input.voice", json!({ "voice": d })),
+            (Key::Num0, _, _) if plain => self.run("note.rest", json!({})),
+            (Key::Period, _, _) if plain => self.run("input.dot", json!({})),
+            (Key::N, _, _) if plain => self.run("input.toggle", json!({})),
+            (Key::N, _, _) if cmd_only => self.dialog = Some(Dialog::NewScore(panels::NewScore::default())),
+            (Key::T, _, _) if plain => self.run("note.tie", json!({})),
+            (Key::Escape, _, _) => self.run("edit.escape", json!({})),
+            (Key::ArrowUp, _, _) if plain => self.run("note.pitch-up", json!({})),
+            (Key::ArrowDown, _, _) if plain => self.run("note.pitch-down", json!({})),
+            (Key::ArrowUp, _, _) if cmd_only => self.run("note.octave-up", json!({})),
+            (Key::ArrowDown, _, _) if cmd_only => self.run("note.octave-down", json!({})),
+            (Key::ArrowUp, _, _) if m.alt && m.shift && !m.command => self.run("note.step-up", json!({})),
+            (Key::ArrowDown, _, _) if m.alt && m.shift && !m.command => self.run("note.step-down", json!({})),
+            (Key::ArrowUp, _, _) if m.command && m.alt => self.run("select.staff-up", json!({})),
+            (Key::ArrowDown, _, _) if m.command && m.alt => self.run("select.staff-down", json!({})),
+            (Key::ArrowRight, _, _) if plain => self.run("select.next", json!({})),
+            (Key::ArrowLeft, _, _) if plain => self.run("select.prev", json!({})),
+            (Key::ArrowRight, _, _) if cmd_only => self.run("select.next-measure", json!({})),
+            (Key::ArrowLeft, _, _) if cmd_only => self.run("select.prev-measure", json!({})),
+            (Key::Delete | Key::Backspace, _, _) if plain => self.run("note.delete", json!({})),
+            (Key::Delete, _, _) if cmd_only => self.run("measure.delete", json!({})),
+            (Key::Insert, _, _) if plain => self.run("measure.insert", json!({})),
+            (Key::Z, _, _) if cmd_only => self.run("edit.undo", json!({})),
+            (Key::Z, _, _) if m.command && m.shift => self.run("edit.redo", json!({})),
+            (Key::Y, _, _) if cmd_only => self.run("edit.redo", json!({})),
+            (Key::S, _, _) if cmd_only => self.save(false),
+            (Key::S, _, _) if m.command && m.shift => self.save(true),
+            (Key::O, _, _) if cmd_only && !self.host.embedded() => self.host.request_open(),
+            (Key::L, _, _) if cmd_only => panels::open_lyric_dialog(self),
+            (Key::Equals | Key::Plus, _, _) if m.command => self.set_zoom(self.zoom * 1.15),
+            (Key::Minus, _, _) if m.command => self.set_zoom(self.zoom / 1.15),
+            (Key::Num0, _, _) if cmd_only => self.set_zoom(7.5),
+            _ => {}
+        }
+    }
+}

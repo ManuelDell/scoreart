@@ -1,0 +1,13 @@
+[package]
+name = "scoreart-midi"
+description = "Playback sequence and Standard MIDI File export for ScoreArt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+scoreart-model = { workspace = true }
+midly = { workspace = true }

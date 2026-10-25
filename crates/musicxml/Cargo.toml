@@ -1,0 +1,15 @@
+[package]
+name = "scoreart-musicxml"
+description = "MusicXML 4.0 import and export (.musicxml, .mxl) for ScoreArt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+scoreart-model = { workspace = true }
+quick-xml = { workspace = true }
+zip = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ScoreArt</title>
+  <link data-trunk rel="icon" href="../../assets/app-icon/scoreart.svg" />
+  <link data-trunk rel="rust" data-bin="scoreart-web" data-wasm-opt="z" />
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #dfe2e8; }
+    #scoreart_canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    #scoreart_loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: #555; font: 14px system-ui, sans-serif; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <canvas id="scoreart_canvas"></canvas>
+  <div id="scoreart_loading">Loading ScoreArt&hellip;</div>
+</body>
+</html>

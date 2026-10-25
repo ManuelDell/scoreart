@@ -1,0 +1,16 @@
+[package]
+name = "scoreart-cli"
+description = "ScoreArt command line: convert scores, list and run commands"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+scoreart-engine = { workspace = true }
+scoreart-engrave = { workspace = true }
+scoreart-render = { workspace = true }
+serde_json = { workspace = true }

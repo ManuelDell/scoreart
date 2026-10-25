@@ -1,0 +1,17 @@
+[package]
+name = "scoreart"
+description = "ScoreArt desktop app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+scoreart-engine = { workspace = true }
+scoreart-ui-egui = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "glow", "wayland", "x11", "accesskit"] }
+rfd = { workspace = true }

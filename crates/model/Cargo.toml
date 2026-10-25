@@ -1,0 +1,13 @@
+[package]
+name = "scoreart-model"
+description = "ScoreArt score model: parts, staves, measures, voices, notes and edit primitives"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
