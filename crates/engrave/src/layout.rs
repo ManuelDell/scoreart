@@ -554,7 +554,11 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
         }
         for (pi, part) in score.parts.iter().enumerate() {
             for s in 0..part.staff_count() {
+                // Make room for notes (with stems and marks) far above or below the staff.
+                let (reach_up, reach_down) = staff_reach(score, pi, s, &sys.measures);
+                sy += (reach_up - 3.0).max(0.0);
                 tops.push((pi, s, sy));
+                sy += (reach_down - 3.0).max(0.0);
                 let lyrics = sys.measures.iter().any(|m| {
                     score.staff_measure(pi, s, *m).is_some_and(|sm| {
                         sm.voices.iter().any(|v| {
@@ -1610,4 +1614,28 @@ fn tie_shape(xa: f32, xb: f32, y: f32, up: bool) -> Shape {
         ],
         thick: g::TIE_MID,
     }
+}
+
+/// How far the notes of one staff reach above the top line and below the bottom line in the
+/// given measures (sp, ≥ 0), counting stems and marks roughly.
+fn staff_reach(score: &Score, part: usize, staff: usize, measures: &[usize]) -> (f32, f32) {
+    let mut up = 0.0f32;
+    let mut down = 0.0f32;
+    for &m in measures {
+        let clef = score.clef_at(part, staff, m);
+        let Some(sm) = score.staff_measure(part, staff, m) else {
+            continue;
+        };
+        for v in &sm.voices {
+            for e in &v.events {
+                let marks = if e.articulations.is_empty() { 0.0 } else { 1.6 };
+                for n in e.notes() {
+                    let y = note_y(clef, n.pitch);
+                    up = up.max(-(y - STEM_LEN) + marks).max(-y + 1.0 + marks);
+                    down = down.max(y + STEM_LEN - 4.0).max(y - 4.0 + 1.0);
+                }
+            }
+        }
+    }
+    (up, down)
 }
