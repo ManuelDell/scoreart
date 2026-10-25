@@ -14,6 +14,8 @@
     clippy::unreachable
 )]
 
+mod audio;
+
 use std::path::PathBuf;
 
 use scoreart_engine::Session;
@@ -24,6 +26,8 @@ struct NativeHost {
     opened: Option<(String, Vec<u8>)>,
     /// Where the open score lives on disk.
     path: Option<PathBuf>,
+    audio: audio::Audio,
+    audio_rate: u32,
 }
 
 impl NativeHost {
@@ -40,6 +44,22 @@ impl NativeHost {
 }
 
 impl Host for NativeHost {
+    fn audio_rate(&self) -> u32 {
+        self.audio_rate
+    }
+
+    fn audio_start(&mut self, synth: scoreart_synth::Synth) -> Result<(), String> {
+        self.audio.start(synth)
+    }
+
+    fn audio_stop(&mut self) {
+        self.audio.stop();
+    }
+
+    fn audio_position(&mut self) -> Option<f64> {
+        self.audio.position()
+    }
+
     fn request_open(&mut self) {
         if let Some(p) = rfd::FileDialog::new()
             .add_filter("MusicXML", &["musicxml", "mxl", "xml"])
@@ -127,6 +147,8 @@ impl eframe::App for App {
 
 fn main() -> eframe::Result<()> {
     let mut host = NativeHost::default();
+    // Opening the device tells us its sample rate (44.1 kHz if there is none).
+    host.audio_rate = host.audio.rate();
     if let Some(arg) = std::env::args().nth(1) {
         host.load(PathBuf::from(arg));
     }

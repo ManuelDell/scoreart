@@ -45,14 +45,18 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   export with real glyph outlines.
 - **Web build** with a `?host=parent` `postMessage` bridge (`scoreart:ready/open/save/dirty`) so
   a same-origin page — for example a Nextcloud app — can open and save scores in it.
+- **Playback** with ScoreArt's own built-in synthesizer (no soundfont needed): `Space` plays
+  from the selection with a moving playhead, notes sound while you enter them, repeats are
+  followed, dynamics and accents shape the volume. Desktop audio via cpal, Web Audio in the
+  browser; **WAV** export.
 - **CLI** for conversion and for driving every command headlessly (agents, scripts).
 
-Not yet: playback, PDF export, slurs, hairpins, tuplet input, multi-measure rests, part
+Not yet: PDF export, slurs, hairpins, tuplet input, multi-measure rests, part
 extraction, transposing instruments, percussion and tablature — see [ROADMAP.md](ROADMAP.md).
 
 ## Build and run
 
-Needs Rust ≥ 1.90.
+Needs Rust ≥ 1.90. On Linux the desktop app needs the ALSA headers (`libasound2-dev`).
 
 ```bash
 cargo run --release -p scoreart -- [score.musicxml]        # desktop app
@@ -84,6 +88,7 @@ attribution, crate layering, wasm build).
 | `Ctrl+B` | append measure | `Ins` | insert measure |
 | `Ctrl+Z` / `Ctrl+Y` | undo / redo | `Ctrl+L` | lyric |
 | `Ctrl+S` / `Ctrl+Shift+S` | save / save as | `Ctrl+O` / `Ctrl+N` | open / new |
+| `Space` | play / stop | `Esc` | stop playback |
 
 ## How it is built
 
@@ -91,7 +96,7 @@ attribution, crate layering, wasm build).
 |---|---|---|
 | L1 | `model` | score model and edit primitives |
 | L2 | `musicxml`, `midi`, `engrave` | MusicXML I/O · MIDI · layout to a display list |
-| L3 | `render` | SVG export with Bravura outlines |
+| L3 | `render`, `synth` | SVG export with Bravura outlines · built-in synthesizer |
 | L4 | `engine` | session, undo, command registry |
 | L6 | `ui-egui` | the egui front end |
 | apps | `scoreart`, `scoreart-cli`, `scoreart-web` | desktop, CLI, browser |

@@ -12,6 +12,7 @@ apps/scoreart  apps/scoreart-cli  apps/scoreart-web        binaries
 L6  crates/ui-egui        menus, toolbar, palettes, properties, canvas, keyboard
 L4  crates/engine         Session · undo/redo · command registry · sample · file I/O
 L3  crates/render         SVG from the display list (Bravura outlines via ttf-parser)
+L3  crates/synth          built-in synthesizer: Sequence → stereo f32 frames
 L2  crates/engrave        layout → pages of shapes + hit boxes + staff boxes
 L2  crates/musicxml       MusicXML 4.0 / MXL read & write
 L2  crates/midi           tie-merged playback sequence · Standard MIDI File
@@ -81,3 +82,15 @@ embedded mode) come in through the `Host` trait.
 - `apps/scoreart-web`: eframe web runner (WebGL2), file picker and downloads, `?host=parent`
   bridge (`scoreart:ready`, `scoreart:open {name, bytes}`, `scoreart:save {name, bytes}`,
   `scoreart:dirty {dirty}`), same-origin parent only.
+
+## Playback
+
+`midi::sequence` flattens the score (repeats unrolled, ties merged, dynamics → velocity,
+staccato shortened, accents louder) into notes with score ticks plus a tempo map.
+`synth::Synth` turns that into audio: per note a voice reading two single-cycle wavetables
+(bright/mellow, crossfaded over time and by pitch to avoid aliasing) of one of eight
+instrument families chosen by the General MIDI program, with an attack/decay/release envelope,
+vibrato for strings, voice and winds, breath noise for flutes, stereo panning per part and a
+soft limiter. The UI asks the `Host` for audio: desktop pulls blocks in a cpal callback; the
+browser renders 0.2 s chunks scheduled 0.6 s ahead on an `AudioContext`. The playhead follows
+the audio clock (`Host::audio_position`) through the tempo map back to measure and tick.

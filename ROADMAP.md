@@ -12,6 +12,10 @@
 - Engraver: spacing, justified systems, pages, stems, beams, flags, accidentals, ledger lines,
   dots, ties (also across systems), rests, multiple voices, chords with seconds, clefs, keys,
   times, barlines, repeats, braces, brackets, articulations, dynamics, lyrics, tempo, text.
+- Playback (alpha): built-in synthesizer with eight instrument families, playhead, note
+  audition while editing, repeats, dynamics; cpal on desktop, Web Audio in the browser; WAV export.
+  Next for playback: mute/solo and volume per instrument, swing, metronome, loop, ritardando,
+  better instrument sounds (optional permissively licensed soundfonts).
 - Note input and editing with undo/redo; palettes; properties; desktop, CLI and web apps;
   `?host=parent` bridge for embedding.
 
@@ -19,7 +23,6 @@
 
 | # | Gap | Why it matters | Estimate |
 |---|---|---|---|
-| 1 | **Playback** (built-in synth; Web Audio in the browser, cpal on desktop; play cursor) | Everyone checks what they wrote by ear | 8–14 h |
 | 2 | **PDF export** (krilla, MIT/Apache) and printing | Sheet music is printed | 4–6 h |
 | 3 | **Slurs, hairpins, ottava lines** (spanners) | Basic phrasing marks | 8–12 h |
 | 4 | **Tuplet input** (`Ctrl+3` …) and tuplet brackets | Common rhythm | 4–6 h |

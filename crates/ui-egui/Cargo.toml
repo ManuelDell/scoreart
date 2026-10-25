@@ -15,3 +15,5 @@ scoreart-engrave = { workspace = true }
 scoreart-render = { workspace = true }
 egui = { workspace = true }
 serde_json = { workspace = true }
+scoreart-midi = { workspace = true }
+scoreart-synth = { workspace = true }

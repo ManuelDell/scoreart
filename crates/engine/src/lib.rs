@@ -76,6 +76,7 @@ pub enum Format {
     Mxl,
     Midi,
     Svg,
+    Wav,
 }
 
 impl Format {
@@ -87,6 +88,7 @@ impl Format {
             "mxl" => Some(Format::Mxl),
             "mid" | "midi" => Some(Format::Midi),
             "svg" => Some(Format::Svg),
+            "wav" => Some(Format::Wav),
             _ => None,
         }
     }
@@ -301,6 +303,7 @@ impl Session {
                 scoreart_musicxml::to_mxl(&self.score).map_err(|e| Error::File(e.to_string()))
             }
             Some(Format::Midi) => Ok(scoreart_midi::to_smf(&self.score)),
+            Some(Format::Wav) => Ok(wav(&self.score)),
             Some(Format::Svg) => {
                 let l = scoreart_engrave::layout(&self.score, &self.style);
                 Ok(scoreart_render::svg_pages(&l, &self.style)
@@ -402,3 +405,32 @@ fn beat_label(score: &Score, p: Pos) -> String {
 
 #[cfg(test)]
 mod tests;
+
+/// Renders the whole score with the built-in synth as a 16-bit stereo WAV file.
+pub fn wav(score: &Score) -> Vec<u8> {
+    const RATE: u32 = 44_100;
+    let seq = scoreart_midi::sequence(score);
+    let mut synth = scoreart_synth::Synth::new(&seq, 0, RATE);
+    // Cap at 30 minutes.
+    let frames = ((synth.duration().min(1800.0)) * f64::from(RATE)) as usize;
+    let mut pcm = vec![0.0f32; frames * 2];
+    synth.render(&mut pcm);
+    let data_len = (pcm.len() * 2) as u32;
+    let mut out = Vec::with_capacity(44 + pcm.len() * 2);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_len).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    out.extend_from_slice(&2u16.to_le_bytes()); // stereo
+    out.extend_from_slice(&RATE.to_le_bytes());
+    out.extend_from_slice(&(RATE * 4).to_le_bytes());
+    out.extend_from_slice(&4u16.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_len.to_le_bytes());
+    for v in pcm {
+        out.extend_from_slice(&((v.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
+    }
+    out
+}

@@ -10,7 +10,8 @@ released by Steinberg under the SIL Open Font License and bundled unmodified. Ev
 original work by ScoreArt contributors. Screenshots of other vendors' software are never committed.
 
 Generated-in-code art is original and has no file to list: the toolbar and palette buttons
-(`crates/ui-egui/src/panels.rs`), the brace and tie shapes (`crates/engrave/src/layout.rs`) and
+(`crates/ui-egui/src/panels.rs`), the instrument sounds of the built-in synthesizer (`crates/synth/src/lib.rs`: wavetables from
+harmonic recipes and envelopes written for ScoreArt — no samples, no soundfont), the brace and tie shapes (`crates/engrave/src/layout.rs`) and
 the sample score (`crates/engine/src/sample.rs`, an arrangement written for ScoreArt of the
 public-domain "Ode to Joy" theme by Ludwig van Beethoven, 1824, with words by Friedrich
 Schiller, 1785).

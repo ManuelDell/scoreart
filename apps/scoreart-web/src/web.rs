@@ -124,6 +124,8 @@ struct WebHost {
     inbox: Inbox,
     ctx: egui::Context,
     bridge: Option<Bridge>,
+    audio: crate::audio::WebAudio,
+    rate: u32,
 }
 
 fn download(name: &str, bytes: &[u8]) -> Result<(), JsValue> {
@@ -177,6 +179,29 @@ impl Host for WebHost {
 
     fn embedded(&self) -> bool {
         self.bridge.is_some()
+    }
+
+    fn audio_rate(&self) -> u32 {
+        self.rate
+    }
+
+    fn audio_start(&mut self, synth: scoreart_synth::Synth) -> Result<(), String> {
+        self.audio.start(synth)
+    }
+
+    fn audio_stop(&mut self) {
+        self.audio.stop();
+    }
+
+    fn audio_position(&mut self) -> Option<f64> {
+        self.audio.position()
+    }
+
+    fn tick(&mut self) {
+        self.audio.pump();
+        if self.audio.active() {
+            self.ctx.request_repaint();
+        }
     }
 }
 
@@ -254,7 +279,11 @@ pub fn start() {
                         inbox: inbox.clone(),
                         ctx: cc.egui_ctx.clone(),
                         bridge: app_bridge.clone(),
+                        audio: crate::audio::WebAudio::default(),
+                        rate: 44_100,
                     };
+                    let mut host = host;
+                    host.rate = host.audio.rate();
                     let ui = ScoreApp::new(&cc.egui_ctx, session, Box::new(host));
                     if let Some(b) = &app_bridge {
                         b.post(

@@ -12,6 +12,7 @@
 mod canvas;
 pub mod glyph;
 mod panels;
+mod playback;
 pub mod theme;
 
 use egui::{Key, Modifiers};
@@ -32,7 +33,35 @@ pub trait Host {
     fn embedded(&self) -> bool {
         false
     }
+    /// Output sample rate for [`scoreart_synth::Synth`].
+    fn audio_rate(&self) -> u32 {
+        44_100
+    }
+    /// Starts playing `synth`, replacing whatever plays.
+    fn audio_start(&mut self, _synth: scoreart_synth::Synth) -> Result<(), String> {
+        Err("no audio output".into())
+    }
+    fn audio_stop(&mut self) {}
+    /// Called once per frame (e.g. to feed an audio queue).
+    fn tick(&mut self) {}
+    /// Seconds of the current synth played so far; `None` when nothing is playing.
+    fn audio_position(&mut self) -> Option<f64> {
+        None
+    }
 }
+
+/// Commands after which the selected notes are auditioned.
+const PREVIEW_AFTER: &[&str] = &[
+    "note.enter",
+    "note.add",
+    "note.pitch-up",
+    "note.pitch-down",
+    "note.step-up",
+    "note.step-down",
+    "note.octave-up",
+    "note.octave-down",
+    "note.accidental",
+];
 
 /// A host that does nothing (tests, screenshots).
 #[derive(Default)]
@@ -72,6 +101,9 @@ pub struct ScoreApp {
     fonts_ready: bool,
     pub show_palette: bool,
     pub show_properties: bool,
+    pub(crate) playback: Option<playback::Playback>,
+    /// Play notes as they are entered or changed.
+    pub sound_on_input: bool,
 }
 
 impl ScoreApp {
@@ -87,6 +119,8 @@ impl ScoreApp {
             fonts_ready: true,
             show_palette: true,
             show_properties: true,
+            playback: None,
+            sound_on_input: true,
         }
     }
 
@@ -95,6 +129,9 @@ impl ScoreApp {
         match self.session.execute(id, &params) {
             Ok(_) => {
                 self.scroll_to_cursor = true;
+                if PREVIEW_AFTER.contains(&id) {
+                    self.preview_selection();
+                }
                 if !id.starts_with("select.") && !id.starts_with("cursor.") {
                     self.session.status.clear();
                 }
@@ -113,6 +150,7 @@ impl ScoreApp {
     }
 
     pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) {
+        self.stop_playback();
         match self.session.open_bytes(name, bytes) {
             Ok(()) => {
                 self.fields = panels::Fields::default();
@@ -160,6 +198,8 @@ impl ScoreApp {
             self.open_bytes(&name, &bytes);
         }
         self.keyboard(&ctx);
+        self.host.tick();
+        self.follow_playback(&ctx);
         panels::menu_bar(self, ui);
         panels::toolbar(self, ui);
         panels::status_bar(self, ui);
@@ -247,6 +287,8 @@ impl ScoreApp {
             (Key::N, _, _) if plain => self.run("input.toggle", json!({})),
             (Key::N, _, _) if cmd_only => self.dialog = Some(Dialog::NewScore(panels::NewScore::default())),
             (Key::T, _, _) if plain => self.run("note.tie", json!({})),
+            (Key::Space, _, _) if plain => self.toggle_playback(),
+            (Key::Escape, _, _) if self.is_playing() => self.stop_playback(),
             (Key::Escape, _, _) => self.run("edit.escape", json!({})),
             (Key::ArrowUp, _, _) if plain => self.run("note.pitch-up", json!({})),
             (Key::ArrowDown, _, _) if plain => self.run("note.pitch-down", json!({})),

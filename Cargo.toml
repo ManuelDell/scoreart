@@ -15,6 +15,7 @@ repository = "https://github.com/ManuelDell/scoreart"
 scoreart-model = { path = "crates/model" }
 scoreart-musicxml = { path = "crates/musicxml" }
 scoreart-midi = { path = "crates/midi" }
+scoreart-synth = { path = "crates/synth" }
 scoreart-engrave = { path = "crates/engrave" }
 scoreart-render = { path = "crates/render" }
 scoreart-engine = { path = "crates/engine" }
@@ -35,6 +36,7 @@ egui = "0.37"
 eframe = { version = "0.37", default-features = false }
 egui_kittest = "0.37"
 rfd = "0.15"
+cpal = "0.16"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

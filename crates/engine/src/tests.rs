@@ -135,6 +135,11 @@ fn save_and_reopen() {
             .contains("<svg")
     );
     assert!(s.save_bytes("x.doc").is_err());
+    let w = s.save_bytes("x.wav").unwrap();
+    assert!(
+        w.starts_with(b"RIFF") && w.len() > 44 + 44_100 * 4 * 10,
+        "the sample lasts > 10 s"
+    );
     assert!(!s.layout().pages.is_empty());
 }
 

@@ -61,6 +61,7 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                             ("Compressed MusicXML (.mxl)", "mxl"),
                             ("MIDI (.mid)", "mid"),
                             ("SVG, first page (.svg)", "svg"),
+                            ("Audio (.wav)", "wav"),
                         ] {
                             if ui.button(label).clicked() {
                                 let name = format!("{stem}.{ext}");
@@ -169,6 +170,7 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     ui.separator();
                     ui.checkbox(&mut app.show_palette, "Palettes");
                     ui.checkbox(&mut app.show_properties, "Properties");
+                    ui.checkbox(&mut app.sound_on_input, "Play notes while editing");
                     ui.separator();
                     let dark = ui.ctx().global_style().visuals.dark_mode;
                     if ui
@@ -274,6 +276,22 @@ pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 let input = app.session.input;
+                // Playback.
+                let playing = app.is_playing();
+                let label = if playing {
+                    GlyphLabel::Text("■")
+                } else {
+                    GlyphLabel::Text("▶")
+                };
+                let tip = if playing {
+                    "Stop (Space)"
+                } else {
+                    "Play from the selection (Space)"
+                };
+                if glyph_button(ui, label, playing, tip).clicked() {
+                    app.toggle_playback();
+                }
+                ui.separator();
                 // Note input toggle: a pen.
                 if glyph_button(ui, GlyphLabel::Text("✏"), input.active, "Note input (N)").clicked() {
                     app.run("input.toggle", json!({}));

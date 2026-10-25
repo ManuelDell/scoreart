@@ -1,0 +1,15 @@
+[package]
+name = "scoreart-synth"
+description = "ScoreArt's built-in software synthesizer: original instrument sounds generated in code"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+scoreart-midi = { workspace = true }
+
+[dev-dependencies]
+scoreart-model = { workspace = true }

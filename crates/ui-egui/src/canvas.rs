@@ -61,6 +61,7 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
     let selected = app.session.selection;
     let selected_ev = app.session.selected_event();
     let input = app.session.input;
+    let playhead = app.playback.as_ref().and_then(|p| p.at);
     let cursor = app.session.cursor;
     let t = theme::Tokens::get(ui.ctx());
     let layout = app.session.layout();
@@ -231,6 +232,19 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         let r = Rect::from_min_max(map(sb.x0, sb.top - 0.6), map(sb.x1, sb.top + 4.6));
                         painter.rect_filled(r, 2.0, t.accent.linear_multiply(0.12));
                         painter.rect_stroke(r, 2.0, Stroke::new(1.5, t.accent), egui::StrokeKind::Inside);
+                    }
+                }
+                // Playhead: a line through every staff of the sounding measure.
+                if let Some((pm, ptick)) = playhead {
+                    for sb in layout.staves.iter().filter(|s| s.page == pi && s.measure == pm) {
+                        let x = sb.x_at(ptick) + 0.5;
+                        let r = Rect::from_min_max(map(x - 0.25, sb.top - 1.5), map(x + 0.25, sb.top + 5.5));
+                        painter.rect_filled(r, 1.0, t.accent.linear_multiply(0.85));
+                        let band = Rect::from_min_max(map(sb.x0, sb.top - 1.5), map(sb.x1, sb.top + 5.5));
+                        painter.rect_filled(band, 0.0, t.accent.linear_multiply(0.06));
+                        if sb.part == 0 && sb.staff == 0 {
+                            scroll_target = Some(r.expand(160.0));
+                        }
                     }
                 }
                 // Note-input cursor.
