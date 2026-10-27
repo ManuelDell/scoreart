@@ -167,6 +167,30 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         }
                     });
                 });
+                ui.menu_button("Instruments", |ui| {
+                    if ui.button("Instruments and sounds…    I").clicked() {
+                        app.open_instruments();
+                        ui.close();
+                    }
+                    ui.menu_button("Add instrument", |ui| {
+                        for inst in INSTRUMENTS {
+                            if ui.button(inst.name).clicked() {
+                                app.run("part.add", json!({ "instrument": inst.id }));
+                                ui.close();
+                            }
+                        }
+                    });
+                    ui.checkbox(&mut app.show_mixer, "Mixer    F10");
+                    ui.separator();
+                    if ui.button("Load sounds…").clicked() {
+                        app.host.request_sounds(false);
+                        ui.close();
+                    }
+                    if ui.button("Free sound libraries…").clicked() {
+                        app.open_catalog();
+                        ui.close();
+                    }
+                });
                 ui.menu_button("View", |ui| {
                     if ui.button("Zoom in    Ctrl+=").clicked() {
                         app.set_zoom(app.zoom * 1.15);
@@ -1014,7 +1038,7 @@ pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         }
                     });
                 if let Some(id) = pick {
-                    app.run("part.change", json!({ "part": part, "instrument": id }));
+                    crate::instruments::request_change(app, part, id);
                 }
                 // Switch instrument from the selected measure on ("To Flute").
                 let here = app

@@ -12,6 +12,7 @@
 mod canvas;
 mod catalog;
 pub mod glyph;
+mod instruments;
 mod mixer;
 mod panels;
 mod playback;
@@ -146,9 +147,16 @@ pub struct ScoreApp {
     pub(crate) mixer: mixer::Mixer,
     /// The "Free sound libraries" window, when open.
     pub(crate) catalog: Option<catalog::CatalogState>,
+    /// The "Instruments and sounds" window and a pending instrument change.
+    pub(crate) instruments: instruments::InstrumentsState,
 }
 
 impl ScoreApp {
+    /// Opens the "Instruments and sounds" window.
+    pub fn open_instruments(&mut self) {
+        self.instruments.open = true;
+    }
+
     /// Opens the "Free sound libraries" window.
     pub fn open_catalog(&mut self) {
         if self.catalog.is_none() {
@@ -173,6 +181,7 @@ impl ScoreApp {
             show_mixer: false,
             mixer: mixer::Mixer::default(),
             catalog: None,
+            instruments: Default::default(),
         }
     }
 
@@ -278,6 +287,7 @@ impl ScoreApp {
             });
         panels::dialogs(self, &ctx);
         catalog::window(self, &ctx);
+        instruments::window(self, &ctx);
         // Ctrl + mouse wheel zooms.
         let (zoom_delta, cmd) = ctx.input(|i| (i.zoom_delta(), i.modifiers.command));
         if (zoom_delta - 1.0).abs() > 1e-3 {
@@ -293,7 +303,7 @@ impl ScoreApp {
     }
 
     fn keyboard(&mut self, ctx: &egui::Context) {
-        if ctx.egui_wants_keyboard_input() || self.dialog.is_some() {
+        if ctx.egui_wants_keyboard_input() || self.dialog.is_some() || self.instruments.has_pending() {
             return;
         }
         let events = ctx.input(|i| i.events.clone());
@@ -353,6 +363,7 @@ impl ScoreApp {
             (Key::T, _, _) if plain => self.run("note.tie", json!({})),
             (Key::Space, _, _) if plain => self.toggle_playback(),
             (Key::F10, _, _) if plain => self.show_mixer = !self.show_mixer,
+            (Key::I, _, _) if plain => self.instruments.open = !self.instruments.open,
             (Key::Escape, _, _) if self.is_playing() => self.stop_playback(),
             (Key::Escape, _, _) => self.run("edit.escape", json!({})),
             (Key::ArrowUp, _, _) if plain => self.run("note.pitch-up", json!({})),

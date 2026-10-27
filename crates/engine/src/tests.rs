@@ -313,3 +313,129 @@ fn instrument_changes() {
     // Audio still renders with both sounds.
     assert!(wav(&s.score).len() > 1000);
 }
+
+/// A "Women" part: soprano on staff 1, alto on staff 2 with a slur, and a flute below.
+fn women_and_flute() -> Session {
+    let mut s = blank();
+    s.execute("part.change", &json!({ "part": 0, "instrument": "women" }))
+        .unwrap();
+    s.execute("part.add", &json!({ "instrument": "flute" })).unwrap();
+    for (staff, steps) in [(0, ["g", "a"]), (1, ["c", "d"])] {
+        s.execute(
+            "cursor.set",
+            &json!({ "part": 0, "staff": staff, "measure": 0, "tick": 0 }),
+        )
+        .unwrap();
+        s.execute("input.duration", &json!({ "value": 6 })).unwrap();
+        for st in steps {
+            s.execute("note.enter", &json!({ "step": st })).unwrap();
+        }
+    }
+    s.score.spanners.push(scoreart_model::Spanner {
+        kind: scoreart_model::SpannerKind::Slur,
+        part: 0,
+        staff: 1,
+        voice: 0,
+        start: scoreart_model::Anchor { measure: 0, tick: 0 },
+        end: scoreart_model::Anchor {
+            measure: 0,
+            tick: TPQ * 2,
+        },
+    });
+    s.score.spanners.push(scoreart_model::Spanner {
+        kind: scoreart_model::SpannerKind::Slur,
+        part: 1,
+        staff: 0,
+        voice: 0,
+        start: scoreart_model::Anchor { measure: 0, tick: 0 },
+        end: scoreart_model::Anchor { measure: 1, tick: 0 },
+    });
+    s
+}
+
+fn steps(s: &Session, part: usize, staff: usize, voice: usize) -> Vec<Step> {
+    s.score
+        .voice(part, staff, 0, voice)
+        .map(|v| {
+            v.events
+                .iter()
+                .flat_map(|e| e.notes().iter().map(|n| n.pitch.step))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn changing_a_two_line_part_keeps_every_line() {
+    // Merge: the alto becomes voice 2 of the soprano staff, its slur goes along.
+    let mut s = women_and_flute();
+    assert_eq!(s.score.parts[0].lines().len(), 2);
+    s.execute("part.change", &json!({ "part": 0, "instrument": "soprano" }))
+        .unwrap();
+    let p = &s.score.parts[0];
+    assert_eq!((p.name.as_str(), p.staff_count()), ("Soprano", 1));
+    assert_eq!(steps(&s, 0, 0, 0), [Step::G, Step::A]);
+    assert_eq!(steps(&s, 0, 0, 1), [Step::C, Step::D]);
+    let alto_slur = s.score.spanners.iter().find(|sp| sp.part == 0).unwrap();
+    assert_eq!((alto_slur.staff, alto_slur.voice), (0, 1));
+    assert!(
+        s.score.spanners.iter().any(|sp| sp.part == 1),
+        "the flute keeps its slur"
+    );
+
+    // Split, keeping the top line: a new Soprano part above, Women keeps the alto.
+    let mut s = women_and_flute();
+    let r = s
+        .execute(
+            "part.change",
+            &json!({ "part": 0, "instrument": "soprano", "mode": "split", "staff": 1 }),
+        )
+        .unwrap();
+    assert_eq!(r["part"], 0);
+    let names: Vec<&str> = s.score.parts.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["Soprano", "Women", "Flute"]);
+    assert_eq!(s.score.parts[1].staff_count(), 1);
+    assert_eq!(steps(&s, 0, 0, 0), [Step::G, Step::A]);
+    assert_eq!(steps(&s, 1, 0, 0), [Step::C, Step::D]);
+    let parts: Vec<(usize, usize)> = s.score.spanners.iter().map(|sp| (sp.part, sp.staff)).collect();
+    assert_eq!(parts, [(1, 0), (2, 0)], "slurs follow the alto and the flute");
+
+    // Split, giving the alto away: Women keeps the soprano, a new Alto part below.
+    let mut s = women_and_flute();
+    s.execute(
+        "part.change",
+        &json!({ "part": 0, "instrument": "alto", "mode": "split", "staff": 2 }),
+    )
+    .unwrap();
+    let names: Vec<&str> = s.score.parts.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["Women", "Alto", "Flute"]);
+    assert_eq!(steps(&s, 0, 0, 0), [Step::G, Step::A]);
+    assert_eq!(steps(&s, 1, 0, 0), [Step::C, Step::D]);
+
+    // Discard: only the chosen line stays.
+    let mut s = women_and_flute();
+    s.execute(
+        "part.change",
+        &json!({ "part": 0, "instrument": "alto", "mode": "discard", "staff": 2 }),
+    )
+    .unwrap();
+    assert_eq!(s.score.parts.len(), 2);
+    assert_eq!(steps(&s, 0, 0, 0), [Step::C, Step::D]);
+    assert_eq!(s.score.parts[0].lines().len(), 1);
+
+    // Undo brings the two staves back.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.score.parts[0].staff_count(), 2);
+}
+
+#[test]
+fn moving_and_removing_parts_keeps_lines_attached() {
+    let mut s = women_and_flute();
+    s.execute("part.move", &json!({ "part": 1, "to": 0 })).unwrap();
+    assert_eq!(s.score.parts[0].name, "Flute");
+    let flute_slur = s.score.spanners.iter().find(|sp| sp.end.measure == 1).unwrap();
+    assert_eq!(flute_slur.part, 0);
+    s.execute("part.remove", &json!({ "part": 0 })).unwrap();
+    assert_eq!(s.score.spanners.len(), 1);
+    assert_eq!((s.score.spanners[0].part, s.score.spanners[0].staff), (0, 1));
+}

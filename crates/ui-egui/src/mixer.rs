@@ -89,6 +89,13 @@ pub fn panel(app: &mut ScoreApp, ui: &mut egui::Ui) {
             // Libraries.
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new("Mixer").strong());
+                if ui
+                    .button("Instruments…")
+                    .on_hover_text("Add, change, order and split instruments (I)")
+                    .clicked()
+                {
+                    app.open_instruments();
+                }
                 ui.separator();
                 ui.label(RichText::new("Sounds:").color(t.text_dim));
                 let names: Vec<String> = app.session.sounds.iter().map(|b| b.name.clone()).collect();
@@ -173,92 +180,7 @@ fn strip(
                 app.run("part.visible", json!({ "part": pi, "visible": shown }));
             }
         });
-        // Sound: library, then preset.
-        let mut choice: Option<(String, String)> = None;
-        egui::ComboBox::from_id_salt(("mix-lib", pi))
-            .width(140.0)
-            .selected_text(sound_label(sound))
-            .show_ui(ui, |ui| {
-                if ui
-                    .selectable_label(sound.library.is_empty(), "Automatic")
-                    .clicked()
-                {
-                    choice = Some((String::new(), String::new()));
-                }
-                if ui
-                    .selectable_label(sound.library == PartSound::BUILT_IN, "Built-in (ScoreArt)")
-                    .clicked()
-                {
-                    choice = Some((PartSound::BUILT_IN.into(), String::new()));
-                }
-                for b in &app.session.sounds {
-                    if ui.selectable_label(sound.library == b.name, &b.name).clicked() {
-                        choice = Some((b.name.clone(), String::new()));
-                    }
-                }
-            });
-        let bank = app
-            .session
-            .sounds
-            .iter()
-            .find(|b| b.name == sound.library)
-            .cloned();
-        if let Some(bank) = bank {
-            let presets = bank.presets();
-            let filter = app
-                .mixer
-                .filter
-                .get(pi)
-                .cloned()
-                .unwrap_or_default()
-                .to_lowercase();
-            egui::ComboBox::from_id_salt(("mix-preset", pi))
-                .width(140.0)
-                .height(320.0)
-                .selected_text(if sound.preset.is_empty() {
-                    "(by instrument)".to_string()
-                } else {
-                    sound
-                        .preset
-                        .rsplit('/')
-                        .next()
-                        .unwrap_or(&sound.preset)
-                        .to_string()
-                })
-                .show_ui(ui, |ui| {
-                    if presets.len() > 12
-                        && let Some(f) = app.mixer.filter.get_mut(pi)
-                    {
-                        // Typing goes to the search, never to the score.
-                        let r = ui.add(egui::TextEdit::singleline(f).hint_text("Search…"));
-                        if !r.has_focus() {
-                            r.request_focus();
-                        }
-                    }
-                    for p in presets
-                        .iter()
-                        .filter(|p| filter.is_empty() || p.name.to_lowercase().contains(&filter))
-                    {
-                        let label = if bank.is_soundfont() {
-                            format!("{:03}:{:03} {}", p.bank, p.program, p.name)
-                        } else {
-                            p.name.clone()
-                        };
-                        if ui.selectable_label(sound.preset == p.name, label).clicked() {
-                            choice = Some((bank.name.clone(), p.name.clone()));
-                        }
-                    }
-                });
-        }
-        if let Some((library, preset)) = choice {
-            if playing {
-                app.stop_playback();
-            }
-            app.run(
-                "part.sound",
-                json!({ "part": pi, "library": library, "preset": preset }),
-            );
-        }
+        sound_picker(app, ui, pi, sound, playing, 140.0);
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             // Volume fader and meter.
@@ -337,4 +259,101 @@ fn strip(
             }
         }
     });
+}
+
+/// Library and preset choice for one part.
+pub(crate) fn sound_picker(
+    app: &mut ScoreApp,
+    ui: &mut egui::Ui,
+    pi: usize,
+    sound: &PartSound,
+    playing: bool,
+    width: f32,
+) {
+    // Sound: library, then preset.
+    let mut choice: Option<(String, String)> = None;
+    egui::ComboBox::from_id_salt(("mix-lib", pi))
+        .width(width)
+        .selected_text(sound_label(sound))
+        .show_ui(ui, |ui| {
+            if ui
+                .selectable_label(sound.library.is_empty(), "Automatic")
+                .clicked()
+            {
+                choice = Some((String::new(), String::new()));
+            }
+            if ui
+                .selectable_label(sound.library == PartSound::BUILT_IN, "Built-in (ScoreArt)")
+                .clicked()
+            {
+                choice = Some((PartSound::BUILT_IN.into(), String::new()));
+            }
+            for b in &app.session.sounds {
+                if ui.selectable_label(sound.library == b.name, &b.name).clicked() {
+                    choice = Some((b.name.clone(), String::new()));
+                }
+            }
+        });
+    let bank = app
+        .session
+        .sounds
+        .iter()
+        .find(|b| b.name == sound.library)
+        .cloned();
+    if let Some(bank) = bank {
+        let presets = bank.presets();
+        let filter = app
+            .mixer
+            .filter
+            .get(pi)
+            .cloned()
+            .unwrap_or_default()
+            .to_lowercase();
+        egui::ComboBox::from_id_salt(("mix-preset", pi))
+            .width(width)
+            .height(320.0)
+            .selected_text(if sound.preset.is_empty() {
+                "(by instrument)".to_string()
+            } else {
+                sound
+                    .preset
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&sound.preset)
+                    .to_string()
+            })
+            .show_ui(ui, |ui| {
+                if presets.len() > 12
+                    && let Some(f) = app.mixer.filter.get_mut(pi)
+                {
+                    // Typing goes to the search, never to the score.
+                    let r = ui.add(egui::TextEdit::singleline(f).hint_text("Search…"));
+                    if !r.has_focus() {
+                        r.request_focus();
+                    }
+                }
+                for p in presets
+                    .iter()
+                    .filter(|p| filter.is_empty() || p.name.to_lowercase().contains(&filter))
+                {
+                    let label = if bank.is_soundfont() {
+                        format!("{:03}:{:03} {}", p.bank, p.program, p.name)
+                    } else {
+                        p.name.clone()
+                    };
+                    if ui.selectable_label(sound.preset == p.name, label).clicked() {
+                        choice = Some((bank.name.clone(), p.name.clone()));
+                    }
+                }
+            });
+    }
+    if let Some((library, preset)) = choice {
+        if playing {
+            app.stop_playback();
+        }
+        app.run(
+            "part.sound",
+            json!({ "part": pi, "library": library, "preset": preset }),
+        );
+    }
 }

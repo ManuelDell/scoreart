@@ -3,8 +3,8 @@
 use serde_json::{Value, json};
 
 use scoreart_model::{
-    Barline, Clef, Instrument, InstrumentChange, KeySig, PartSound, Score, Tempo, TimeSig, TimeSymbol, clip,
-    instrument, limits,
+    Barline, Clef, Instrument, InstrumentChange, KeySig, Line, PartSound, Rearrange, Score, Tempo, TimeSig,
+    TimeSymbol, clip, instrument, limits,
 };
 
 use super::{CommandSpec, always, need_i64, need_str, p_i64, p_str, p_usize};
@@ -329,7 +329,7 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "Add instrument",
             menu: &["Add", "Instruments"],
             shortcut: Some("I"),
-            params: "instrument: piano|organ|voice|soprano|alto|tenor|bass-voice|flute|oboe|bassoon|violin|viola|cello|contrabass|guitar|trombone|tuba",
+            params: "instrument: piano|organ|voice|soprano|alto|tenor|bass-voice|women|men|choir|flute|oboe|bassoon|violin|viola|cello|contrabass|guitar|trombone|tuba",
             enabled: |s| {
                 if s.score.parts.len() < limits::MAX_PARTS {
                     Ok(())
@@ -363,7 +363,25 @@ pub fn commands() -> Vec<CommandSpec> {
                 if part >= s.score.parts.len() {
                     return Err(Error::Param("no such part".into()));
                 }
-                s.score.parts.remove(part);
+                s.score.remove_part(part)?;
+                s.selection = None;
+                s.cursor = Default::default();
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "part.move",
+            label: "Move instrument",
+            menu: &[],
+            shortcut: None,
+            params: "to (index), part? (default: the selected part)",
+            enabled: has_parts,
+            run: |s, p| {
+                let part = p_usize(p, "part").unwrap_or_else(|| s.focus().0);
+                let to = p_usize(p, "to").ok_or_else(|| Error::Param("missing to".into()))?;
+                s.score
+                    .move_part(part, to.min(s.score.parts.len().saturating_sub(1)))?;
                 s.selection = None;
                 s.cursor = Default::default();
                 Ok(Value::Null)
@@ -398,22 +416,29 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "Change instrument",
             menu: &[],
             shortcut: None,
-            params: "instrument (id: piano, violin, flute …), part? (default: the selected part). Replaces name, sound and staves of the whole part",
+            params: "instrument (id: piano, violin, flute …), part? (default: the selected part), mode?: merge (default: every line goes into the new instrument, extra staves become voices) | split (staff/voice becomes a new part with the instrument, the rest stays) | discard (only staff/voice is kept), staff?, voice? (1…, the line for split and discard; default 1)",
             enabled: has_parts,
             run: |s, p| {
                 let part = p_usize(p, "part").unwrap_or_else(|| s.focus().0);
                 let id = need_str(p, "instrument")?;
                 let inst = instrument(id).ok_or_else(|| Error::Param(format!("unknown instrument {id}")))?;
-                let pt = s
-                    .score
-                    .parts
-                    .get_mut(part)
-                    .ok_or_else(|| Error::Param("no such part".into()))?;
-                pt.change_instrument(inst);
-                s.score.normalize();
+                let keep = Line {
+                    staff: p_usize(p, "staff").unwrap_or(1).saturating_sub(1),
+                    voice: p_usize(p, "voice").unwrap_or(1).saturating_sub(1),
+                };
+                let how = match p_str(p, "mode").unwrap_or("merge") {
+                    "merge" => Rearrange::Merge,
+                    "split" => Rearrange::Split { keep },
+                    "discard" => Rearrange::Discard { keep },
+                    m => return Err(Error::Param(format!("unknown mode {m} (merge, split, discard)"))),
+                };
+                if part >= s.score.parts.len() {
+                    return Err(Error::Param("no such part".into()));
+                }
+                let now = s.score.rearrange_part(part, inst, how)?;
                 s.selection = None;
                 s.cursor = Default::default();
-                Ok(Value::Null)
+                Ok(json!({ "part": now }))
             },
             undoable: true,
         },

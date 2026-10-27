@@ -56,7 +56,11 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   `Ctrl+↑/↓` octaves, `T` ties, `Del` deletes, notes crossing a barline are split and tied,
   four voices, mouse input with a ghost note.
 - **Editing**: selection of notes, rests, note ranges (`Shift+click`, `Shift+→`) and measure ranges; palettes for every mark above; add/insert/delete measures; add,
-  rename, **change** and remove instruments (17 built-in), **instrument changes inside a part**
+  rename, **change**, reorder and remove instruments (20 built-in, including Women, Men and SATB
+  choir) in the **Instruments and sounds** window (`I`, menu *Instruments*). Changing an
+  instrument that holds several lines (Women → Soprano) asks whether to **merge** them, **split**
+  one off into the new instrument (the alto stays in Women) or **keep only one**; any line can
+  also get an instrument of its own. **Instrument changes inside a part**
   ("To Flute", played and exported to MIDI); show or hide instruments; line and page breaks;
   **lyrics with several verses and hyphens**; transpose; score properties; unlimited undo/redo.
 - **Files**: **MusicXML 4.0** is the native format (`.musicxml` and compressed `.mxl`, read and
@@ -131,7 +135,7 @@ attribution, crate layering, wasm build).
 | `S` | slur over the selection | `<` / `>` | crescendo / diminuendo hairpin |
 | `/` | grace note | `Shift+→` | extend the selection |
 | `Ctrl+K` | chord symbol | `Ctrl+T` / `Ctrl+M` | staff text / rehearsal mark |
-| `F10` | mixer | | |
+| `F10` | mixer | `I` | instruments and sounds |
 
 ## How it is built
 

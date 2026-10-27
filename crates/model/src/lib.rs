@@ -13,11 +13,13 @@
     clippy::unreachable
 )]
 
+mod arrange;
 pub mod edit;
 pub mod marks;
 mod pitch;
 mod time;
 
+pub use arrange::{Line, Rearrange};
 pub use marks::{
     Anchor, Arpeggio, Articulation, Dynamic, Grace, Jump, NoteHead, Spanner, SpannerKind, Tremolo,
 };
@@ -734,6 +736,27 @@ pub const INSTRUMENTS: &[Instrument] = &[
         clefs: &[Clef::Bass],
     },
     Instrument {
+        id: "women",
+        name: "Women",
+        abbreviation: "W.",
+        program: 52,
+        clefs: &[Clef::Treble, Clef::Treble],
+    },
+    Instrument {
+        id: "men",
+        name: "Men",
+        abbreviation: "M.",
+        program: 52,
+        clefs: &[Clef::Treble8vb, Clef::Bass],
+    },
+    Instrument {
+        id: "choir",
+        name: "Choir (SATB)",
+        abbreviation: "Ch.",
+        program: 52,
+        clefs: &[Clef::Treble, Clef::Treble, Clef::Treble8vb, Clef::Bass],
+    },
+    Instrument {
         id: "flute",
         name: "Flute",
         abbreviation: "Fl.",
@@ -845,10 +868,7 @@ impl Score {
     }
 
     pub fn add_part(&mut self, inst: &Instrument) {
-        let id = (1..)
-            .map(|k| format!("P{k}"))
-            .find(|id| self.parts.iter().all(|p| &p.id != id))
-            .unwrap_or_default();
+        let id = self.free_part_id();
         self.parts.push(Part {
             id,
             name: inst.name.to_string(),
