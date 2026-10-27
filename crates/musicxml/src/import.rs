@@ -5,9 +5,10 @@ use std::collections::{BTreeMap, HashMap};
 
 use scoreart_model::marks::{MARKS, XmlGroup};
 use scoreart_model::{
-    Anchor, Arpeggio, Articulation, Barline, Clef, Duration, Dynamic, Event, EventKind, Grace, Jump, KeySig,
-    MeasureInfo, Meta, Note, NoteHead, NoteValue, Part, PartMeasure, PartSound, Pitch, Score, Spanner,
-    SpannerKind, StaffMeasure, Step, TPQ, Tempo, TimeSig, TimeSymbol, Tremolo, Tuplet, Voice, clip, limits,
+    Anchor, Arpeggio, Articulation, Barline, Clef, Duration, Dynamic, Event, EventKind, Grace,
+    InstrumentChange, Jump, KeySig, MeasureInfo, Meta, Note, NoteHead, NoteValue, Part, PartMeasure,
+    PartSound, Pitch, Score, Spanner, SpannerKind, StaffMeasure, Step, TPQ, Tempo, TimeSig, TimeSymbol,
+    Tremolo, Tuplet, Voice, clip, limits,
 };
 
 use crate::Error;
@@ -282,6 +283,7 @@ fn read_part(
     let first_part = pi == 0;
     let mut divisions: u64 = 1;
     let mut staves: usize = 1;
+    let mut hidden: Vec<bool> = Vec::new();
     let mut clefs: BTreeMap<usize, Clef> = BTreeMap::new();
     let mut measures: Vec<PartMeasure> = Vec::new();
     // Open lines: (staff, voice, family, number) for note lines; (staff, key) for directions.
@@ -301,6 +303,7 @@ fn read_part(
         let mut clef_changes: BTreeMap<usize, Clef> = BTreeMap::new();
         let mut pending_dyn: Vec<(usize, u64, Dynamic)> = Vec::new();
         let mut pending_text: Vec<(usize, u64, String, bool)> = Vec::new(); // (staff, t, text, is_chord_symbol)
+        let mut instrument_change: Option<InstrumentChange> = None;
         let mut dir_marks: Vec<(usize, u64, DirMark)> = Vec::new();
         let mut graces: HashMap<(usize, u32), Vec<Grace>> = HashMap::new();
         let mut t: u64 = 0;
@@ -308,12 +311,41 @@ fn read_part(
 
         for c in &m_el.children {
             match c.name.as_str() {
+                "print" => {
+                    // <print new-system/new-page> starts this measure on a new line or page.
+                    if first_part
+                        && mi > 0
+                        && let Some(prev) = score.measures.get_mut(mi - 1)
+                    {
+                        if c.attr("new-page") == Some("yes") {
+                            prev.page_break = true;
+                        } else if c.attr("new-system") == Some("yes") {
+                            prev.system_break = true;
+                        }
+                    }
+                }
                 "attributes" => {
                     if let Some(d) = c.child_num("divisions") {
                         divisions = (d as u64).clamp(1, 1_000_000);
                     }
                     if let Some(s) = c.child_num("staves") {
                         staves = (s as usize).clamp(1, limits::MAX_STAVES);
+                    }
+                    // Staves that are not printed.
+                    for sd in c.children_named("staff-details") {
+                        if sd.attr("print-object") == Some("no") {
+                            let n = sd
+                                .attr("number")
+                                .and_then(|n| n.parse::<usize>().ok())
+                                .unwrap_or(1)
+                                .clamp(1, limits::MAX_STAVES);
+                            if hidden.len() < n {
+                                hidden.resize(n, false);
+                            }
+                            if let Some(h) = hidden.get_mut(n - 1) {
+                                *h = true;
+                            }
+                        }
                     }
                     if first_part {
                         let info = score
@@ -590,8 +622,23 @@ fn read_part(
                     event.articulations = marks;
                     event.tremolo = tremolo;
                     event.arpeggio = arpeggio;
-                    if let Some(l) = c.child("lyric").and_then(|l| l.child_text("text")) {
-                        event.lyric = Some(clip(l));
+                    for (i, l) in c.children_named("lyric").enumerate() {
+                        let Some(text) = l.child_text("text").map(str::trim).filter(|t| !t.is_empty()) else {
+                            continue;
+                        };
+                        let verse = l
+                            .attr("number")
+                            .and_then(|n| n.trim().parse::<usize>().ok())
+                            .map(|n| n.max(1) - 1)
+                            .unwrap_or(i);
+                        let hyphen =
+                            matches!(l.child_text("syllabic").map(str::trim), Some("begin" | "middle"));
+                        let text = if hyphen {
+                            format!("{text}-")
+                        } else {
+                            text.to_string()
+                        };
+                        event.set_lyric(verse, Some(clip(&text)));
                     }
                     if let Some(g) = graces.remove(&(staff, voice)) {
                         event.grace = g;
@@ -800,6 +847,25 @@ fn read_part(
                             info.tempo = Some(Tempo { bpm });
                         }
                     }
+                    // An instrument change: a new MIDI program in the direction's sound, with words
+                    // such as "To Flute".
+                    if let Some(program) = c
+                        .path(&["sound", "midi-instrument", "midi-program"])
+                        .and_then(|p| p.text.trim().parse::<i32>().ok())
+                    {
+                        let words = words_here.take().unwrap_or_default();
+                        let name = words
+                            .strip_prefix("To ")
+                            .or_else(|| words.strip_prefix("to "))
+                            .unwrap_or(&words)
+                            .trim()
+                            .to_string();
+                        instrument_change = Some(InstrumentChange {
+                            name: clip(if name.is_empty() { "Instrument" } else { &name }),
+                            abbreviation: String::new(),
+                            program: (program - 1).clamp(0, 127) as u8,
+                        });
+                    }
                     if let Some(w) = words_here {
                         if let Some(j) = jump_from_words(&w) {
                             if first_part && let Some(info) = score.measures.get_mut(mi) {
@@ -912,7 +978,10 @@ fn read_part(
         }
 
         // Group into staves and voices; voice numbers map to indices in ascending order per staff.
-        let mut pm = PartMeasure { staves: Vec::new() };
+        let mut pm = PartMeasure {
+            instrument_change: instrument_change.take(),
+            ..PartMeasure::default()
+        };
         // Where each raw ended up: (staff, voice index, onset tick).
         let mut placed: Vec<Option<(usize, usize, u32)>> = vec![None; raws.len()];
         for s in 0..staves {
@@ -1040,5 +1109,6 @@ fn read_part(
         clefs: clef_list,
         measures,
         sound: Default::default(),
+        hidden,
     })
 }

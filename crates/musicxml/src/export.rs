@@ -371,6 +371,16 @@ pub fn write(score: &Score) -> String {
             let next_info = score.measures.get(mi + 1);
             let len = score.measure_ticks(mi);
             let _ = writeln!(x, "    <measure number=\"{}\">", mi + 1);
+            // A line or page break after the previous measure.
+            if let Some(p) = prev_info
+                && (p.system_break || p.page_break)
+            {
+                let _ = writeln!(
+                    x,
+                    "      <print {}=\"yes\"/>",
+                    if p.page_break { "new-page" } else { "new-system" }
+                );
+            }
             // Left barline: forward repeat and the start of a volta.
             let volta_start = info.volta.filter(|v| prev_info.and_then(|p| p.volta) != Some(*v));
             if info.repeat_start || volta_start.is_some() {
@@ -437,6 +447,10 @@ pub fn write(score: &Score) -> String {
                     for (s, c) in p.clefs.iter().enumerate() {
                         x.push_str(&clef_xml(*c, (staves > 1).then_some(s)));
                     }
+                    // Hidden staves still play but are not printed.
+                    for s in (0..staves).filter(|s| !p.staff_visible(*s)) {
+                        let _ = write!(x, "<staff-details number=\"{}\" print-object=\"no\"/>", s + 1);
+                    }
                 } else {
                     for (s, c) in &clef_changes {
                         x.push_str(&clef_xml(*c, (staves > 1).then_some(*s)));
@@ -458,6 +472,15 @@ pub fn write(score: &Score) -> String {
             }
             if pi == 0 {
                 write_measure_directions(&mut x, &info, score.tempo_at(mi));
+            }
+            if let Some(ch) = &pm.instrument_change {
+                let _ = writeln!(
+                    x,
+                    "      <direction placement=\"above\"><direction-type><words>To {}</words></direction-type><sound><midi-instrument id=\"{}-I1\"><midi-program>{}</midi-program></midi-instrument></sound></direction>",
+                    esc(&ch.name),
+                    esc(&p.id),
+                    u32::from(ch.program) + 1
+                );
             }
             let mut first_block = true;
             for (s, sm) in pm.staves.iter().enumerate() {
@@ -845,12 +868,20 @@ fn write_event(
         if !notations.is_empty() {
             let _ = write!(x, "<notations>{notations}</notations>");
         }
-        if first && let Some(l) = &e.lyric {
-            let _ = write!(
-                x,
-                "<lyric number=\"1\"><syllabic>single</syllabic><text>{}</text></lyric>",
-                esc(l)
-            );
+        if first {
+            for (v, l) in e.lyrics.iter().enumerate().filter(|(_, l)| !l.is_empty()) {
+                // A trailing hyphen joins the syllable to the next one.
+                let (text, syllabic) = match l.strip_suffix('-') {
+                    Some(t) if !t.is_empty() => (t, "begin"),
+                    _ => (l.as_str(), "single"),
+                };
+                let _ = write!(
+                    x,
+                    "<lyric number=\"{}\"><syllabic>{syllabic}</syllabic><text>{}</text></lyric>",
+                    v + 1,
+                    esc(text)
+                );
+            }
         }
     };
     match &e.kind {

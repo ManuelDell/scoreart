@@ -41,7 +41,7 @@ fn imports_small_score() {
     assert_eq!(v.events.len(), 3);
     assert_eq!(v.events[0].duration.dots, 1);
     assert_eq!(v.events[0].dynamic, Dynamic::from_id("mf"));
-    assert_eq!(v.events[0].lyric.as_deref(), Some("la"));
+    assert_eq!(v.events[0].lyric(0), Some("la"));
     assert_eq!(
         v.events[1].articulations,
         vec![Articulation::from_id("staccato").unwrap()]

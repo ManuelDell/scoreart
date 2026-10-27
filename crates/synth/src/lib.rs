@@ -304,6 +304,8 @@ struct TrackEvent {
     at: f64,
     key: u8,
     vel: u8,
+    /// After an instrument change: the program that plays it (None = the part's own sound).
+    program: Option<u8>,
 }
 
 struct Track {
@@ -312,6 +314,8 @@ struct Track {
     events: Vec<TrackEvent>,
     next: usize,
     source: Source,
+    /// Sounds of instruments changed to inside the part, by MIDI program.
+    extra: Vec<(u8, Source)>,
     l: Vec<f32>,
     r: Vec<f32>,
 }
@@ -325,6 +329,7 @@ impl Track {
             events,
             next: 0,
             source,
+            extra: Vec::new(),
             l: vec![0.0; BLOCK],
             r: vec![0.0; BLOCK],
         }
@@ -342,10 +347,20 @@ impl Track {
                     break;
                 }
                 self.next += 1;
+                let src = match e
+                    .program
+                    .and_then(|p| self.extra.iter().position(|(q, _)| *q == p))
+                {
+                    Some(i) => match self.extra.get_mut(i) {
+                        Some((_, s)) => s,
+                        None => &mut self.source,
+                    },
+                    None => &mut self.source,
+                };
                 if e.vel > 0 {
-                    self.source.note_on(e.key, e.vel);
+                    src.note_on(e.key, e.vel);
                 } else {
-                    self.source.note_off(e.key);
+                    src.note_off(e.key);
                 }
             }
             let until = self
@@ -356,6 +371,9 @@ impl Track {
                 .clamp(done + 1, n);
             let (l, r) = (&mut self.l[done..until], &mut self.r[done..until]);
             self.source.render(l, r);
+            for (_, s) in &mut self.extra {
+                s.render(l, r);
+            }
             done = until;
         }
     }
@@ -371,7 +389,7 @@ pub struct Synth {
     pub volume: f32,
 }
 
-fn track_events(seq: &Sequence, from: u64, part: Option<usize>) -> Vec<TrackEvent> {
+fn track_events(seq: &Sequence, from: u64, part: Option<usize>, own: u8) -> Vec<TrackEvent> {
     let t0 = seq.seconds_at(from);
     let mut out = Vec::new();
     for n in seq
@@ -381,23 +399,40 @@ fn track_events(seq: &Sequence, from: u64, part: Option<usize>) -> Vec<TrackEven
     {
         let start = seq.seconds_at(n.start) - t0;
         let end = (seq.seconds_at(n.start + n.ticks) - t0).max(start + 0.03);
+        let program = (n.program != own).then_some(n.program);
         out.push(TrackEvent {
             at: start,
             key: n.key.min(127),
             vel: n.velocity.clamp(1, 127),
+            program,
         });
         out.push(TrackEvent {
             at: end,
             key: n.key.min(127),
             vel: 0,
+            program,
         });
     }
     out
 }
 
+/// The programs of instrument changes in a track's events, in order of first use.
+fn changed_programs(events: &[TrackEvent]) -> Vec<u8> {
+    let mut v: Vec<u8> = Vec::new();
+    for p in events.iter().filter_map(|e| e.program) {
+        if !v.contains(&p) && v.len() < 16 {
+            v.push(p);
+        }
+    }
+    v
+}
+
 impl Synth {
     fn assemble(tracks: Vec<Track>, controls: Arc<MixControls>, rate: u32, music_end: f64) -> Synth {
-        let tail = if tracks.iter().any(|t| t.source.sampled()) {
+        let tail = if tracks
+            .iter()
+            .any(|t| t.source.sampled() || t.extra.iter().any(|(_, s)| s.sampled()))
+        {
             2.5
         } else {
             0.8
@@ -427,11 +462,16 @@ impl Synth {
                 if parts > 1 {
                     controls.set_pan(p, (p as f32 / (parts - 1) as f32 - 0.5) * 0.7);
                 }
-                Track::new(
+                let mut t = Track::new(
                     p,
-                    track_events(seq, from, Some(p)),
+                    track_events(seq, from, Some(p), program),
                     Source::Builtin(Builtin::new(Family::of_program(program), rate)),
-                )
+                );
+                for q in changed_programs(&t.events) {
+                    t.extra
+                        .push((q, Source::Builtin(Builtin::new(Family::of_program(q), rate))));
+                }
+                t
             })
             .collect();
         let end = seq.seconds_at(seq.end) - seq.seconds_at(from);
@@ -463,11 +503,23 @@ impl Synth {
                 if let Some(w) = warning {
                     warnings.push(w);
                 }
-                Track::new(
+                let mut t = Track::new(
                     pi,
-                    track_events(seq, from, Some(pi)),
+                    track_events(seq, from, Some(pi), p.program),
                     Source::new(&resolved, rate),
-                )
+                );
+                // Instruments changed to inside the part sound automatically (or built-in when
+                // the part is set to the built-in sound).
+                let fallback = if p.sound.library == scoreart_model::PartSound::BUILT_IN {
+                    p.sound.clone()
+                } else {
+                    scoreart_model::PartSound::default()
+                };
+                for q in changed_programs(&t.events) {
+                    let (r, _) = resolve(banks, &fallback, q);
+                    t.extra.push((q, Source::new(&r, rate)));
+                }
+                t
             })
             .collect();
         let end = seq.seconds_at(seq.end) - seq.seconds_at(from);
@@ -489,11 +541,13 @@ impl Synth {
                         at: 0.0,
                         key: (*k).min(127),
                         vel: 80,
+                        program: None,
                     },
                     TrackEvent {
                         at: 0.45,
                         key: (*k).min(127),
                         vel: 0,
+                        program: None,
                     },
                 ]
             })

@@ -3,7 +3,8 @@
 use serde_json::{Value, json};
 
 use scoreart_model::{
-    Barline, Clef, Instrument, KeySig, PartSound, Score, Tempo, TimeSig, TimeSymbol, clip, instrument, limits,
+    Barline, Clef, Instrument, InstrumentChange, KeySig, PartSound, Score, Tempo, TimeSig, TimeSymbol, clip,
+    instrument, limits,
 };
 
 use super::{CommandSpec, always, need_i64, need_str, p_i64, p_str, p_usize};
@@ -387,6 +388,137 @@ pub fn commands() -> Vec<CommandSpec> {
                 pt.name = clip(name);
                 if let Some(a) = p_str(p, "abbreviation") {
                     pt.abbreviation = clip(a);
+                }
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "part.change",
+            label: "Change instrument",
+            menu: &[],
+            shortcut: None,
+            params: "instrument (id: piano, violin, flute …), part? (default: the selected part). Replaces name, sound and staves of the whole part",
+            enabled: has_parts,
+            run: |s, p| {
+                let part = p_usize(p, "part").unwrap_or_else(|| s.focus().0);
+                let id = need_str(p, "instrument")?;
+                let inst = instrument(id).ok_or_else(|| Error::Param(format!("unknown instrument {id}")))?;
+                let pt = s
+                    .score
+                    .parts
+                    .get_mut(part)
+                    .ok_or_else(|| Error::Param("no such part".into()))?;
+                pt.change_instrument(inst);
+                s.score.normalize();
+                s.selection = None;
+                s.cursor = Default::default();
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "measure.instrument-change",
+            label: "Instrument change",
+            menu: &[],
+            shortcut: None,
+            params: "instrument (id; \"\" removes), part?, measure? (default: the selection). The part plays the new instrument from this measure on (\"To Flute\")",
+            enabled: has_parts,
+            run: |s, p| {
+                let (fp, _, fm) = s.focus();
+                let part = p_usize(p, "part").unwrap_or(fp);
+                let measure = p_usize(p, "measure").unwrap_or(fm);
+                let id = p_str(p, "instrument").unwrap_or("");
+                let change = if id.is_empty() {
+                    None
+                } else {
+                    let inst =
+                        instrument(id).ok_or_else(|| Error::Param(format!("unknown instrument {id}")))?;
+                    Some(InstrumentChange {
+                        name: inst.name.to_string(),
+                        abbreviation: inst.abbreviation.to_string(),
+                        program: inst.program,
+                    })
+                };
+                let pm = s
+                    .score
+                    .parts
+                    .get_mut(part)
+                    .and_then(|pt| pt.measures.get_mut(measure))
+                    .ok_or_else(|| Error::Param("no such part or measure".into()))?;
+                pm.instrument_change = change;
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "part.visible",
+            label: "Show or hide instrument",
+            menu: &[],
+            shortcut: None,
+            params: "visible: true|false, staff? (1…; default: every staff of the part), part? (default: the selected part). Hidden staves still play",
+            enabled: has_parts,
+            run: |s, p| {
+                let part = p_usize(p, "part").unwrap_or_else(|| s.focus().0);
+                let on = p
+                    .get("visible")
+                    .and_then(Value::as_bool)
+                    .ok_or_else(|| Error::Param("visible: true or false".into()))?;
+                let pt = s
+                    .score
+                    .parts
+                    .get_mut(part)
+                    .ok_or_else(|| Error::Param("no such part".into()))?;
+                match p_usize(p, "staff") {
+                    Some(st) if st >= 1 && st <= pt.staff_count() => {
+                        let n = pt.staff_count();
+                        if pt.hidden.len() < n {
+                            pt.hidden.resize(n, false);
+                        }
+                        if let Some(h) = pt.hidden.get_mut(st - 1) {
+                            *h = !on;
+                        }
+                        if pt.hidden.iter().all(|h| !h) {
+                            pt.hidden.clear();
+                        }
+                    }
+                    Some(_) => return Err(Error::Param("no such staff".into())),
+                    None => pt.set_visible(on),
+                }
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "measure.break",
+            label: "Line or page break",
+            menu: &[],
+            shortcut: None,
+            params: "kind: line|page|none, measure? (default: the selection) — a new system or page starts after the measure",
+            enabled: always,
+            run: |s, p| {
+                let (_, last) = target_measures(s);
+                let m = p_usize(p, "measure").unwrap_or(last);
+                let kind = p_str(p, "kind").unwrap_or("line");
+                let info = s
+                    .score
+                    .measures
+                    .get_mut(m)
+                    .ok_or_else(|| Error::Param("no such measure".into()))?;
+                match kind {
+                    "line" => {
+                        info.system_break = !info.system_break;
+                        info.page_break = false;
+                    }
+                    "page" => {
+                        info.page_break = !info.page_break;
+                        info.system_break = false;
+                    }
+                    "none" => {
+                        info.system_break = false;
+                        info.page_break = false;
+                    }
+                    other => return Err(Error::Param(format!("kind: line, page or none, not {other}"))),
                 }
                 Ok(Value::Null)
             },

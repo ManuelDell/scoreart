@@ -244,7 +244,7 @@ pub fn sequence(score: &Score) -> Sequence {
                                         key: p.midi(),
                                         velocity: vel,
                                         part: pi,
-                                        program: part.program,
+                                        program: part.program_at(m),
                                     });
                                 }
                                 start += each;
@@ -285,7 +285,7 @@ pub fn sequence(score: &Score) -> Sequence {
                                     key,
                                     velocity: vel,
                                     part: pi,
-                                    program: part.program,
+                                    program: part.program_at(m),
                                 });
                                 open.insert(k, seq.notes.len() - 1);
                             }
@@ -361,6 +361,22 @@ pub fn to_smf(score: &Score) -> Vec<u8> {
                     },
                 },
             ));
+        }
+        // Instrument changes: a program change before the first note of the new instrument.
+        let mut current = part.program;
+        for n in seq.notes.iter().filter(|n| n.part == pi) {
+            if n.program != current {
+                current = n.program;
+                abs.push((
+                    scale(n.start),
+                    TrackEventKind::Midi {
+                        channel: ch,
+                        message: MidiMessage::ProgramChange {
+                            program: u7::new(current.min(127)),
+                        },
+                    },
+                ));
+            }
         }
         for n in seq.notes.iter().filter(|n| n.part == pi) {
             let key = u7::new(n.key.min(127));

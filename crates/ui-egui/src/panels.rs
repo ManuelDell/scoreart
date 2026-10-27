@@ -124,6 +124,15 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                             app.run("measure.delete", json!({}));
                             ui.close();
                         }
+                        ui.separator();
+                        if ui.button("Line break after the measure (toggle)").clicked() {
+                            app.run("measure.break", json!({ "kind": "line" }));
+                            ui.close();
+                        }
+                        if ui.button("Page break after the measure (toggle)").clicked() {
+                            app.run("measure.break", json!({ "kind": "page" }));
+                            ui.close();
+                        }
                     });
                     ui.menu_button("Instrument", |ui| {
                         for inst in INSTRUMENTS {
@@ -873,6 +882,8 @@ pub struct Fields {
     composer: String,
     lyricist: String,
     lyric: String,
+    /// The verse the lyric field edits (0-based).
+    pub verse: usize,
     part_name: String,
 }
 
@@ -886,9 +897,11 @@ pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
             .session
             .selected_event()
             .and_then(|e| app.session.score.event(e))
-            .and_then(|e| e.lyric.clone())
+            .and_then(|e| e.lyric(app.fields.verse).map(str::to_string))
             .unwrap_or_default();
+        let verse = app.fields.verse;
         app.fields = Fields {
+            verse,
             revision: app.session.revision,
             sel: app.session.selection,
             title: m.title.clone(),
@@ -945,10 +958,22 @@ pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         ui.label("Lyric");
+                        egui::ComboBox::from_id_salt("verse")
+                            .width(54.0)
+                            .selected_text(format!("v. {}", app.fields.verse + 1))
+                            .show_ui(ui, |ui| {
+                                for v in 0..6 {
+                                    if ui.selectable_label(app.fields.verse == v, format!("Verse {}", v + 1)).clicked() {
+                                        app.fields.verse = v;
+                                        app.fields.revision = 0;
+                                    }
+                                }
+                            });
                         let r = ui.add(egui::TextEdit::singleline(&mut app.fields.lyric).desired_width(120.0));
                         if r.lost_focus() {
                             let text = app.fields.lyric.clone();
-                            app.run("note.lyric", json!({ "text": text }));
+                            let verse = app.fields.verse + 1;
+                            app.run("note.lyric", json!({ "text": text, "verse": verse }));
                             if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                                 app.run("select.next", json!({}));
                                 app.fields.revision = 0;
@@ -974,6 +999,55 @@ pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         app.run("part.rename", json!({ "name": n }));
                     }
                 });
+                let (part, _, measure) = app.session.focus();
+                let current = app.session.score.parts.get(part).map(|p| p.name.clone()).unwrap_or_default();
+                // Swap the whole part to another instrument.
+                let mut pick: Option<&'static str> = None;
+                egui::ComboBox::from_id_salt("change-instrument")
+                    .selected_text(format!("Change to … ({current})"))
+                    .width(200.0)
+                    .show_ui(ui, |ui| {
+                        for i in scoreart_model::INSTRUMENTS {
+                            if ui.selectable_label(i.name == current, i.name).clicked() {
+                                pick = Some(i.id);
+                            }
+                        }
+                    });
+                if let Some(id) = pick {
+                    app.run("part.change", json!({ "part": part, "instrument": id }));
+                }
+                // Switch instrument from the selected measure on ("To Flute").
+                let here = app
+                    .session
+                    .score
+                    .parts
+                    .get(part)
+                    .and_then(|p| p.measures.get(measure))
+                    .and_then(|m| m.instrument_change.as_ref())
+                    .map(|c| c.name.clone());
+                let mut change: Option<&'static str> = None;
+                egui::ComboBox::from_id_salt("instrument-change")
+                    .selected_text(match &here {
+                        Some(n) => format!("From m. {}: {n}", measure + 1),
+                        None => format!("Instrument change at m. {} …", measure + 1),
+                    })
+                    .width(200.0)
+                    .show_ui(ui, |ui| {
+                        if here.is_some() && ui.selectable_label(false, "(remove the change)").clicked() {
+                            change = Some("");
+                        }
+                        for i in scoreart_model::INSTRUMENTS {
+                            if ui.selectable_label(here.as_deref() == Some(i.name), i.name).clicked() {
+                                change = Some(i.id);
+                            }
+                        }
+                    });
+                if let Some(id) = change {
+                    app.run(
+                        "measure.instrument-change",
+                        json!({ "part": part, "measure": measure, "instrument": id }),
+                    );
+                }
                 if ui.button("Remove this instrument").clicked() {
                     app.run("part.remove", json!({}));
                 }
@@ -987,11 +1061,11 @@ pub fn open_lyric_dialog(app: &mut ScoreApp) {
         .session
         .selected_event()
         .and_then(|e| app.session.score.event(e))
-        .and_then(|e| e.lyric.clone())
+        .and_then(|e| e.lyric(app.fields.verse).map(str::to_string))
         .unwrap_or_default();
     if app.session.selected_event().is_some() {
         app.dialog = Some(Dialog::Text {
-            title: "Lyric",
+            title: "Lyric (a trailing - joins it to the next syllable)",
             command: "note.lyric",
             key: "text",
             value: current,
@@ -1137,6 +1211,8 @@ pub fn dialogs(app: &mut ScoreApp, ctx: &egui::Context) {
             if ok {
                 let v = if key == "bpm" {
                     json!({ key: value.trim().parse::<i64>().unwrap_or(0) })
+                } else if command == "note.lyric" {
+                    json!({ key: value, "verse": app.fields.verse + 1 })
                 } else {
                     json!({ key: value })
                 };

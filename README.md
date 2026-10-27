@@ -56,7 +56,9 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   `Ctrl+↑/↓` octaves, `T` ties, `Del` deletes, notes crossing a barline are split and tied,
   four voices, mouse input with a ghost note.
 - **Editing**: selection of notes, rests, note ranges (`Shift+click`, `Shift+→`) and measure ranges; palettes for every mark above; add/insert/delete measures; add,
-  rename and remove instruments (17 built-in); transpose; score properties; unlimited undo/redo.
+  rename, **change** and remove instruments (17 built-in), **instrument changes inside a part**
+  ("To Flute", played and exported to MIDI); show or hide instruments; line and page breaks;
+  **lyrics with several verses and hyphens**; transpose; score properties; unlimited undo/redo.
 - **Files**: **MusicXML 4.0** is the native format (`.musicxml` and compressed `.mxl`, read and
   write — exchange scores with MuseScore, Dorico, Sibelius, Finale), **MuseScore files**
   (`.mscz`, `.mscx` of MuseScore 3 and 4, checked against files saved by MuseScore Studio 4.7)

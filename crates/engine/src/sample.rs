@@ -67,9 +67,9 @@ pub fn ode_to_joy() -> Score {
         (D, 4, h),
     ];
     let words = [
-        "Freu", "de,", "schö", "ner", "Göt", "ter", "fun", "ken,", "Toch", "ter", "aus", "E", "ly", "si",
-        "um,", "Wir", "be", "tre", "ten", "feu", "er", "trun", "ken,", "Himm", "li", "sche,", "dein", "Hei",
-        "lig", "tum!",
+        "Freu-", "de,", "schö-", "ner", "Göt-", "ter-", "fun-", "ken,", "Toch-", "ter", "aus", "E-", "ly-",
+        "si-", "um,", "Wir", "be-", "tre-", "ten", "feu-", "er-", "trun-", "ken,", "Himm-", "li-", "sche,",
+        "dein", "Hei-", "lig-", "tum!",
     ];
     let mut pos = Pos::default();
     for (i, (st, oct, d)) in melody.iter().enumerate() {
@@ -78,7 +78,7 @@ pub fn ode_to_joy() -> Score {
         if let Some(r) = before.event(&s)
             && let Some(ev) = s.event_mut(r)
         {
-            ev.lyric = words.get(i).map(|w| w.to_string());
+            ev.set_lyric(0, words.get(i).map(|w| w.to_string()));
             if i == 0 {
                 ev.dynamic = Dynamic::from_id("mp");
             }

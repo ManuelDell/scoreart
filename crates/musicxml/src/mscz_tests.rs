@@ -161,7 +161,7 @@ fn reads_musescore_4() {
     assert_eq!(first.dynamic.map(|d| d.id()), Some("mf"));
     assert_eq!(first.text.as_deref(), Some("dolce"));
     assert_eq!(first.chord_symbol.as_deref(), Some("F#m7"));
-    assert_eq!(first.lyric.as_deref(), Some("la"));
+    assert_eq!(first.lyric(0), Some("la"));
     let ids: Vec<&str> = first.articulations.iter().map(|a| a.id()).collect();
     assert!(
         ids.contains(&"fermata") && ids.contains(&"staccato") && ids.contains(&"trill"),
@@ -330,4 +330,84 @@ fn reads_musescore_4_6_conventions() {
     let v1 = s.voice(0, 0, 1, 0).unwrap();
     let names: Vec<String> = v1.events.iter().map(|e| e.notes()[0].pitch.name()).collect();
     assert_eq!(names, ["D5", "C5", "C4"]);
+}
+
+/// Hidden instruments and staves, several lyric verses with hyphens, staves without a clef of
+/// their own (treble) and a line break — as MuseScore 4 writes them.
+const MS_LAYOUT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<museScore version="4.50">
+  <Score>
+    <Division>480</Division>
+    <Part id="1">
+      <Staff id="1"><StaffType group="pitched"/></Staff>
+      <Staff id="2"><StaffType group="pitched"/></Staff>
+      <trackName>Women</trackName>
+      <Instrument id="women"><longName>Women</longName></Instrument>
+    </Part>
+    <Part id="2">
+      <Staff id="3"><StaffType group="pitched"/><isStaffVisible>0</isStaffVisible></Staff>
+      <Staff id="4"><StaffType group="pitched"/><isStaffVisible>0</isStaffVisible></Staff>
+      <show>0</show>
+      <trackName>Piano</trackName>
+      <Instrument id="piano"><longName>Piano</longName><clef staff="2">F</clef></Instrument>
+    </Part>
+    <Staff id="1">
+      <Measure>
+        <voice>
+          <TimeSig><sigN>2</sigN><sigD>4</sigD></TimeSig>
+          <Chord><durationType>quarter</durationType>
+            <Lyrics><syllabic>begin</syllabic><text>1. Freu</text></Lyrics>
+            <Lyrics><no>1</no><text>2. Wir</text></Lyrics>
+            <Note><pitch>67</pitch><tpc>15</tpc></Note></Chord>
+          <Chord><durationType>quarter</durationType>
+            <Lyrics><syllabic>end</syllabic><text>de</text></Lyrics>
+            <Lyrics><no>1</no><text>be</text><syllabic>begin</syllabic></Lyrics>
+            <Note><pitch>69</pitch><tpc>17</tpc></Note></Chord>
+        </voice>
+      </Measure>
+      <Measure>
+        <LayoutBreak><subtype>line</subtype></LayoutBreak>
+        <voice><Rest><durationType>measure</durationType><duration>2/4</duration></Rest></voice>
+      </Measure>
+      <Measure>
+        <voice><Rest><durationType>measure</durationType><duration>2/4</duration></Rest></voice>
+      </Measure>
+    </Staff>
+    <Staff id="2"><Measure><voice><Rest><durationType>measure</durationType><duration>2/4</duration></Rest></voice></Measure></Staff>
+    <Staff id="3"><Measure><voice><Rest><durationType>measure</durationType><duration>2/4</duration></Rest></voice></Measure></Staff>
+    <Staff id="4"><Measure><voice><Rest><durationType>measure</durationType><duration>2/4</duration></Rest></voice></Measure></Staff>
+  </Score>
+</museScore>
+"#;
+
+#[test]
+fn reads_hidden_staves_verses_and_breaks() {
+    let s = from_bytes(MS_LAYOUT.as_bytes()).unwrap();
+    assert_eq!(
+        s.parts[0].clefs,
+        vec![Clef::Treble, Clef::Treble],
+        "no clef given: treble"
+    );
+    assert_eq!(s.parts[1].clefs, vec![Clef::Treble, Clef::Bass]);
+    assert!(s.parts[0].visible() && !s.parts[1].visible());
+    let v = s.voice(0, 0, 0, 0).unwrap();
+    assert_eq!(
+        v.events[0].lyrics,
+        vec!["1. Freu-".to_string(), "2. Wir".to_string()]
+    );
+    assert_eq!(v.events[1].lyric(0), Some("de"));
+    assert_eq!(v.events[1].lyric(1), Some("be-"));
+    assert!(s.measures[1].system_break && !s.measures[0].system_break);
+    // All of it survives MusicXML.
+    let back = from_str(&to_string(&s)).unwrap();
+    assert_eq!(back.parts[1].hidden, vec![true, true]);
+    assert_eq!(
+        back.voice(0, 0, 0, 0).unwrap().events[0].lyrics,
+        v.events[0].lyrics
+    );
+    assert_eq!(
+        back.voice(0, 0, 0, 0).unwrap().events[1].lyrics,
+        v.events[1].lyrics
+    );
+    assert!(back.measures[1].system_break);
 }

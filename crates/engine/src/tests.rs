@@ -252,3 +252,64 @@ fn sound_and_mix_per_instrument() {
     assert_eq!(names.len(), 2, "{names:?}");
     assert!(names.contains(&"02 Violin.wav"), "{names:?}");
 }
+
+#[test]
+fn instrument_changes() {
+    let mut s = Session::default();
+    // The sample is a piano (two staves): change the whole part to a violin.
+    s.score.parts[0].sound.library = "ScoreArt".into();
+    s.execute("part.change", &json!({ "part": 0, "instrument": "violin" }))
+        .unwrap();
+    let p = &s.score.parts[0];
+    assert_eq!((p.name.as_str(), p.program, p.staff_count()), ("Violin", 40, 1));
+    assert!(p.measures.iter().all(|m| m.staves.len() == 1));
+    assert!(p.sound.library.is_empty(), "the sound goes back to automatic");
+    assert!(
+        s.execute("part.change", &json!({ "instrument": "kazoo" }))
+            .is_err()
+    );
+    // From measure 3 the player switches to the flute.
+    s.execute(
+        "measure.instrument-change",
+        &json!({ "part": 0, "measure": 2, "instrument": "flute" }),
+    )
+    .unwrap();
+    let p = &s.score.parts[0];
+    assert_eq!((p.program_at(1), p.program_at(2), p.program_at(7)), (40, 73, 73));
+    assert_eq!(p.name_at(5), "Flute");
+    // Played with the flute from there on.
+    let seq = scoreart_midi::sequence(&s.score);
+    let starts: std::collections::HashMap<usize, u64> = seq.measure_starts.iter().copied().collect();
+    let m3 = starts[&2];
+    assert!(seq.notes.iter().filter(|n| n.start < m3).all(|n| n.program == 40));
+    assert!(
+        seq.notes
+            .iter()
+            .filter(|n| n.start >= m3)
+            .all(|n| n.program == 73)
+    );
+    // MIDI export switches the program; MusicXML keeps the change.
+    let smf = scoreart_midi::to_smf(&s.score);
+    assert!(smf.windows(2).any(|w| w[0] & 0xF0 == 0xC0 && w[1] == 73));
+    let back = scoreart_musicxml::from_str(&scoreart_musicxml::to_string(&s.score)).unwrap();
+    assert_eq!(
+        back.parts[0].measures[2]
+            .instrument_change
+            .as_ref()
+            .map(|c| (c.name.as_str(), c.program)),
+        Some(("Flute", 73))
+    );
+    // Undo removes it again.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(s.score.parts[0].measures[2].instrument_change.is_none());
+    // Removing works through the same command.
+    s.execute("edit.redo", &json!({})).unwrap();
+    s.execute(
+        "measure.instrument-change",
+        &json!({ "part": 0, "measure": 2, "instrument": "" }),
+    )
+    .unwrap();
+    assert!(s.score.parts[0].measures[2].instrument_change.is_none());
+    // Audio still renders with both sounds.
+    assert!(wav(&s.score).len() > 1000);
+}

@@ -10,7 +10,7 @@ use scoreart_model::{
 };
 
 use super::edit::{select_event, start_input};
-use super::{CommandSpec, always, need_str, p_i64, p_str};
+use super::{CommandSpec, always, need_str, p_i64, p_str, p_usize};
 use crate::{Error, Result, Selection, Session};
 
 fn has_event_selection(s: &Session) -> std::result::Result<(), String> {
@@ -409,14 +409,18 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "Lyric",
             menu: &["Add", "Text"],
             shortcut: Some("Ctrl+L"),
-            params: "text (empty removes)",
+            params: "text (empty removes; a trailing - joins it to the next syllable), verse? 1… (default 1)",
             enabled: has_note_selection,
             run: |s, p| {
                 let text = p_str(p, "text").unwrap_or("").trim();
+                let verse = p_usize(p, "verse")
+                    .unwrap_or(1)
+                    .clamp(1, scoreart_model::MAX_VERSES)
+                    - 1;
                 if let Some(ev) = s.selected_event()
                     && let Some(e) = s.score.event_mut(ev)
                 {
-                    e.lyric = if text.is_empty() { None } else { Some(clip(text)) };
+                    e.set_lyric(verse, (!text.is_empty()).then(|| clip(text)));
                 }
                 Ok(Value::Null)
             },

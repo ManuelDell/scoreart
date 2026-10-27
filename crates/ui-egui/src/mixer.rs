@@ -162,7 +162,17 @@ fn strip(
     let controls = app.mixer.controls.clone();
     ui.vertical(|ui| {
         ui.set_width(150.0);
-        ui.label(RichText::new(name).strong());
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(name).strong());
+            let mut shown = app.session.score.parts.get(pi).is_none_or(|p| p.visible());
+            if ui
+                .checkbox(&mut shown, "")
+                .on_hover_text("Show this instrument in the score (hidden ones still play)")
+                .changed()
+            {
+                app.run("part.visible", json!({ "part": pi, "visible": shown }));
+            }
+        });
         // Sound: library, then preset.
         let mut choice: Option<(String, String)> = None;
         egui::ComboBox::from_id_salt(("mix-lib", pi))

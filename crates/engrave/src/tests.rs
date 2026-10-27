@@ -137,3 +137,35 @@ fn layout_is_deterministic() {
     let s = melody();
     assert_eq!(layout(&s, &Style::default()), layout(&s, &Style::default()));
 }
+
+#[test]
+fn hidden_staves_and_breaks() {
+    let mut s = Score::new(
+        "T",
+        &[instrument("flute").unwrap(), instrument("piano").unwrap()],
+        TimeSig::default(),
+        KeySig::default(),
+        12,
+    );
+    s.parts[1].set_visible(false);
+    s.measures[1].system_break = true;
+    s.measures[3].page_break = true;
+    let l = layout(&s, &Style::default());
+    assert!(
+        l.staves.iter().all(|b| b.part == 0),
+        "the hidden piano is not drawn"
+    );
+    let first_system: Vec<usize> = l
+        .staves
+        .iter()
+        .filter(|b| b.system == 0)
+        .map(|b| b.measure)
+        .collect();
+    assert_eq!(first_system, [0, 1], "a line break after measure 2");
+    let m4 = l.staves.iter().find(|b| b.measure == 4).unwrap();
+    assert_eq!(m4.page, 1, "a page break after measure 4");
+    // Every staff hidden: everything is shown rather than an empty page.
+    s.parts[0].set_visible(false);
+    let l = layout(&s, &Style::default());
+    assert!(l.staves.iter().any(|b| b.part == 1));
+}

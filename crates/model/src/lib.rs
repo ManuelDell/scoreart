@@ -264,8 +264,10 @@ pub struct Event {
     pub articulations: Vec<Articulation>,
     #[serde(default)]
     pub dynamic: Option<Dynamic>,
+    /// Lyric syllables by verse (index 0 = verse 1; "" = none in that verse). A syllable ending
+    /// in `-` is joined to the next one by a hyphen ("Freu-" "de").
     #[serde(default)]
-    pub lyric: Option<String>,
+    pub lyrics: Vec<String>,
     /// Grace notes before this event.
     #[serde(default)]
     pub grace: Vec<Grace>,
@@ -281,14 +283,50 @@ pub struct Event {
     pub text: Option<String>,
 }
 
+/// Most lyric verses kept per note.
+pub const MAX_VERSES: usize = 12;
+
 impl Event {
+    /// The syllable of `verse` (0-based), if any.
+    pub fn lyric(&self, verse: usize) -> Option<&str> {
+        self.lyrics
+            .get(verse)
+            .map(String::as_str)
+            .filter(|l| !l.is_empty())
+    }
+
+    /// Sets (or with `None`/"" clears) the syllable of `verse` (0-based).
+    pub fn set_lyric(&mut self, verse: usize, text: Option<String>) {
+        if verse >= MAX_VERSES {
+            return;
+        }
+        let text = text.unwrap_or_default();
+        if self.lyrics.len() <= verse {
+            if text.is_empty() {
+                return;
+            }
+            self.lyrics.resize(verse + 1, String::new());
+        }
+        if let Some(l) = self.lyrics.get_mut(verse) {
+            *l = text;
+        }
+        while self.lyrics.last().is_some_and(String::is_empty) {
+            self.lyrics.pop();
+        }
+    }
+
+    /// Number of verses with a syllable on this event (the highest verse used).
+    pub fn verse_count(&self) -> usize {
+        self.lyrics.len()
+    }
+
     pub fn rest(duration: Duration) -> Event {
         Event {
             kind: EventKind::Rest,
             duration,
             articulations: Vec::new(),
             dynamic: None,
-            lyric: None,
+            lyrics: Vec::new(),
             grace: Vec::new(),
             tremolo: Tremolo::None,
             arpeggio: Arpeggio::None,
@@ -401,6 +439,18 @@ pub struct StaffMeasure {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct PartMeasure {
     pub staves: Vec<StaffMeasure>,
+    /// From this measure on the part plays another instrument ("To Flute").
+    #[serde(default)]
+    pub instrument_change: Option<InstrumentChange>,
+}
+
+/// An instrument change inside a part, e.g. a player switching from flute to piccolo.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstrumentChange {
+    pub name: String,
+    pub abbreviation: String,
+    /// General MIDI program, 0-based.
+    pub program: u8,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -416,6 +466,9 @@ pub struct Part {
     /// Playback sound and mixer settings.
     #[serde(default)]
     pub sound: PartSound,
+    /// Staves not shown (by staff index; missing = shown). Hidden staves still play.
+    #[serde(default)]
+    pub hidden: Vec<bool>,
 }
 
 /// Which sound plays a part, and its mixer channel.
@@ -451,6 +504,60 @@ impl PartSound {
 impl Part {
     pub fn staff_count(&self) -> usize {
         self.clefs.len()
+    }
+
+    pub fn staff_visible(&self, staff: usize) -> bool {
+        !self.hidden.get(staff).copied().unwrap_or(false)
+    }
+
+    /// Whether any staff of the part is shown.
+    pub fn visible(&self) -> bool {
+        (0..self.staff_count()).any(|s| self.staff_visible(s))
+    }
+
+    /// Shows or hides every staff of the part.
+    pub fn set_visible(&mut self, on: bool) {
+        self.hidden = if on {
+            Vec::new()
+        } else {
+            vec![true; self.staff_count()]
+        };
+    }
+
+    /// The MIDI program sounding in `measure` (after any instrument change).
+    pub fn program_at(&self, measure: usize) -> u8 {
+        self.measures
+            .iter()
+            .take(measure.saturating_add(1))
+            .rev()
+            .find_map(|m| m.instrument_change.as_ref().map(|c| c.program))
+            .unwrap_or(self.program)
+    }
+
+    /// The instrument name in `measure` (after any instrument change).
+    pub fn name_at(&self, measure: usize) -> &str {
+        self.measures
+            .iter()
+            .take(measure.saturating_add(1))
+            .rev()
+            .find_map(|m| m.instrument_change.as_ref().map(|c| c.name.as_str()))
+            .unwrap_or(&self.name)
+    }
+
+    /// Replaces the instrument of the whole part: name, abbreviation, MIDI program and staves.
+    /// Staves beyond the new instrument's count are removed (with their music); new ones start
+    /// with whole-measure rests. The chosen sound goes back to automatic; volume and pan stay.
+    pub fn change_instrument(&mut self, inst: &Instrument) {
+        self.name = inst.name.to_string();
+        self.abbreviation = inst.abbreviation.to_string();
+        self.program = inst.program;
+        let n = inst.clefs.len().max(1);
+        self.clefs = inst.clefs.to_vec();
+        for m in &mut self.measures {
+            m.staves.truncate(n);
+        }
+        self.sound.library.clear();
+        self.sound.preset.clear();
     }
 }
 
@@ -491,6 +598,12 @@ pub struct MeasureInfo {
     pub volta: Option<u8>,
     #[serde(default)]
     pub jumps: Vec<Jump>,
+    /// A new system starts after this measure.
+    #[serde(default)]
+    pub system_break: bool,
+    /// A new page starts after this measure.
+    #[serde(default)]
+    pub page_break: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -697,6 +810,7 @@ impl Score {
             clefs: inst.clefs.to_vec(),
             measures: Vec::new(),
             sound: Default::default(),
+            hidden: Vec::new(),
         });
         self.normalize();
     }

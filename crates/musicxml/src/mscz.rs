@@ -320,12 +320,26 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                     })
                     .map(|c| clef_of(&c.text))
                 })
-                .unwrap_or(if si == 1 { Clef::Bass } else { Clef::Treble });
+                // Without a clef of their own, MuseScore staves use the treble clef (instruments
+                // such as the piano name their bass staff's clef explicitly).
+                .unwrap_or(Clef::Treble);
             clefs.push(default);
         }
         if clefs.is_empty() {
             clefs.push(Clef::Treble);
         }
+        // Hidden instruments (<show>0</show>) and staves (<isStaffVisible>0</isStaffVisible>).
+        let part_shown = p.child_text("show").is_none_or(|v| v.trim() != "0");
+        let hidden: Vec<bool> = p
+            .children_named("Staff")
+            .take(clefs.len())
+            .map(|st| !part_shown || st.child_text("isStaffVisible").is_some_and(|v| v.trim() == "0"))
+            .collect();
+        let hidden = if hidden.iter().any(|h| *h) {
+            hidden
+        } else {
+            Vec::new()
+        };
         score.parts.push(Part {
             id: format!("P{}", pi + 1),
             name: clip(&name),
@@ -334,6 +348,7 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
             clefs,
             measures: Vec::new(),
             sound: Default::default(),
+            hidden,
         });
     }
     if score.parts.is_empty() {
@@ -377,6 +392,14 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                     .ok_or(Error::Invalid("measure".into()))?;
                 if m_el.has("startRepeat") {
                     info.repeat_start = true;
+                }
+                // Line and page breaks set in MuseScore.
+                for b in m_el.children_named("LayoutBreak") {
+                    match b.child_text("subtype").map(str::trim) {
+                        Some("page") => info.page_break = true,
+                        Some("line" | "section") => info.system_break = true,
+                        _ => {}
+                    }
                 }
                 if m_el.has("endRepeat") {
                     info.barline = Barline::RepeatEnd;
@@ -866,11 +889,19 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                                         _ => Arpeggio::Normal,
                                     };
                                 }
-                                if let Some(l) = c.child("Lyrics") {
+                                // One <Lyrics> per verse; <no> counts from 0.
+                                for l in c.children_named("Lyrics") {
                                     let txt = flat_text(l.child("text").unwrap_or(l));
-                                    if !txt.is_empty() {
-                                        e.lyric = Some(clip(&txt));
+                                    if txt.is_empty() {
+                                        continue;
                                     }
+                                    let verse = l.child_num("no").map_or(0, |n| n.max(0.0) as usize);
+                                    let hyphen = matches!(
+                                        l.child_text("syllabic").map(str::trim),
+                                        Some("begin" | "middle")
+                                    );
+                                    let txt = if hyphen { format!("{txt}-") } else { txt };
+                                    e.set_lyric(verse, Some(clip(&txt)));
                                 }
                                 e.grace = std::mem::take(&mut graces);
                             }
