@@ -34,19 +34,106 @@ async fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
     Ok(js_sys::Uint8Array::new(&buf).to_vec())
 }
 
-/// Downloads one catalogue instrument into the library's in-memory store.
+/// What the host page (e.g. Nextcloud, set up by its administrator) allows and provides.
+#[derive(Debug)]
+pub struct HostConfig {
+    /// Catalogue libraries may be fetched from the internet.
+    internet: bool,
+    /// Per catalogue library (by name): offered at all, and the server copy (base URL ending in
+    /// `/`, laid out like the library's repository) with its instruments.
+    libraries: std::collections::HashMap<String, LibraryRule>,
+    /// Sound files on the server: name, URL, load at start.
+    files: Vec<(String, String, bool)>,
+}
+
+#[derive(Debug, Default)]
+struct LibraryRule {
+    enabled: bool,
+    base: Option<String>,
+    instruments: Vec<String>,
+}
+
+impl Default for HostConfig {
+    fn default() -> Self {
+        HostConfig {
+            internet: true,
+            libraries: Default::default(),
+            files: Vec::new(),
+        }
+    }
+}
+
+impl HostConfig {
+    /// Reads a `scoreart:config` message (unknown or malformed fields keep the defaults).
+    fn from_json(v: &serde_json::Value) -> HostConfig {
+        let mut c = HostConfig::default();
+        if let Some(b) = v.get("internet").and_then(|b| b.as_bool()) {
+            c.internet = b;
+        }
+        for l in v
+            .get("libraries")
+            .and_then(|l| l.as_array())
+            .into_iter()
+            .flatten()
+        {
+            let Some(name) = l.get("name").and_then(|n| n.as_str()) else {
+                continue;
+            };
+            let base = l
+                .get("base")
+                .and_then(|b| b.as_str())
+                .filter(|b| b.starts_with('/') && b.ends_with('/'))
+                .map(str::to_string);
+            let instruments = l
+                .get("instruments")
+                .and_then(|i| i.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|i| i.as_str().map(str::to_string))
+                .collect();
+            c.libraries.insert(
+                name.to_string(),
+                LibraryRule {
+                    enabled: l.get("enabled").and_then(|e| e.as_bool()).unwrap_or(true),
+                    base,
+                    instruments,
+                },
+            );
+        }
+        for f in v.get("files").and_then(|f| f.as_array()).into_iter().flatten() {
+            let (Some(name), Some(url)) = (
+                f.get("name").and_then(|n| n.as_str()),
+                f.get("url")
+                    .and_then(|u| u.as_str())
+                    .filter(|u| u.starts_with('/')),
+            ) else {
+                continue;
+            };
+            let auto = f.get("autoload").and_then(|a| a.as_bool()).unwrap_or(false);
+            c.files.push((name.to_string(), url.to_string(), auto));
+        }
+        c
+    }
+}
+
+/// Fetches a sound file the host provides and reads it as a library.
+async fn load_host_file(name: String, url: String) -> Result<scoreart_synth::SoundBank, String> {
+    let bytes = fetch_bytes(&url).await?;
+    scoreart_synth::SoundBank::from_bytes(&name, bytes)
+}
+
+/// Downloads one catalogue instrument into the library's in-memory store, from `base` (the
+/// publisher's repository, or a server copy laid out the same way).
 async fn download_instrument(
     lib: &'static scoreart_synth::catalog::Library,
+    base: String,
     instrument: String,
     mem: scoreart_synth::files::Mem,
     status: Rc<RefCell<Option<scoreart_ui_egui::DownloadStatus>>>,
     cancel: Rc<Cell<bool>>,
 ) -> Result<scoreart_synth::SoundBank, String> {
-    use scoreart_synth::catalog::{self, NOTICE_FILE, Source};
+    use scoreart_synth::catalog::{self, NOTICE_FILE};
     use scoreart_synth::files::Files as _;
-    let Source::Repository { base, .. } = lib.source else {
-        return Err(format!("{} is downloaded from its website", lib.name));
-    };
     let accepted = scoreart_ui_egui::acceptance_text(lib, (js_sys::Date::now() / 1000.0) as u64);
     let previous = mem
         .read(NOTICE_FILE)
@@ -70,7 +157,7 @@ async fn download_instrument(
             if let Some(s) = status.borrow_mut().as_mut() {
                 s.progress = p.clone();
             }
-            let bytes = fetch_bytes(&catalog::file_url(base, &f)).await?;
+            let bytes = fetch_bytes(&catalog::file_url(&base, &f)).await?;
             p.bytes += bytes.len() as u64;
             mem.insert(&f, bytes);
             p.files_done += 1;
@@ -95,6 +182,8 @@ struct Bridge {
     parent: web_sys::Window,
     origin: String,
     dirty: Rc<Cell<Option<bool>>>,
+    /// The host's settings, once it sent them.
+    config: Rc<RefCell<HostConfig>>,
 }
 
 impl Bridge {
@@ -109,6 +198,7 @@ impl Bridge {
             parent,
             origin,
             dirty: Rc::default(),
+            config: Rc::default(),
         })
     }
 
@@ -150,10 +240,12 @@ impl Bridge {
         }
     }
 
-    /// Hears `scoreart:open` from the parent (same origin, parent window only).
-    fn listen(&self, inbox: Inbox, ctx: egui::Context) {
+    /// Hears `scoreart:open` and `scoreart:config` from the parent (same origin, parent window
+    /// only). Sound files the configuration marks for loading at start go to `sounds`.
+    fn listen(&self, inbox: Inbox, sounds: SoundInbox, ctx: egui::Context) {
         let origin = self.origin.clone();
         let parent = self.parent.clone();
+        let config = self.config.clone();
         let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |e: web_sys::MessageEvent| {
             if e.origin() != origin {
                 return;
@@ -167,7 +259,31 @@ impl Bridge {
             }
             let data = e.data();
             let get = |k: &str| js_sys::Reflect::get(&data, &JsValue::from_str(k)).ok();
-            if get("type").and_then(|t| t.as_string()).as_deref() != Some("scoreart:open") {
+            let kind = get("type").and_then(|t| t.as_string());
+            if kind.as_deref() == Some("scoreart:config") {
+                let json = js_sys::JSON::stringify(&data)
+                    .ok()
+                    .and_then(|s| s.as_string())
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+                if let Some(v) = json {
+                    let c = HostConfig::from_json(&v);
+                    for (name, url, auto) in &c.files {
+                        if *auto {
+                            let (name, url, sounds, ctx) =
+                                (name.clone(), url.clone(), sounds.clone(), ctx.clone());
+                            wasm_bindgen_futures::spawn_local(async move {
+                                let r = load_host_file(name, url).await;
+                                sounds.borrow_mut().push(r);
+                                ctx.request_repaint();
+                            });
+                        }
+                    }
+                    *config.borrow_mut() = c;
+                    ctx.request_repaint();
+                }
+                return;
+            }
+            if kind.as_deref() != Some("scoreart:open") {
                 return;
             }
             let name = get("name")
@@ -213,6 +329,13 @@ fn download(name: &str, bytes: &[u8]) -> Result<(), JsValue> {
     a.click();
     let _ = web_sys::Url::revoke_object_url(&url);
     Ok(())
+}
+
+impl WebHost {
+    /// The host page's settings, when ScoreArt runs inside one.
+    fn config(&self) -> Option<Rc<RefCell<HostConfig>>> {
+        self.bridge.as_ref().map(|b| b.config.clone())
+    }
 }
 
 impl Host for WebHost {
@@ -272,6 +395,19 @@ impl Host for WebHost {
         if self.download.borrow().is_some() {
             return;
         }
+        let config = self.config();
+        let rule = config.as_ref().and_then(|c| {
+            c.borrow()
+                .libraries
+                .get(library.name)
+                .map(|r| (r.base.clone(), r.instruments.contains(&instrument.to_string())))
+        });
+        let internet = config.as_ref().is_none_or(|c| c.borrow().internet);
+        let base = match (rule, &library.source) {
+            (Some((Some(base), true)), _) => base,
+            (_, scoreart_synth::catalog::Source::Repository { base, .. }) if internet => base.to_string(),
+            _ => return,
+        };
         let mem = self.stores.borrow_mut().entry(library.id).or_default().clone();
         *self.download.borrow_mut() = Some(scoreart_ui_egui::DownloadStatus {
             library: library.name.to_string(),
@@ -287,7 +423,7 @@ impl Host for WebHost {
         );
         let instrument = instrument.to_string();
         wasm_bindgen_futures::spawn_local(async move {
-            let r = download_instrument(library, instrument, mem, status.clone(), cancel)
+            let r = download_instrument(library, base, instrument, mem, status.clone(), cancel)
                 .await
                 .map_err(|e| format!("{}: {e}", library.name));
             *status.borrow_mut() = None;
@@ -302,6 +438,47 @@ impl Host for WebHost {
 
     fn cancel_download(&mut self) {
         self.cancel.set(true);
+    }
+
+    fn host_language(&self) -> Option<String> {
+        query_param("lang").filter(|l| !l.trim().is_empty())
+    }
+
+    fn library_allowed(&self, library: &str) -> bool {
+        self.config()
+            .is_none_or(|c| c.borrow().libraries.get(library).is_none_or(|r| r.enabled))
+    }
+
+    fn provided_instruments(&self, library: &str) -> Option<Vec<String>> {
+        let c = self.config()?;
+        let c = c.borrow();
+        let r = c.libraries.get(library)?;
+        r.base.as_ref().map(|_| r.instruments.clone())
+    }
+
+    fn internet_downloads(&self) -> bool {
+        self.config().is_none_or(|c| c.borrow().internet)
+    }
+
+    fn host_sounds(&self) -> Vec<String> {
+        self.config()
+            .map(|c| c.borrow().files.iter().map(|f| f.0.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    fn load_host_sounds(&mut self, name: &str) {
+        let Some(url) = self
+            .config()
+            .and_then(|c| c.borrow().files.iter().find(|f| f.0 == name).map(|f| f.1.clone()))
+        else {
+            return;
+        };
+        let (name, sounds, ctx) = (name.to_string(), self.sounds.clone(), self.ctx.clone());
+        wasm_bindgen_futures::spawn_local(async move {
+            let r = load_host_file(name, url).await;
+            sounds.borrow_mut().push(r);
+            ctx.request_repaint();
+        });
     }
 
     fn midi_ports(&mut self) -> Vec<String> {
@@ -433,13 +610,23 @@ pub fn start() {
                 eframe::WebOptions::default(),
                 Box::new(move |cc| {
                     let inbox: Inbox = Rc::default();
+                    let sounds = SoundInbox::default();
                     let mut session = Session::default();
+                    // The language first, so a new score gets its title in it.
+                    use scoreart_ui_egui::i18n::{Lang, set_lang, t};
+                    let lang = query_param("lang")
+                        .or_else(|| crate::midi::load_setting("language"))
+                        .or_else(|| web_sys::window().and_then(|w| w.navigator().language()));
+                    set_lang(lang.map_or(Lang::En, |l| Lang::from_code(&l)));
                     if app_bridge.is_some() || query_param("new").is_some() {
-                        let _ = session.execute("file.new", &serde_json::json!({ "measures": 16 }));
+                        let _ = session.execute(
+                            "file.new",
+                            &serde_json::json!({ "measures": 16, "title": t("Untitled score") }),
+                        );
                         session.dirty = false;
                     }
                     if let Some(b) = &app_bridge {
-                        b.listen(inbox.clone(), cc.egui_ctx.clone());
+                        b.listen(inbox.clone(), sounds.clone(), cc.egui_ctx.clone());
                     }
                     let host = WebHost {
                         inbox: inbox.clone(),
@@ -447,7 +634,7 @@ pub fn start() {
                         bridge: app_bridge.clone(),
                         audio: crate::audio::WebAudio::default(),
                         rate: 44_100,
-                        sounds: SoundInbox::default(),
+                        sounds,
                         stores: Rc::default(),
                         download: Rc::default(),
                         cancel: Rc::default(),

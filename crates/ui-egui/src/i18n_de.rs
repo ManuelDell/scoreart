@@ -5,6 +5,7 @@ pub const DE: &[(&str, &str)] = &[
         "    Staves the new instrument does not have become extra voices.",
         "    Systeme, die das neue Instrument nicht hat, werden zu zusätzlichen Stimmen.",
     ),
+    (" (on the server)", " (auf dem Server)"),
     (" semitones", " Halbtöne"),
     ("(by instrument)", "(nach Instrument)"),
     ("(remove the change)", "(Wechsel entfernen)"),
@@ -346,12 +347,14 @@ pub const DE: &[(&str, &str)] = &[
     ("Line or page break", "Zeilen- oder Seitenumbruch"),
     ("Lines", "Linien"),
     ("List sound libraries", "Klangbibliotheken auflisten"),
+    ("Load \"{}\"", "„{}“ laden"),
     ("Load SFZ folder…", "SFZ-Ordner laden…"),
     ("Load sounds…", "Klänge laden…"),
     (
         "Loaded sounds \"{}\" ({} presets)",
         "Klänge „{}“ geladen ({} Presets)",
     ),
+    ("Loading {} …", "Lade {} …"),
     ("Long fermata", "Lange Fermate"),
     ("Long fermata (Henze)", "Lange Fermate (Henze)"),
     (
@@ -507,6 +510,10 @@ pub const DE: &[(&str, &str)] = &[
     ("Previous measure", "Voriger Takt"),
     ("Previous note", "Vorige Note"),
     ("Properties", "Eigenschaften"),
+    (
+        "Provided by your administrator",
+        "Von deinem Administrator bereitgestellt",
+    ),
     ("Quarter note", "Viertelnote"),
     ("Redo", "Wiederherstellen"),
     ("Redo    Ctrl+Y", "Wiederherstellen    Strg+Y"),
@@ -743,6 +750,10 @@ pub const DE: &[(&str, &str)] = &[
     (
         "You are about to download \"{}\" ({}).",
         "Du lädst gleich „{}“ ({}) herunter.",
+    ),
+    (
+        "Your administrator has turned off downloads from the internet; only instruments kept on the server can be loaded.",
+        "Dein Administrator hat das Herunterladen aus dem Internet abgeschaltet; nur Instrumente, die auf dem Server liegen, können geladen werden.",
     ),
     ("Zoom 100%    Ctrl+0", "Zoom 100 %    Strg+0"),
     ("Zoom in", "Vergrößern"),

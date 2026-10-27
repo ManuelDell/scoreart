@@ -74,7 +74,11 @@ pub fn window(app: &mut ScoreApp, ctx: &egui::Context) {
     let tk = Tokens::get(ctx);
     let mut open = true;
     let status = app.host.download_status();
-    let libs = catalog::libraries();
+    let libs: Vec<&'static Library> = catalog::libraries()
+        .iter()
+        .filter(|l| app.host.library_allowed(l.name))
+        .collect();
+    let offered = app.host.host_sounds();
     egui::Window::new(t("Free sound libraries"))
         .open(&mut open)
         .default_width(780.0)
@@ -85,7 +89,33 @@ pub fn window(app: &mut ScoreApp, ctx: &egui::Context) {
             ui.label(t(
                 "ScoreArt can fetch these free libraries for you. None of them is part of ScoreArt: an instrument is downloaded only after you have read and accepted its licence, directly from the publisher's public source. The licence and a record of your acceptance are saved next to the files.",
             ));
-            if !app.host.can_download() {
+            if !offered.is_empty() {
+                ui.separator();
+                ui.label(RichText::new(t("Provided by your administrator")).strong());
+                ui.horizontal_wrapped(|ui| {
+                    for name in &offered {
+                        let loaded = app.session.sounds.iter().any(|b| &b.name == name);
+                        let label = if loaded {
+                            format!("✓ {name}")
+                        } else {
+                            tf("Load \"{}\"", &[name])
+                        };
+                        if ui.add_enabled(!loaded, egui::Button::new(label)).clicked() {
+                            app.host.load_host_sounds(name);
+                            app.session.status = tf("Loading {} …", &[name]);
+                        }
+                    }
+                });
+                ui.separator();
+            }
+            if !app.host.internet_downloads() {
+                ui.label(
+                    RichText::new(t(
+                        "Your administrator has turned off downloads from the internet; only instruments kept on the server can be loaded.",
+                    ))
+                    .color(tk.text_dim),
+                );
+            } else if !app.host.can_download() {
                 ui.label(
                     RichText::new(t("Downloading is not available here; use the source links and \"Load sounds…\"."))
                         .color(tk.text_dim),
@@ -214,11 +244,14 @@ fn instruments(
                 .filter(|i| f.is_empty() || i.to_lowercase().contains(&f))
             {
                 let done = installed(app, lib, inst);
-                let label = if done {
+                let mut label = if done {
                     format!("✓ {}", catalog::instrument_name(inst))
                 } else {
                     catalog::instrument_name(inst).to_string()
                 };
+                if on_server(app, lib, inst) {
+                    label.push_str(t(" (on the server)"));
+                }
                 let r = ui.selectable_label(st.instrument == Some(*inst), label);
                 let r = if inst.contains('/') {
                     r.on_hover_text(*inst)
@@ -232,7 +265,7 @@ fn instruments(
         });
     ui.add_space(4.0);
     if let Some(inst) = st.instrument {
-        let can = app.host.can_download() && !busy;
+        let can = obtainable(app, lib, inst) && !busy;
         let label = tf("Download \"{}\"…", &[&catalog::instrument_name(inst)]);
         if ui.add_enabled(can, egui::Button::new(label)).clicked() {
             st.confirm = Some(inst);
@@ -247,6 +280,19 @@ fn instruments(
             );
         }
     }
+}
+
+/// Whether the host keeps a copy of this instrument.
+fn on_server(app: &ScoreApp, lib: &Library, inst: &str) -> bool {
+    app.host
+        .provided_instruments(lib.name)
+        .is_some_and(|l| l.iter().any(|i| i == inst))
+}
+
+/// Whether this instrument can be fetched: from the host's copy, or from the internet when that
+/// is allowed.
+fn obtainable(app: &ScoreApp, lib: &Library, inst: &str) -> bool {
+    app.host.can_download() && (on_server(app, lib, inst) || app.host.internet_downloads())
 }
 
 /// The licence confirmation: the whole licence statement and an explicit tick before anything

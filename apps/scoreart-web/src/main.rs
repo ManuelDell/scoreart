@@ -8,7 +8,16 @@
 //!   - `scoreart:save` (to the parent) `{ name, bytes }` for Save and every export.
 //!   - `scoreart:dirty` (to the parent) `{ dirty }` when unsaved changes appear or go away.
 //!
+//!   - `scoreart:config` (from the parent, before or after `open`) — what the host's administrator
+//!     set up: `{ internet: bool, libraries: [{ name, enabled, base?, instruments? }],
+//!     files: [{ name, url, autoload }] }`. `libraries` names catalogue libraries: hidden when
+//!     `enabled` is false; with `base` (a same-origin path ending in `/`, laid out like the
+//!     library's repository) the listed `instruments` are fetched from there instead of the
+//!     internet. `internet: false` allows only such server copies. `files` are sound files
+//!     (.sf2, .sfz, zip) on the server, loaded at start when `autoload`, else on request.
+//!
 //!   Only the parent window on the page's own origin is heard or answered.
+//! - `?lang=de` — the interface language the host wants (e.g. the Nextcloud user's).
 //! - `?new` — start with an empty piano score instead of the sample.
 #![deny(
     clippy::unwrap_used,

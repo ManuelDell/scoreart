@@ -104,6 +104,30 @@ pub trait Host {
         None
     }
     fn save_setting(&mut self, _name: &str, _value: &str) {}
+    /// The language the host page asks for (e.g. the Nextcloud user's); it wins over the saved
+    /// choice.
+    fn host_language(&self) -> Option<String> {
+        None
+    }
+    /// Whether a catalogue library may be offered (an administrator can hide libraries).
+    fn library_allowed(&self, _library: &str) -> bool {
+        true
+    }
+    /// The instruments of a catalogue library the host keeps a copy of (fetched from there
+    /// instead of the internet), if it keeps one.
+    fn provided_instruments(&self, _library: &str) -> Option<Vec<String>> {
+        None
+    }
+    /// Whether catalogue libraries may be fetched from the internet.
+    fn internet_downloads(&self) -> bool {
+        true
+    }
+    /// Sound libraries the host offers (by name), e.g. files an administrator provides.
+    fn host_sounds(&self) -> Vec<String> {
+        Vec::new()
+    }
+    /// Loads one of [`Host::host_sounds`]; it arrives through [`Host::take_sounds`].
+    fn load_host_sounds(&mut self, _name: &str) {}
     /// The system's or browser's language ("de-DE", "en_US.UTF-8" …).
     fn locale(&self) -> Option<String> {
         None
@@ -215,7 +239,8 @@ impl ScoreApp {
 
     pub fn new(ctx: &egui::Context, session: Session, host: Box<dyn Host>) -> ScoreApp {
         let lang = host
-            .load_setting("language")
+            .host_language()
+            .or_else(|| host.load_setting("language"))
             .or_else(|| host.locale())
             .map_or(i18n::Lang::En, |c| i18n::Lang::from_code(&c));
         i18n::set_lang(lang);
