@@ -470,10 +470,14 @@ fn page_format_and_view() {
 #[test]
 fn midi_keys_enter_notes_and_chords() {
     let mut s = blank();
-    assert!(s.execute("note.midi", &json!({ "key": 60 })).is_err(), "only in note input");
+    assert!(
+        s.execute("note.midi", &json!({ "key": 60 })).is_err(),
+        "only in note input"
+    );
     s.execute("input.toggle", &json!({})).unwrap();
     s.execute("note.midi", &json!({ "key": 61 })).unwrap();
-    s.execute("note.midi", &json!({ "key": 64, "chord": true })).unwrap();
+    s.execute("note.midi", &json!({ "key": 64, "chord": true }))
+        .unwrap();
     s.execute("note.midi", &json!({ "key": 67 })).unwrap();
     let v = s.score.voice(0, 0, 0, 0).unwrap();
     let names: Vec<Vec<String>> = v.events[..2]

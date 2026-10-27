@@ -35,7 +35,8 @@ pub(crate) struct MidiUi {
 /// after the user allowed access; devices get plugged in).
 fn scan_due(ui: &egui::Ui, next: &mut f64) -> bool {
     let now = ui.input(|i| i.time);
-    ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(500));
     if now >= *next {
         *next = now + 1.0;
         true
