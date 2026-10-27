@@ -46,7 +46,7 @@ fn licence_box(ui: &mut egui::Ui, lib: &Library, tk: &Tokens) {
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(t("Licence:")).strong());
-                ui.hyperlink_to(l.name, l.url);
+                ui.add(egui::Hyperlink::from_label_and_url(l.name, l.url).open_in_new_tab(true));
             });
             ui.label(RichText::new(t("The licence allows you to")).strong());
             for a in l.allows {
@@ -181,7 +181,7 @@ pub fn window(app: &mut ScoreApp, ctx: &egui::Context) {
                     ui.add_space(6.0);
                     match lib.source {
                         Source::Website { url } => {
-                            ui.hyperlink_to(t("Open the publisher's website to download"), url);
+                            ui.add(egui::Hyperlink::from_label_and_url(t("Open the publisher's website to download"), url).open_in_new_tab(true));
                             ui.label(
                                 RichText::new(t("After downloading, load the file with Mixer → Load sounds…")).color(tk.text_dim),
                             );
@@ -189,7 +189,7 @@ pub fn window(app: &mut ScoreApp, ctx: &egui::Context) {
                         Source::Repository { page, .. } => {
                             ui.horizontal_wrapped(|ui| {
                                 ui.label(t("Source:"));
-                                ui.hyperlink_to(page, page);
+                                ui.add(egui::Hyperlink::from_label_and_url(page, page).open_in_new_tab(true));
                             });
                             instruments(app, ui, lib, &mut st, &tk, status.is_some());
                         }
@@ -319,7 +319,7 @@ fn confirm(
         if let Source::Repository { page, .. } = lib.source {
             ui.horizontal_wrapped(|ui| {
                 ui.label(t("Files come from:"));
-                ui.hyperlink_to(page, page);
+                ui.add(egui::Hyperlink::from_label_and_url(page, page).open_in_new_tab(true));
             });
         }
         ui.checkbox(
