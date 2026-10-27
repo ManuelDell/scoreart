@@ -67,6 +67,9 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   vertical view; **Format → Page settings**: paper size (A4, Letter, A3 …), portrait or
   landscape, all four margins, staff size, distances between staves, instruments and systems,
   note spacing. Saved in the file (MusicXML `<defaults>`), read from MuseScore styles.
+- **Languages**: the whole interface in **English and German** (*View → Language*; the
+  system or browser language is used at first and the choice is remembered). Every text has
+  to have a German translation: a test fails otherwise (`crates/ui-egui/src/i18n_de.rs`).
 - **MIDI keyboard input** (desktop and browser): connect a device, play notes and chords into
   the score; **every key and controller can be given its own action** (note value, rest, tie,
   undo, play …) by clicking it on the keyboard picture or with *Learn*. Bindings are kept.

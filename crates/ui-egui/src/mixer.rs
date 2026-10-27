@@ -11,6 +11,8 @@ use serde_json::json;
 use crate::ScoreApp;
 use crate::theme::Tokens;
 
+use crate::i18n::{t, tf};
+
 /// Mixer state kept by the app between frames.
 #[derive(Default)]
 pub struct Mixer {
@@ -56,21 +58,21 @@ impl ScoreApp {
         let name = bank.name.clone();
         self.session.sounds.retain(|b| b.name != name);
         self.session.sounds.push(Arc::new(bank));
-        self.session.status = format!("Loaded sounds \"{name}\" ({n} presets)");
+        self.session.status = tf("Loaded sounds \"{}\" ({} presets)", &[&name, &n]);
     }
 
     fn remove_sounds(&mut self, name: &str) {
         self.session.sounds.retain(|b| b.name != name);
         self.host.forget_sounds(name);
-        self.session.status = format!("Removed sounds \"{name}\"");
+        self.session.status = tf("Removed sounds \"{}\"", &[&name]);
     }
 }
 
 fn sound_label(sound: &PartSound) -> String {
     if sound.library.is_empty() {
-        "Automatic".into()
+        t("Automatic").into()
     } else if sound.library == PartSound::BUILT_IN {
-        "Built-in".into()
+        t("Built-in").into()
     } else {
         // The preset has its own list below.
         sound.library.clone()
@@ -78,58 +80,60 @@ fn sound_label(sound: &PartSound) -> String {
 }
 
 pub fn panel(app: &mut ScoreApp, ui: &mut egui::Ui) {
-    let t = Tokens::get(ui.ctx());
+    let tk = Tokens::get(ui.ctx());
     app.mixer.sync(&app.session.score, app.session.revision);
     let playing = app.is_playing();
     egui::Panel::bottom("mixer")
         .resizable(true)
         .default_size(250.0)
-        .frame(egui::Frame::NONE.fill(t.panel).inner_margin(10))
+        .frame(egui::Frame::NONE.fill(tk.panel).inner_margin(10))
         .show(ui, |ui| {
             // Libraries.
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("Mixer").strong());
+                ui.label(RichText::new(t("Mixer")).strong());
                 if ui
-                    .button("Instruments…")
-                    .on_hover_text("Add, change, order and split instruments (I)")
+                    .button(t("Instruments…"))
+                    .on_hover_text(t("Add, change, order and split instruments (I)"))
                     .clicked()
                 {
                     app.open_instruments();
                 }
                 ui.separator();
-                ui.label(RichText::new("Sounds:").color(t.text_dim));
+                ui.label(RichText::new(t("Sounds:")).color(tk.text_dim));
                 let names: Vec<String> = app.session.sounds.iter().map(|b| b.name.clone()).collect();
                 if names.is_empty() {
-                    ui.label(RichText::new("built-in only").color(t.text_dim));
+                    ui.label(RichText::new(t("built-in only")).color(tk.text_dim));
                 }
                 for name in names {
                     ui.label(&name);
                     if ui
                         .small_button("✕")
-                        .on_hover_text("Remove this library")
+                        .on_hover_text(t("Remove this library"))
                         .clicked()
                     {
                         app.remove_sounds(&name);
                     }
                 }
                 if ui
-                    .button("Load sounds…")
-                    .on_hover_text("A SoundFont (.sf2), an SFZ instrument (.sfz) or a zip of SFZ instruments")
+                    .button(t("Load sounds…"))
+                    .on_hover_text(t(
+                        "A SoundFont (.sf2), an SFZ instrument (.sfz) or a zip of SFZ instruments",
+                    ))
                     .clicked()
                 {
                     app.host.request_sounds(false);
                 }
                 if ui
-                    .button("Get free sounds…")
-                    .on_hover_text("Free libraries (orchestra, piano …) with their licences")
+                    .button(t("Get free sounds…"))
+                    .on_hover_text(t("Free libraries (orchestra, piano …) with their licences"))
                     .clicked()
                 {
                     app.open_catalog();
                 }
                 if app.host.can_load_folders()
                     && ui
-                        .button("Load SFZ folder…")
-                        .on_hover_text("A folder with .sfz instruments and their samples")
+                        .button(t("Load SFZ folder…"))
+                        .on_hover_text(t("A folder with .sfz instruments and their samples"))
                         .clicked()
                 {
                     app.host.request_sounds(true);
@@ -146,7 +150,7 @@ pub fn panel(app: &mut ScoreApp, ui: &mut egui::Ui) {
             egui::ScrollArea::horizontal().show(ui, |ui| {
                 ui.horizontal_top(|ui| {
                     for (pi, (name, sound)) in parts.iter().enumerate() {
-                        strip(app, ui, pi, name, sound, playing, &t);
+                        strip(app, ui, pi, name, sound, playing, &tk);
                         ui.separator();
                     }
                 });
@@ -164,7 +168,7 @@ fn strip(
     name: &str,
     sound: &PartSound,
     playing: bool,
-    t: &Tokens,
+    tk: &Tokens,
 ) {
     let controls = app.mixer.controls.clone();
     ui.vertical(|ui| {
@@ -174,7 +178,7 @@ fn strip(
             let mut shown = app.session.score.parts.get(pi).is_none_or(|p| p.visible());
             if ui
                 .checkbox(&mut shown, "")
-                .on_hover_text("Show this instrument in the score (hidden ones still play)")
+                .on_hover_text(t("Show this instrument in the score (hidden ones still play)"))
                 .changed()
             {
                 app.run("part.visible", json!({ "part": pi, "visible": shown }));
@@ -208,21 +212,21 @@ fn strip(
             }
             let level = app.mixer.meters.get(pi).copied().unwrap_or(0.0).min(1.0);
             let (rect, _) = ui.allocate_exact_size(Vec2::new(8.0, 110.0), egui::Sense::hover());
-            ui.painter().rect_filled(rect, 2.0, t.canvas);
+            ui.painter().rect_filled(rect, 2.0, tk.canvas);
             let mut fill = rect;
             fill.set_top(rect.bottom() - rect.height() * level.sqrt());
             let color = if level > 0.9 {
                 egui::Color32::from_rgb(220, 70, 60)
             } else {
-                t.accent
+                tk.accent
             };
             ui.painter().rect_filled(fill, 2.0, color);
             ui.vertical(|ui| {
-                ui.label(RichText::new(format!("{vol:.0}")).color(t.text_dim));
+                ui.label(RichText::new(format!("{vol:.0}")).color(tk.text_dim));
                 let mute = controls.mute(pi);
                 if ui
                     .add(egui::Button::new("M").selected(mute))
-                    .on_hover_text("Mute")
+                    .on_hover_text(t("Mute"))
                     .clicked()
                 {
                     controls.set_mute(pi, !mute);
@@ -230,7 +234,7 @@ fn strip(
                 let solo = controls.solo(pi);
                 if ui
                     .add(egui::Button::new("S").selected(solo))
-                    .on_hover_text("Solo")
+                    .on_hover_text(t("Solo"))
                     .clicked()
                 {
                     controls.set_solo(pi, !solo);
@@ -244,9 +248,9 @@ fn strip(
             .add(
                 egui::Slider::new(&mut pan, -100.0..=100.0)
                     .show_value(false)
-                    .text("Pan"),
+                    .text(t("Pan")),
             )
-            .on_hover_text("Left … right (double-click: centre)");
+            .on_hover_text(t("Left … right (double-click: centre)"));
         if r.double_clicked() {
             controls.set_pan(pi, 0.0);
             app.run("part.mix", json!({ "part": pi, "pan": 0 }));
@@ -277,13 +281,13 @@ pub(crate) fn sound_picker(
         .selected_text(sound_label(sound))
         .show_ui(ui, |ui| {
             if ui
-                .selectable_label(sound.library.is_empty(), "Automatic")
+                .selectable_label(sound.library.is_empty(), t("Automatic"))
                 .clicked()
             {
                 choice = Some((String::new(), String::new()));
             }
             if ui
-                .selectable_label(sound.library == PartSound::BUILT_IN, "Built-in (ScoreArt)")
+                .selectable_label(sound.library == PartSound::BUILT_IN, t("Built-in (ScoreArt)"))
                 .clicked()
             {
                 choice = Some((PartSound::BUILT_IN.into(), String::new()));
@@ -313,7 +317,7 @@ pub(crate) fn sound_picker(
             .width(width)
             .height(320.0)
             .selected_text(if sound.preset.is_empty() {
-                "(by instrument)".to_string()
+                t("(by instrument)").to_string()
             } else {
                 sound
                     .preset
@@ -327,7 +331,7 @@ pub(crate) fn sound_picker(
                     && let Some(f) = app.mixer.filter.get_mut(pi)
                 {
                     // Typing goes to the search, never to the score.
-                    let r = ui.add(egui::TextEdit::singleline(f).hint_text("Search…"));
+                    let r = ui.add(egui::TextEdit::singleline(f).hint_text(t("Search…")));
                     if !r.has_focus() {
                         r.request_focus();
                     }

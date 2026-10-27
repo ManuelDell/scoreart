@@ -10,6 +10,8 @@ use serde_json::json;
 use crate::ScoreApp;
 use crate::theme::Tokens;
 
+use crate::i18n::t;
+
 const MAP_SETTING: &str = "midi-map";
 const PORT_SETTING: &str = "midi-port";
 
@@ -49,8 +51,8 @@ fn scan_due(ui: &egui::Ui, next: &mut f64) -> bool {
 pub(crate) fn poll(app: &mut ScoreApp) {
     if !app.midi.loaded {
         app.midi.loaded = true;
-        if let Some(t) = app.host.load_setting(MAP_SETTING) {
-            app.midi.map = MidiMap::from_json(&t);
+        if let Some(text) = app.host.load_setting(MAP_SETTING) {
+            app.midi.map = MidiMap::from_json(&text);
         }
         if let Some(port) = app
             .host
@@ -94,9 +96,9 @@ fn save(app: &mut ScoreApp) {
 
 fn action_label(a: &MidiAction) -> String {
     match a {
-        MidiAction::Note => "Enter the note".into(),
-        MidiAction::Ignore => "Nothing".into(),
-        MidiAction::Action(id) => action(id).map_or_else(|| id.clone(), |s| s.label.to_string()),
+        MidiAction::Note => t("Enter the note").into(),
+        MidiAction::Ignore => t("Nothing").into(),
+        MidiAction::Action(id) => action(id).map_or_else(|| id.clone(), |s| t(s.label).to_string()),
     }
 }
 
@@ -104,59 +106,59 @@ pub(crate) fn window(app: &mut ScoreApp, ctx: &egui::Context) {
     if !app.midi.open {
         return;
     }
-    let t = Tokens::get(ctx);
+    let tk = Tokens::get(ctx);
     let mut open = true;
-    egui::Window::new("MIDI input")
+    egui::Window::new(t("MIDI input"))
         .open(&mut open)
         .default_width(720.0)
         .pivot(egui::Align2::CENTER_TOP)
         .default_pos(egui::pos2(ctx.content_rect().center().x, 60.0))
         .show(ctx, |ui| {
-            device_row(app, ui, &t);
+            device_row(app, ui, &tk);
             ui.separator();
             ui.horizontal(|ui| {
-                ui.label("Channel");
+                ui.label(t("Channel"));
                 let mut ch = app.midi.map.channel;
                 egui::ComboBox::from_id_salt("midi-channel")
-                    .selected_text(ch.map_or("All".to_string(), |c| c.to_string()))
+                    .selected_text(ch.map_or(t("All").to_string(), |c| c.to_string()))
                     .width(60.0)
                     .height(320.0)
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut ch, None, "All");
+                        ui.selectable_value(&mut ch, None, t("All"));
                         for c in 1..=16u8 {
                             ui.selectable_value(&mut ch, Some(c), c.to_string());
                         }
                     });
                 let mut tr = app.midi.map.transpose;
-                ui.label("Transpose");
-                ui.add(egui::DragValue::new(&mut tr).range(-36..=36).suffix(" semitones"));
+                ui.label(t("Transpose"));
+                ui.add(egui::DragValue::new(&mut tr).range(-36..=36).suffix(t(" semitones")));
                 if ch != app.midi.map.channel || tr != app.midi.map.transpose {
                     app.midi.map.channel = ch;
                     app.midi.map.transpose = tr;
                     save(app);
                 }
                 ui.separator();
-                ui.label(RichText::new("Last pressed:").color(t.text_dim));
-                ui.label(app.midi.last.map_or("—".to_string(), Trigger::label));
+                ui.label(RichText::new(t("Last pressed:")).color(tk.text_dim));
+                ui.label(app.midi.last.map_or("—".to_string(), |x| crate::i18n::tr(&x.label())));
             });
             ui.add_space(4.0);
             ui.label(
                 RichText::new(
-                    "Click a key below, or press Learn and then a key, pad, button or pedal on the device, to choose what it does.",
+                    t("Click a key below, or press Learn and then a key, pad, button or pedal on the device, to choose what it does."),
                 )
-                .color(t.text_dim),
+                .color(tk.text_dim),
             );
-            keyboard(app, ui, &t);
+            keyboard(app, ui, &tk);
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 let learn = app.midi.learn;
                 if ui
-                    .add(egui::Button::new(if learn { "Press a key or control…" } else { "Learn" }).selected(learn))
+                    .add(egui::Button::new(if learn { t("Press a key or control…") } else { t("Learn") }).selected(learn))
                     .clicked()
                 {
                     app.midi.learn = !learn;
                 }
-                ui.label("or controller");
+                ui.label(t("or controller"));
                 let mut cc = match app.midi.selected {
                     Some(Trigger::Control(c)) => i32::from(c),
                     _ => -1,
@@ -171,9 +173,9 @@ pub(crate) fn window(app: &mut ScoreApp, ctx: &egui::Context) {
                     app.midi.selected = Some(Trigger::Control(cc as u8));
                 }
             });
-            binding_row(app, ui, &t);
+            binding_row(app, ui, &tk);
             ui.separator();
-            bindings_list(app, ui, &t);
+            bindings_list(app, ui, &tk);
         });
     if !open {
         app.midi.open = false;
@@ -181,16 +183,19 @@ pub(crate) fn window(app: &mut ScoreApp, ctx: &egui::Context) {
     }
 }
 
-fn device_row(app: &mut ScoreApp, ui: &mut egui::Ui, t: &Tokens) {
+fn device_row(app: &mut ScoreApp, ui: &mut egui::Ui, tk: &Tokens) {
     ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new("Device").strong());
+        ui.label(RichText::new(t("Device")).strong());
         let current = app.host.midi_connected();
         let mut pick: Option<Option<String>> = None;
         egui::ComboBox::from_id_salt("midi-port")
-            .selected_text(current.clone().unwrap_or_else(|| "Not connected".into()))
+            .selected_text(current.clone().unwrap_or_else(|| t("Not connected").into()))
             .width(260.0)
             .show_ui(ui, |ui| {
-                if ui.selectable_label(current.is_none(), "Not connected").clicked() {
+                if ui
+                    .selectable_label(current.is_none(), t("Not connected"))
+                    .clicked()
+                {
                     pick = Some(None);
                 }
                 for p in &app.midi.ports {
@@ -200,14 +205,14 @@ fn device_row(app: &mut ScoreApp, ui: &mut egui::Ui, t: &Tokens) {
                 }
             });
         if ui
-            .button("Refresh")
-            .on_hover_text("Look for devices again (plug the device in first)")
+            .button(t("Refresh"))
+            .on_hover_text(t("Look for devices again (plug the device in first)"))
             .clicked()
             || app.midi.ports.is_empty() && scan_due(ui, &mut app.midi.next_scan)
         {
             app.midi.ports = app.host.midi_ports();
             app.midi.error = if app.midi.ports.is_empty() {
-                "No MIDI devices found.".into()
+                t("No MIDI devices found.").into()
             } else {
                 String::new()
             };
@@ -222,18 +227,18 @@ fn device_row(app: &mut ScoreApp, ui: &mut egui::Ui, t: &Tokens) {
             }
         }
         if !app.midi.error.is_empty() {
-            ui.label(RichText::new(&app.midi.error).color(t.text_dim));
+            ui.label(RichText::new(&app.midi.error).color(tk.text_dim));
         }
     });
     ui.label(
-        RichText::new("Played keys enter notes in note input (N); keys pressed together make a chord. Outside note input they only sound.")
+        RichText::new(t("Played keys enter notes in note input (N); keys pressed together make a chord. Outside note input they only sound."))
             .small()
-            .color(t.text_dim),
+            .color(tk.text_dim),
     );
 }
 
 /// An 88-key keyboard (A0–C8): bound keys are coloured, the selected one outlined.
-fn keyboard(app: &mut ScoreApp, ui: &mut egui::Ui, t: &Tokens) {
+fn keyboard(app: &mut ScoreApp, ui: &mut egui::Ui, tk: &Tokens) {
     const LOW: u8 = 21;
     const HIGH: u8 = 108;
     let black = |k: u8| matches!(k % 12, 1 | 3 | 6 | 8 | 10);
@@ -273,7 +278,7 @@ fn keyboard(app: &mut ScoreApp, ui: &mut egui::Ui, t: &Tokens) {
         match app.midi.map.binding(Trigger::Key(k)) {
             MidiAction::Note => base,
             MidiAction::Ignore => Color32::from_gray(150),
-            MidiAction::Action(_) => t.accent,
+            MidiAction::Action(_) => tk.accent,
         }
     };
     for (k, r) in &rects {
@@ -324,16 +329,16 @@ fn keyboard(app: &mut ScoreApp, ui: &mut egui::Ui, t: &Tokens) {
 }
 
 /// The selected key or controller and the choice of what it does.
-fn binding_row(app: &mut ScoreApp, ui: &mut egui::Ui, t: &Tokens) {
+fn binding_row(app: &mut ScoreApp, ui: &mut egui::Ui, tk: &Tokens) {
     let Some(sel) = app.midi.selected else {
-        ui.label(RichText::new("No key selected.").color(t.text_dim));
+        ui.label(RichText::new(t("No key selected.")).color(tk.text_dim));
         return;
     };
     let current = app.midi.map.binding(sel);
     let mut choice: Option<MidiAction> = None;
     ui.horizontal(|ui| {
-        ui.label(RichText::new(sel.label()).strong());
-        ui.label("does");
+        ui.label(RichText::new(crate::i18n::tr(&sel.label())).strong());
+        ui.label(t("does"));
         egui::ComboBox::from_id_salt("midi-action")
             .selected_text(action_label(&current))
             .width(220.0)
@@ -341,13 +346,13 @@ fn binding_row(app: &mut ScoreApp, ui: &mut egui::Ui, t: &Tokens) {
             .show_ui(ui, |ui| {
                 if matches!(sel, Trigger::Key(_))
                     && ui
-                        .selectable_label(current == MidiAction::Note, "Enter the note")
+                        .selectable_label(current == MidiAction::Note, t("Enter the note"))
                         .clicked()
                 {
                     choice = Some(MidiAction::Note);
                 }
                 if ui
-                    .selectable_label(current == MidiAction::Ignore, "Nothing")
+                    .selectable_label(current == MidiAction::Ignore, t("Nothing"))
                     .clicked()
                 {
                     choice = Some(MidiAction::Ignore);
@@ -355,7 +360,7 @@ fn binding_row(app: &mut ScoreApp, ui: &mut egui::Ui, t: &Tokens) {
                 ui.separator();
                 for a in ACTIONS {
                     let this = MidiAction::Action(a.id.to_string());
-                    if ui.selectable_label(current == this, a.label).clicked() {
+                    if ui.selectable_label(current == this, t(a.label)).clicked() {
                         choice = Some(this);
                     }
                 }
@@ -367,7 +372,7 @@ fn binding_row(app: &mut ScoreApp, ui: &mut egui::Ui, t: &Tokens) {
     }
 }
 
-fn bindings_list(app: &mut ScoreApp, ui: &mut egui::Ui, t: &Tokens) {
+fn bindings_list(app: &mut ScoreApp, ui: &mut egui::Ui, tk: &Tokens) {
     let mut rows: Vec<(Trigger, MidiAction)> = app
         .midi
         .map
@@ -384,15 +389,15 @@ fn bindings_list(app: &mut ScoreApp, ui: &mut egui::Ui, t: &Tokens) {
         .collect();
     rows.sort_by_key(|(t, _)| *t);
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Assigned").strong());
-        if !rows.is_empty() && ui.button("Reset all").clicked() {
+        ui.label(RichText::new(t("Assigned")).strong());
+        if !rows.is_empty() && ui.button(t("Reset all")).clicked() {
             app.midi.map.keys.clear();
             app.midi.map.controls.clear();
             save(app);
         }
     });
     if rows.is_empty() {
-        ui.label(RichText::new("Every key enters its note; controllers do nothing.").color(t.text_dim));
+        ui.label(RichText::new(t("Every key enters its note; controllers do nothing.")).color(tk.text_dim));
         return;
     }
     let mut remove: Option<Trigger> = None;
@@ -402,13 +407,13 @@ fn bindings_list(app: &mut ScoreApp, ui: &mut egui::Ui, t: &Tokens) {
             .num_columns(3)
             .show(ui, |ui| {
                 for (trig, a) in &rows {
-                    if ui.link(trig.label()).clicked() {
+                    if ui.link(crate::i18n::tr(&trig.label())).clicked() {
                         app.midi.selected = Some(*trig);
                     }
                     ui.label(action_label(a));
                     if ui
                         .small_button("✕")
-                        .on_hover_text("Back to the default")
+                        .on_hover_text(t("Back to the default"))
                         .clicked()
                     {
                         remove = Some(*trig);

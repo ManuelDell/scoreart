@@ -61,11 +61,11 @@ impl ScoreApp {
                     at: None,
                 });
                 self.session.status = match warnings.first() {
-                    Some(w) => format!("Playing — {w}"),
-                    None => "Playing — Space stops".into(),
+                    Some(w) => crate::i18n::tf("Playing — {}", &[&crate::i18n::tr(w)]),
+                    None => crate::i18n::t("Playing — Space stops").into(),
                 };
             }
-            Err(e) => self.session.status = format!("Playback: {e}"),
+            Err(e) => self.session.status = crate::i18n::tf("Playback: {}", &[&crate::i18n::tr(&e)]),
         }
     }
 

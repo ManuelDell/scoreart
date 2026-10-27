@@ -7,6 +7,8 @@ use scoreart_synth::catalog::{self, Library, Source};
 use crate::ScoreApp;
 use crate::theme::Tokens;
 
+use crate::i18n::{t, tf};
+
 /// A download in progress, as the host reports it.
 #[derive(Clone, Debug, Default)]
 pub struct DownloadStatus {
@@ -35,58 +37,58 @@ fn installed(app: &ScoreApp, lib: &Library, instrument: &str) -> bool {
         .any(|b| b.presets().iter().any(|p| p.name == preset))
 }
 
-fn licence_box(ui: &mut egui::Ui, lib: &Library, t: &Tokens) {
+fn licence_box(ui: &mut egui::Ui, lib: &Library, tk: &Tokens) {
     let l = &lib.licence;
     egui::Frame::NONE
-        .fill(t.canvas)
+        .fill(tk.canvas)
         .inner_margin(8)
         .corner_radius(4)
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("Licence:").strong());
+                ui.label(RichText::new(t("Licence:")).strong());
                 ui.hyperlink_to(l.name, l.url);
             });
-            ui.label(RichText::new("The licence allows you to").strong());
+            ui.label(RichText::new(t("The licence allows you to")).strong());
             for a in l.allows {
-                ui.label(format!("• {a}"));
+                ui.label(format!("• {}", t(a)));
             }
-            ui.label(RichText::new("The licence requires you to").strong());
+            ui.label(RichText::new(t("The licence requires you to")).strong());
             for r in l.requires {
-                ui.label(format!("• {r}"));
+                ui.label(format!("• {}", t(r)));
             }
-            ui.label(RichText::new("Please note").strong());
+            ui.label(RichText::new(t("Please note")).strong());
             for n in l.notes {
-                ui.label(RichText::new(format!("• {n}")).color(t.text_dim));
+                ui.label(RichText::new(format!("• {}", t(n))).color(tk.text_dim));
             }
             ui.label(
-                RichText::new(
+                RichText::new(t(
                     "• ScoreArt does not host, sell or change these files. They come directly from the publisher's source; ScoreArt's own licence does not cover them.",
-                )
-                .color(t.text_dim),
+                ))
+                .color(tk.text_dim),
             );
         });
 }
 
 pub fn window(app: &mut ScoreApp, ctx: &egui::Context) {
     let Some(mut st) = app.catalog.take() else { return };
-    let t = Tokens::get(ctx);
+    let tk = Tokens::get(ctx);
     let mut open = true;
     let status = app.host.download_status();
     let libs = catalog::libraries();
-    egui::Window::new("Free sound libraries")
+    egui::Window::new(t("Free sound libraries"))
         .open(&mut open)
         .default_width(780.0)
         .pivot(egui::Align2::CENTER_TOP)
         .default_pos(egui::pos2(ctx.content_rect().center().x, 40.0))
         .collapsible(false)
         .show(ctx, |ui| {
-            ui.label(
+            ui.label(t(
                 "ScoreArt can fetch these free libraries for you. None of them is part of ScoreArt: an instrument is downloaded only after you have read and accepted its licence, directly from the publisher's public source. The licence and a record of your acceptance are saved next to the files.",
-            );
+            ));
             if !app.host.can_download() {
                 ui.label(
-                    RichText::new("Downloading is not available here; use the source links and \"Load sounds…\".")
-                        .color(t.text_dim),
+                    RichText::new(t("Downloading is not available here; use the source links and \"Load sounds…\"."))
+                        .color(tk.text_dim),
                 );
             }
             if let Some(s) = &status {
@@ -100,16 +102,18 @@ pub fn window(app: &mut ScoreApp, ctx: &egui::Context) {
                     ui.add(
                         egui::ProgressBar::new(frac)
                             .desired_width(380.0)
-                            .text(format!(
-                                "{} · {}: {}/{} files, {:.1} MB",
-                                s.library,
-                                catalog::instrument_name(&s.instrument),
-                                p.files_done,
-                                p.files_total,
-                                p.bytes as f64 / 1e6
+                            .text(tf(
+                                "{} · {}: {}/{} files, {} MB",
+                                &[
+                                    &s.library,
+                                    &catalog::instrument_name(&s.instrument),
+                                    &p.files_done,
+                                    &p.files_total,
+                                    &format!("{:.1}", p.bytes as f64 / 1e6),
+                                ],
                             )),
                     );
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(t("Cancel")).clicked() {
                         app.host.cancel_download();
                     }
                 });
@@ -121,7 +125,7 @@ pub fn window(app: &mut ScoreApp, ctx: &egui::Context) {
                 ui.vertical(|ui| {
                     ui.set_width(190.0);
                     for (i, l) in libs.iter().enumerate() {
-                        let text = format!("{}\n{}", l.name, short_licence(l));
+                        let text = format!("{}\n{}", l.name, t(short_licence(l)));
                         if ui.selectable_label(st.library == i, text).clicked() {
                             st.library = i;
                             st.instrument = None;
@@ -140,24 +144,24 @@ pub fn window(app: &mut ScoreApp, ctx: &egui::Context) {
                     .show(ui, |ui| {
                     ui.vertical(|ui| {
                     ui.heading(lib.name);
-                    ui.label(RichText::new(lib.publisher).color(t.text_dim));
-                    ui.label(lib.description);
-                    ui.label(format!("Size: {}", lib.size));
-                    licence_box(ui, lib, &t);
+                    ui.label(RichText::new(lib.publisher).color(tk.text_dim));
+                    ui.label(t(lib.description));
+                    ui.label(tf("Size: {}", &[&t(lib.size)]));
+                    licence_box(ui, lib, &tk);
                     ui.add_space(6.0);
                     match lib.source {
                         Source::Website { url } => {
-                            ui.hyperlink_to("Open the publisher's website to download", url);
+                            ui.hyperlink_to(t("Open the publisher's website to download"), url);
                             ui.label(
-                                RichText::new("After downloading, load the file with Mixer → Load sounds…").color(t.text_dim),
+                                RichText::new(t("After downloading, load the file with Mixer → Load sounds…")).color(tk.text_dim),
                             );
                         }
                         Source::Repository { page, .. } => {
                             ui.horizontal_wrapped(|ui| {
-                                ui.label("Source:");
+                                ui.label(t("Source:"));
                                 ui.hyperlink_to(page, page);
                             });
-                            instruments(app, ui, lib, &mut st, &t, status.is_some());
+                            instruments(app, ui, lib, &mut st, &tk, status.is_some());
                         }
                     }
                     });
@@ -165,7 +169,7 @@ pub fn window(app: &mut ScoreApp, ctx: &egui::Context) {
             });
         });
     if let (Some(inst), Some(lib)) = (st.confirm, libs.get(st.library)) {
-        confirm(app, ctx, lib, inst, &mut st, &t);
+        confirm(app, ctx, lib, inst, &mut st, &tk);
     }
     if open {
         app.catalog = Some(st);
@@ -174,9 +178,9 @@ pub fn window(app: &mut ScoreApp, ctx: &egui::Context) {
 
 fn short_licence(l: &Library) -> &'static str {
     match l.id {
-        "vsco2ce" | "vcsl" => "CC0 · public domain",
-        "salamander" => "CC BY 3.0 · credit the author",
-        _ => "free licence · website download",
+        "vsco2ce" | "vcsl" => t("CC0 · public domain"),
+        "salamander" => t("CC BY 3.0 · credit the author"),
+        _ => t("free licence · website download"),
     }
 }
 
@@ -185,15 +189,15 @@ fn instruments(
     ui: &mut egui::Ui,
     lib: &'static Library,
     st: &mut CatalogState,
-    t: &Tokens,
+    tk: &Tokens,
     busy: bool,
 ) {
     ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("Instruments ({})", lib.instruments.len())).strong());
+        ui.label(RichText::new(tf("Instruments ({})", &[&lib.instruments.len()])).strong());
         if lib.instruments.len() > 8 {
             ui.add(
                 egui::TextEdit::singleline(&mut st.filter)
-                    .hint_text("Search…")
+                    .hint_text(t("Search…"))
                     .desired_width(180.0),
             );
         }
@@ -229,15 +233,17 @@ fn instruments(
     ui.add_space(4.0);
     if let Some(inst) = st.instrument {
         let can = app.host.can_download() && !busy;
-        let label = format!("Download \"{}\"…", catalog::instrument_name(inst));
+        let label = tf("Download \"{}\"…", &[&catalog::instrument_name(inst)]);
         if ui.add_enabled(can, egui::Button::new(label)).clicked() {
             st.confirm = Some(inst);
             st.accepted = false;
         }
         if installed(app, lib, inst) {
             ui.label(
-                RichText::new("Already loaded — downloading again only fetches missing files.")
-                    .color(t.text_dim),
+                RichText::new(t(
+                    "Already loaded — downloading again only fetches missing files.",
+                ))
+                .color(tk.text_dim),
             );
         }
     }
@@ -251,43 +257,42 @@ fn confirm(
     lib: &'static Library,
     inst: &'static str,
     st: &mut CatalogState,
-    t: &Tokens,
+    tk: &Tokens,
 ) {
     let mut close = false;
     egui::Modal::new(egui::Id::unique("licence-confirm")).show(ctx, |ui| {
         ui.set_width(560.0);
-        ui.heading(format!("Licence of {}", lib.name));
-        ui.label(format!(
+        ui.heading(tf("Licence of {}", &[&lib.name]));
+        ui.label(tf(
             "You are about to download \"{}\" ({}).",
-            catalog::instrument_name(inst),
-            lib.name
+            &[&catalog::instrument_name(inst), &lib.name],
         ));
         egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-            licence_box(ui, lib, t);
+            licence_box(ui, lib, tk);
         });
         if let Source::Repository { page, .. } = lib.source {
             ui.horizontal_wrapped(|ui| {
-                ui.label("Files come from:");
+                ui.label(t("Files come from:"));
                 ui.hyperlink_to(page, page);
             });
         }
         ui.checkbox(
             &mut st.accepted,
-            format!(
+            tf(
                 "I have read the licence ({}) and accept its terms for the files I download.",
-                lib.licence.name
+                &[&lib.licence.name],
             ),
         );
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(st.accepted, egui::Button::new("Accept and download"))
+                .add_enabled(st.accepted, egui::Button::new(t("Accept and download")))
                 .clicked()
             {
                 app.host.download_sounds(lib, inst);
-                app.session.status = format!("Downloading {} …", catalog::instrument_name(inst));
+                app.session.status = tf("Downloading {} …", &[&catalog::instrument_name(inst)]);
                 close = true;
             }
-            if ui.button("Cancel").clicked() {
+            if ui.button(t("Cancel")).clicked() {
                 close = true;
             }
         });

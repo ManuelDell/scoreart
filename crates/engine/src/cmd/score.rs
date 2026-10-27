@@ -64,7 +64,7 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "New score",
             menu: &["File"],
             shortcut: Some("Ctrl+N"),
-            params: "title?, composer?, instruments? ([ids], default [\"piano\"]), time? (\"4/4\"), key? (fifths -7…7), measures? (16), tempo? (bpm)",
+            params: "title?, composer?, instruments? ([ids], default [\"piano\"]), names? ([names of those instruments, e.g. translated]), time? (\"4/4\"), key? (fifths -7…7), measures? (16), tempo? (bpm)",
             enabled: always,
             run: |s, p| {
                 let ids: Vec<String> = match p.get("instruments") {
@@ -93,6 +93,13 @@ pub fn commands() -> Vec<CommandSpec> {
                     measures,
                 );
                 score.meta.composer = clip(p_str(p, "composer").unwrap_or(""));
+                if let Some(Value::Array(names)) = p.get("names") {
+                    for (part, n) in score.parts.iter_mut().zip(names) {
+                        if let Some(n) = n.as_str().filter(|n| !n.trim().is_empty()) {
+                            part.name = clip(n);
+                        }
+                    }
+                }
                 if let Some(t) = p_i64(p, "tempo")
                     && let Some(m) = score.measures.first_mut()
                 {
@@ -329,7 +336,7 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "Add instrument",
             menu: &["Add", "Instruments"],
             shortcut: Some("I"),
-            params: "instrument: piano|organ|voice|soprano|alto|tenor|bass-voice|women|men|choir|flute|oboe|bassoon|violin|viola|cello|contrabass|guitar|trombone|tuba",
+            params: "name? (shown name, default the instrument's), instrument: piano|organ|voice|soprano|alto|tenor|bass-voice|women|men|choir|flute|oboe|bassoon|violin|viola|cello|contrabass|guitar|trombone|tuba",
             enabled: |s| {
                 if s.score.parts.len() < limits::MAX_PARTS {
                     Ok(())
@@ -341,6 +348,11 @@ pub fn commands() -> Vec<CommandSpec> {
                 let id = need_str(p, "instrument")?;
                 let inst = instrument(id).ok_or_else(|| Error::Param(format!("unknown instrument {id}")))?;
                 s.score.add_part(inst);
+                if let Some(n) = p_str(p, "name").filter(|n| !n.trim().is_empty())
+                    && let Some(part) = s.score.parts.last_mut()
+                {
+                    part.name = clip(n);
+                }
                 Ok(json!({ "part": s.score.parts.len() - 1 }))
             },
             undoable: true,
@@ -416,7 +428,7 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "Change instrument",
             menu: &[],
             shortcut: None,
-            params: "instrument (id: piano, violin, flute …), part? (default: the selected part), mode?: merge (default: every line goes into the new instrument, extra staves become voices) | split (staff/voice becomes a new part with the instrument, the rest stays) | discard (only staff/voice is kept), staff?, voice? (1…, the line for split and discard; default 1)",
+            params: "instrument (id: piano, violin, flute …), part? (default: the selected part), name? (shown name), mode?: merge (default: every line goes into the new instrument, extra staves become voices) | split (staff/voice becomes a new part with the instrument, the rest stays) | discard (only staff/voice is kept), staff?, voice? (1…, the line for split and discard; default 1)",
             enabled: has_parts,
             run: |s, p| {
                 let part = p_usize(p, "part").unwrap_or_else(|| s.focus().0);
@@ -436,6 +448,11 @@ pub fn commands() -> Vec<CommandSpec> {
                     return Err(Error::Param("no such part".into()));
                 }
                 let now = s.score.rearrange_part(part, inst, how)?;
+                if let Some(n) = p_str(p, "name").filter(|n| !n.trim().is_empty())
+                    && let Some(pt) = s.score.parts.get_mut(now)
+                {
+                    pt.name = clip(n);
+                }
                 s.selection = None;
                 s.cursor = Default::default();
                 Ok(json!({ "part": now }))

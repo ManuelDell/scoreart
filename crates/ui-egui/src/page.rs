@@ -8,12 +8,14 @@ use serde_json::json;
 
 use crate::ScoreApp;
 
+use crate::i18n::{t, tf};
+
 /// Name shown for a view mode.
 pub(crate) fn view_label(v: View) -> &'static str {
     match v {
-        View::Page => "Page view",
-        View::Horizontal => "Continuous view (horizontal)",
-        View::Vertical => "Continuous view (vertical)",
+        View::Page => t("Page view"),
+        View::Horizontal => t("Continuous view (horizontal)"),
+        View::Vertical => t("Continuous view (vertical)"),
     }
 }
 
@@ -88,14 +90,14 @@ pub(crate) fn dialog(app: &mut ScoreApp, ctx: &egui::Context) {
     let mut apply_now = false;
     let resp = egui::Modal::new(egui::Id::unique("page-settings")).show(ctx, |ui| {
         ui.set_width(440.0);
-        ui.heading("Page settings");
+        ui.heading(t("Page settings"));
         ui.add_space(6.0);
         egui::Grid::new("page-grid")
             .num_columns(2)
             .spacing([12.0, 8.0])
             .show(ui, |ui| {
-                ui.label("Paper size");
-                let current = f.size_name().unwrap_or("Custom");
+                ui.label(t("Paper size"));
+                let current = f.size_name().unwrap_or(t("Custom"));
                 egui::ComboBox::from_id_salt("page-size")
                     .selected_text(current)
                     .show_ui(ui, |ui| {
@@ -107,39 +109,39 @@ pub(crate) fn dialog(app: &mut ScoreApp, ctx: &egui::Context) {
                         }
                     });
                 ui.end_row();
-                ui.label("Width × height");
+                ui.label(t("Width × height"));
                 ui.horizontal(|ui| {
                     mm(ui, &mut f.width_mm, 50.0, 2000.0);
                     ui.label("×");
                     mm(ui, &mut f.height_mm, 50.0, 2000.0);
                 });
                 ui.end_row();
-                ui.label("Orientation");
+                ui.label(t("Orientation"));
                 ui.horizontal(|ui| {
                     let landscape = f.landscape();
-                    if ui.selectable_label(!landscape, "Portrait").clicked() && landscape {
+                    if ui.selectable_label(!landscape, t("Portrait")).clicked() && landscape {
                         (f.width_mm, f.height_mm) = (f.height_mm, f.width_mm);
                     }
-                    if ui.selectable_label(landscape, "Landscape").clicked() && !landscape {
+                    if ui.selectable_label(landscape, t("Landscape")).clicked() && !landscape {
                         (f.width_mm, f.height_mm) = (f.height_mm, f.width_mm);
                     }
                 });
                 ui.end_row();
-                ui.label("Margins");
+                ui.label(t("Margins"));
                 egui::Grid::new("margins").num_columns(4).show(ui, |ui| {
-                    ui.label("Top");
+                    ui.label(t("Top"));
                     mm(ui, &mut f.margin_top_mm, 0.0, 100.0);
-                    ui.label("Bottom");
+                    ui.label(t("Bottom"));
                     mm(ui, &mut f.margin_bottom_mm, 0.0, 100.0);
                     ui.end_row();
-                    ui.label("Left");
+                    ui.label(t("Left"));
                     mm(ui, &mut f.margin_left_mm, 0.0, 100.0);
-                    ui.label("Right");
+                    ui.label(t("Right"));
                     mm(ui, &mut f.margin_right_mm, 0.0, 100.0);
                     ui.end_row();
                 });
                 ui.end_row();
-                ui.label("Staff size");
+                ui.label(t("Staff size"));
                 ui.horizontal(|ui| {
                     ui.add(
                         egui::DragValue::new(&mut f.staff_space_mm)
@@ -149,47 +151,47 @@ pub(crate) fn dialog(app: &mut ScoreApp, ctx: &egui::Context) {
                             .max_decimals(2),
                     );
                     ui.label(
-                        RichText::new(format!(
-                            "between lines (staff height {:.1} mm)",
-                            f.staff_space_mm * 4.0
+                        RichText::new(tf(
+                            "between lines (staff height {} mm)",
+                            &[&format!("{:.1}", f.staff_space_mm * 4.0)],
                         ))
                         .weak(),
                     );
                 });
                 ui.end_row();
-                ui.label("Between staves of an instrument");
+                ui.label(t("Between staves of an instrument"));
                 sp(ui, &mut f.staff_gap, 1.0, 40.0);
                 ui.end_row();
-                ui.label("Between instruments");
+                ui.label(t("Between instruments"));
                 sp(ui, &mut f.part_gap, 1.0, 40.0);
                 ui.end_row();
-                ui.label("Between systems");
+                ui.label(t("Between systems"));
                 sp(ui, &mut f.system_gap, 1.0, 60.0);
                 ui.end_row();
-                ui.label("Note spacing");
+                ui.label(t("Note spacing"));
                 ui.add(egui::Slider::new(&mut f.spacing, 0.5..=2.0).step_by(0.05));
                 ui.end_row();
             });
         ui.label(
-            RichText::new("sp = staff spaces (the distance between two staff lines)")
+            RichText::new(t("sp = staff spaces (the distance between two staff lines)"))
                 .small()
                 .weak(),
         );
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if ui.button("OK").clicked() {
+            if ui.button(t("OK")).clicked() {
                 apply_now = true;
                 close = true;
             }
-            if ui.button("Apply").clicked() {
+            if ui.button(t("Apply")).clicked() {
                 apply_now = true;
             }
-            if ui.button("Cancel").clicked() {
+            if ui.button(t("Cancel")).clicked() {
                 close = true;
             }
             if ui
-                .button("Defaults")
-                .on_hover_text("A4 portrait, 15 mm margins")
+                .button(t("Defaults"))
+                .on_hover_text(t("A4 portrait, 15 mm margins"))
                 .clicked()
             {
                 f = PageFormat::default();

@@ -330,10 +330,7 @@ impl Session {
         };
         let lower = self.file_name.to_ascii_lowercase();
         self.status = if midi {
-            format!(
-                "Opened {} (MIDI, quantised to sixteenths) — Save writes MusicXML",
-                self.file_name
-            )
+            format!("Opened {} (MIDI) — Save writes MusicXML", self.file_name)
         } else if lower.ends_with(".mscz") || lower.ends_with(".mscx") {
             format!("Opened {} (MuseScore) — Save writes MusicXML", self.file_name)
         } else {

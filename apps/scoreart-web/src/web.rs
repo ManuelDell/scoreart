@@ -320,6 +320,10 @@ impl Host for WebHost {
         self.midi.take()
     }
 
+    fn locale(&self) -> Option<String> {
+        web_sys::window()?.navigator().language()
+    }
+
     fn load_setting(&self, name: &str) -> Option<String> {
         crate::midi::load_setting(name)
     }

@@ -12,6 +12,10 @@
 mod canvas;
 mod catalog;
 pub mod glyph;
+pub mod i18n;
+mod i18n_de;
+#[cfg(test)]
+mod i18n_tests;
 mod instruments;
 mod midi;
 mod mixer;
@@ -20,6 +24,7 @@ mod panels;
 mod playback;
 pub mod theme;
 
+use crate::i18n::{t, tf, tr};
 use egui::{Key, Modifiers};
 use serde_json::{Value, json};
 
@@ -99,6 +104,10 @@ pub trait Host {
         None
     }
     fn save_setting(&mut self, _name: &str, _value: &str) {}
+    /// The system's or browser's language ("de-DE", "en_US.UTF-8" …).
+    fn locale(&self) -> Option<String> {
+        None
+    }
 }
 
 pub use catalog::DownloadStatus;
@@ -180,6 +189,13 @@ pub struct ScoreApp {
 }
 
 impl ScoreApp {
+    /// Switches the interface language and remembers it.
+    pub fn set_language(&mut self, l: i18n::Lang) {
+        i18n::set_lang(l);
+        self.host.save_setting("language", l.code());
+        self.fields = panels::Fields::default();
+    }
+
     /// Opens the "MIDI input" window.
     pub fn open_midi(&mut self) {
         self.midi.open = true;
@@ -198,6 +214,11 @@ impl ScoreApp {
     }
 
     pub fn new(ctx: &egui::Context, session: Session, host: Box<dyn Host>) -> ScoreApp {
+        let lang = host
+            .load_setting("language")
+            .or_else(|| host.locale())
+            .map_or(i18n::Lang::En, |c| i18n::Lang::from_code(&c));
+        i18n::set_lang(lang);
         glyph::install_fonts(ctx);
         ScoreApp {
             session,
@@ -277,7 +298,7 @@ impl ScoreApp {
             Ok(bytes) => {
                 if let Some(saved) = self.host.save(name, bytes, save_as) {
                     self.session.mark_saved(&saved);
-                    self.session.status = format!("Saved {saved}");
+                    self.session.status = tf("Saved {}", &[&saved]);
                 }
             }
             Err(e) => self.session.status = e.to_string(),
@@ -296,7 +317,7 @@ impl ScoreApp {
         while let Some(loaded) = self.host.take_sounds() {
             match loaded {
                 Ok(bank) => self.add_sounds(bank),
-                Err(e) => self.session.status = format!("Sounds: {e}"),
+                Err(e) => self.session.status = tf("Sounds: {}", &[&tr(&e)]),
             }
         }
         self.keyboard(&ctx);
@@ -315,9 +336,9 @@ impl ScoreApp {
         if self.show_properties {
             panels::properties(self, ui);
         }
-        let t = theme::Tokens::get(&ctx);
+        let tk = theme::Tokens::get(&ctx);
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(t.canvas))
+            .frame(egui::Frame::NONE.fill(tk.canvas))
             .show(ui, |ui| {
                 canvas::show(self, ui);
             });
@@ -423,7 +444,7 @@ impl ScoreApp {
             (Key::Slash, _, _) if plain => self.run("note.grace", json!({ "type": "acciaccatura" })),
             (Key::K, _, _) if cmd_only => {
                 self.dialog = Some(Dialog::Text {
-                    title: "Chord symbol (e.g. Cmaj7, F#m7/C#)",
+                    title: t("Chord symbol (e.g. Cmaj7, F#m7/C#)"),
                     command: "note.chord-symbol",
                     key: "text",
                     value: String::new(),
@@ -431,7 +452,7 @@ impl ScoreApp {
             }
             (Key::T, _, _) if cmd_only => {
                 self.dialog = Some(Dialog::Text {
-                    title: "Staff text",
+                    title: t("Staff text"),
                     command: "note.text",
                     key: "text",
                     value: String::new(),

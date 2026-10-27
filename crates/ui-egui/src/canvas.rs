@@ -69,7 +69,7 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
     let input = app.session.input;
     let playhead = app.playback.as_ref().and_then(|p| p.at);
     let cursor = app.session.cursor;
-    let t = theme::Tokens::get(ui.ctx());
+    let tk = theme::Tokens::get(ui.ctx());
     let layout = app.session.layout();
 
     let max_w = layout.pages.iter().map(|p| p.width).fold(0.0f32, f32::max) * zoom;
@@ -91,7 +91,7 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
             let size = Vec2::new((max_w + 2.0 * PAD).max(avail), total_h.max(ui.available_height()));
             let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
             let painter = ui.painter_at(rect);
-            painter.rect_filled(rect, 0.0, t.canvas);
+            painter.rect_filled(rect, 0.0, tk.canvas);
             let clip = ui.clip_rect();
             let mut y = rect.top() + PAD;
             for (pi, page) in layout.pages.iter().enumerate() {
@@ -125,7 +125,7 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 if !prect.intersects(clip) {
                     continue;
                 }
-                painter.rect_filled(prect.translate(Vec2::new(2.0, 3.0)), 2.0, t.page_shadow);
+                painter.rect_filled(prect.translate(Vec2::new(2.0, 3.0)), 2.0, tk.page_shadow);
                 painter.rect_filled(prect, 0.0, Color32::WHITE);
                 let ink = Color32::from_rgb(0x11, 0x11, 0x11);
                 for it in &page.items {
@@ -144,7 +144,7 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         ) => o.part == part && o.staff == staff && o.measure >= first && o.measure <= last,
                         _ => false,
                     };
-                    let color = if sel { t.accent } else { ink };
+                    let color = if sel { tk.accent } else { ink };
                     match &it.shape {
                         Shape::Glyph { c, x, y, scale } => {
                             glyph::paint(&painter, *c, map(*x, *y), 4.0 * zoom * scale, color)
@@ -236,8 +236,8 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                             && s.measure <= last
                     }) {
                         let r = Rect::from_min_max(map(sb.x0, sb.top - 0.6), map(sb.x1, sb.top + 4.6));
-                        painter.rect_filled(r, 2.0, t.accent.linear_multiply(0.12));
-                        painter.rect_stroke(r, 2.0, Stroke::new(1.5, t.accent), egui::StrokeKind::Inside);
+                        painter.rect_filled(r, 2.0, tk.accent.linear_multiply(0.12));
+                        painter.rect_stroke(r, 2.0, Stroke::new(1.5, tk.accent), egui::StrokeKind::Inside);
                     }
                 }
                 // Playhead: a line through every staff of the sounding measure.
@@ -245,9 +245,9 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     for sb in layout.staves.iter().filter(|s| s.page == pi && s.measure == pm) {
                         let x = sb.x_at(ptick) + 0.5;
                         let r = Rect::from_min_max(map(x - 0.25, sb.top - 1.5), map(x + 0.25, sb.top + 5.5));
-                        painter.rect_filled(r, 1.0, t.accent.linear_multiply(0.85));
+                        painter.rect_filled(r, 1.0, tk.accent.linear_multiply(0.85));
                         let band = Rect::from_min_max(map(sb.x0, sb.top - 1.5), map(sb.x1, sb.top + 5.5));
-                        painter.rect_filled(band, 0.0, t.accent.linear_multiply(0.06));
+                        painter.rect_filled(band, 0.0, tk.accent.linear_multiply(0.06));
                         if sb.part == 0 && sb.staff == 0 {
                             scroll_target = Some(r.expand(160.0));
                         }

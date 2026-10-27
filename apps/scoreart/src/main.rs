@@ -338,6 +338,14 @@ impl Host for NativeHost {
         }
     }
 
+    fn locale(&self) -> Option<String> {
+        ["LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"]
+            .iter()
+            .filter_map(std::env::var_os)
+            .map(|v| v.to_string_lossy().into_owned())
+            .find(|v| !v.is_empty() && v != "C" && v != "POSIX")
+    }
+
     fn load_setting(&self, name: &str) -> Option<String> {
         std::fs::read_to_string(setting_file(name)?).ok()
     }

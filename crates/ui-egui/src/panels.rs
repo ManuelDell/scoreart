@@ -9,47 +9,49 @@ use scoreart_model::{Clef, INSTRUMENTS, KeySig, NoteValue};
 
 use crate::{Dialog, ScoreApp, canvas::voice_color, glyph, theme::Tokens};
 
+use crate::i18n::{t, tf};
+
 // ---------- menu bar ----------
 
 pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
-    let t = Tokens::get(ui.ctx());
+    let tk = Tokens::get(ui.ctx());
     egui::Panel::top("menu_bar")
         .frame(
             egui::Frame::NONE
-                .fill(t.toolbar)
+                .fill(tk.toolbar)
                 .inner_margin(egui::Margin::symmetric(8, 3)),
         )
         .show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
-                ui.label(RichText::new("ScoreArt").strong().color(t.accent));
+                ui.label(RichText::new("ScoreArt").strong().color(tk.accent));
                 ui.add_space(6.0);
-                ui.menu_button("File", |ui| {
+                ui.menu_button(t("File"), |ui| {
                     if !app.host.embedded() {
-                        if ui.button("New score…    Ctrl+N").clicked() {
+                        if ui.button(t("New score…    Ctrl+N")).clicked() {
                             app.dialog = Some(Dialog::NewScore(NewScore::default()));
                             ui.close();
                         }
-                        if ui.button("Open…    Ctrl+O").clicked() {
+                        if ui.button(t("Open…    Ctrl+O")).clicked() {
                             app.host.request_open();
                             ui.close();
                         }
-                        if ui.button("Open sample (Ode to Joy)").clicked() {
+                        if ui.button(t("Open sample (Ode to Joy)")).clicked() {
                             app.session = scoreart_engine::Session::default();
                             app.fields = Fields::default();
                             ui.close();
                         }
                         ui.separator();
                     }
-                    if ui.button("Save    Ctrl+S").clicked() {
+                    if ui.button(t("Save    Ctrl+S")).clicked() {
                         app.save(false);
                         ui.close();
                     }
-                    if !app.host.embedded() && ui.button("Save as…    Ctrl+Shift+S").clicked() {
+                    if !app.host.embedded() && ui.button(t("Save as…    Ctrl+Shift+S")).clicked() {
                         app.save(true);
                         ui.close();
                     }
                     ui.separator();
-                    ui.menu_button("Export", |ui| {
+                    ui.menu_button(t("Export"), |ui| {
                         let stem = app
                             .session
                             .file_name
@@ -57,12 +59,12 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                             .map(|(a, _)| a.to_string())
                             .unwrap_or_else(|| app.session.file_name.clone());
                         for (label, ext) in [
-                            ("MusicXML (.musicxml)", "musicxml"),
-                            ("Compressed MusicXML (.mxl)", "mxl"),
-                            ("MIDI (.mid)", "mid"),
-                            ("SVG, first page (.svg)", "svg"),
-                            ("Audio (.wav)", "wav"),
-                            ("Audio per instrument (.zip of .wav)", "zip"),
+                            (t("MusicXML (.musicxml)"), "musicxml"),
+                            (t("Compressed MusicXML (.mxl)"), "mxl"),
+                            (t("MIDI (.mid)"), "mid"),
+                            (t("SVG, first page (.svg)"), "svg"),
+                            (t("Audio (.wav)"), "wav"),
+                            (t("Audio per instrument (.zip of .wav)"), "zip"),
                         ] {
                             if ui.button(label).clicked() {
                                 let name = format!("{stem}.{ext}");
@@ -70,7 +72,7 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                                 match bytes {
                                     Ok(b) => {
                                         if let Some(n) = app.host.save(&name, b, true) {
-                                            app.session.status = format!("Exported {n}");
+                                            app.session.status = tf("Exported {}", &[&n]);
                                         }
                                     }
                                     Err(e) => app.session.status = e.to_string(),
@@ -80,13 +82,13 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         }
                     });
                 });
-                ui.menu_button("Edit", |ui| {
+                ui.menu_button(t("Edit"), |ui| {
                     for (label, id) in [
-                        ("Undo    Ctrl+Z", "edit.undo"),
-                        ("Redo    Ctrl+Y", "edit.redo"),
-                        ("Delete    Del", "note.delete"),
-                        ("Select all    Ctrl+A", "select.all"),
-                        ("Note input    N", "input.toggle"),
+                        (t("Undo    Ctrl+Z"), "edit.undo"),
+                        (t("Redo    Ctrl+Y"), "edit.redo"),
+                        (t("Delete    Del"), "note.delete"),
+                        (t("Select all    Ctrl+A"), "select.all"),
+                        (t("Note input    N"), "input.toggle"),
                     ] {
                         let enabled = scoreart_engine::cmd::find(id)
                             .map(|c| (c.enabled)(&app.session).is_ok())
@@ -96,73 +98,73 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                             ui.close();
                         }
                     }
-                    if ui.button("MIDI input device…").clicked() {
+                    if ui.button(t("MIDI input device…")).clicked() {
                         app.open_midi();
                         ui.close();
                     }
                     ui.separator();
-                    if ui.button("Transpose up a semitone").clicked() {
+                    if ui.button(t("Transpose up a semitone")).clicked() {
                         app.run("score.transpose", json!({ "semitones": 1 }));
                         ui.close();
                     }
-                    if ui.button("Transpose down a semitone").clicked() {
+                    if ui.button(t("Transpose down a semitone")).clicked() {
                         app.run("score.transpose", json!({ "semitones": -1 }));
                         ui.close();
                     }
                 });
-                ui.menu_button("Add", |ui| {
-                    ui.menu_button("Measures", |ui| {
-                        if ui.button("Append one measure    Ctrl+B").clicked() {
+                ui.menu_button(t("Add"), |ui| {
+                    ui.menu_button(t("Measures"), |ui| {
+                        if ui.button(t("Append one measure    Ctrl+B")).clicked() {
                             app.run("measure.append", json!({}));
                             ui.close();
                         }
-                        if ui.button("Append four measures").clicked() {
+                        if ui.button(t("Append four measures")).clicked() {
                             app.run("measure.append", json!({ "count": 4 }));
                             ui.close();
                         }
-                        if ui.button("Insert before selection    Ins").clicked() {
+                        if ui.button(t("Insert before selection    Ins")).clicked() {
                             app.run("measure.insert", json!({}));
                             ui.close();
                         }
-                        if ui.button("Delete selected measures    Ctrl+Del").clicked() {
+                        if ui.button(t("Delete selected measures    Ctrl+Del")).clicked() {
                             app.run("measure.delete", json!({}));
                             ui.close();
                         }
                         ui.separator();
-                        if ui.button("Line break after the measure (toggle)").clicked() {
+                        if ui.button(t("Line break after the measure (toggle)")).clicked() {
                             app.run("measure.break", json!({ "kind": "line" }));
                             ui.close();
                         }
-                        if ui.button("Page break after the measure (toggle)").clicked() {
+                        if ui.button(t("Page break after the measure (toggle)")).clicked() {
                             app.run("measure.break", json!({ "kind": "page" }));
                             ui.close();
                         }
                     });
-                    ui.menu_button("Instrument", |ui| {
+                    ui.menu_button(t("Instrument"), |ui| {
                         for inst in INSTRUMENTS {
-                            if ui.button(inst.name).clicked() {
-                                app.run("part.add", json!({ "instrument": inst.id }));
+                            if ui.button(t(inst.name)).clicked() {
+                                app.run("part.add", json!({ "instrument": inst.id, "name": t(inst.name) }));
                                 ui.close();
                             }
                         }
                     });
-                    ui.menu_button("Text", |ui| {
-                        if ui.button("Lyric…    Ctrl+L").clicked() {
+                    ui.menu_button(t("Text"), |ui| {
+                        if ui.button(t("Lyric…    Ctrl+L")).clicked() {
                             open_lyric_dialog(app);
                             ui.close();
                         }
-                        if ui.button("System text…").clicked() {
+                        if ui.button(t("System text…")).clicked() {
                             app.dialog = Some(Dialog::Text {
-                                title: "System text",
+                                title: t("System text"),
                                 command: "measure.text",
                                 key: "text",
                                 value: String::new(),
                             });
                             ui.close();
                         }
-                        if ui.button("Tempo…").clicked() {
+                        if ui.button(t("Tempo…")).clicked() {
                             app.dialog = Some(Dialog::Text {
-                                title: "Tempo (quarter notes per minute)",
+                                title: t("Tempo (quarter notes per minute)"),
                                 command: "measure.tempo",
                                 key: "bpm",
                                 value: "100".into(),
@@ -171,45 +173,45 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         }
                     });
                 });
-                ui.menu_button("Instruments", |ui| {
-                    if ui.button("Instruments and sounds…    I").clicked() {
+                ui.menu_button(t("Instruments"), |ui| {
+                    if ui.button(t("Instruments and sounds…    I")).clicked() {
                         app.open_instruments();
                         ui.close();
                     }
-                    ui.menu_button("Add instrument", |ui| {
+                    ui.menu_button(t("Add instrument"), |ui| {
                         for inst in INSTRUMENTS {
-                            if ui.button(inst.name).clicked() {
-                                app.run("part.add", json!({ "instrument": inst.id }));
+                            if ui.button(t(inst.name)).clicked() {
+                                app.run("part.add", json!({ "instrument": inst.id, "name": t(inst.name) }));
                                 ui.close();
                             }
                         }
                     });
-                    ui.checkbox(&mut app.show_mixer, "Mixer    F10");
-                    if ui.button("MIDI input device…").clicked() {
+                    ui.checkbox(&mut app.show_mixer, t("Mixer    F10"));
+                    if ui.button(t("MIDI input device…")).clicked() {
                         app.open_midi();
                         ui.close();
                     }
                     ui.separator();
-                    if ui.button("Load sounds…").clicked() {
+                    if ui.button(t("Load sounds…")).clicked() {
                         app.host.request_sounds(false);
                         ui.close();
                     }
-                    if ui.button("Free sound libraries…").clicked() {
+                    if ui.button(t("Free sound libraries…")).clicked() {
                         app.open_catalog();
                         ui.close();
                     }
                 });
-                ui.menu_button("Format", |ui| {
-                    if ui.button("Page settings…").clicked() {
+                ui.menu_button(t("Format"), |ui| {
+                    if ui.button(t("Page settings…")).clicked() {
                         crate::page::open(app);
                         ui.close();
                     }
-                    ui.menu_button("Note spacing", |ui| {
+                    ui.menu_button(t("Note spacing"), |ui| {
                         for (label, f) in [
-                            ("Tight", 0.8),
-                            ("Normal", 1.0),
-                            ("Wide", 1.25),
-                            ("Very wide", 1.5),
+                            (t("Tight"), 0.8),
+                            (t("Normal"), 1.0),
+                            (t("Wide"), 1.25),
+                            (t("Very wide"), 1.5),
                         ] {
                             if ui.button(label).clicked() {
                                 app.run("style.spacing", json!({ "factor": f }));
@@ -217,36 +219,45 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                             }
                         }
                     });
-                    if ui.button("Reset page settings").clicked() {
+                    if ui.button(t("Reset page settings")).clicked() {
                         app.run("page.format", json!({ "reset": true }));
                         ui.close();
                     }
                 });
-                ui.menu_button("View", |ui| {
+                ui.menu_button(t("View"), |ui| {
                     crate::page::view_choices(app, ui);
                     ui.separator();
-                    if ui.button("Zoom in    Ctrl+=").clicked() {
+                    ui.menu_button(t("Language"), |ui| {
+                        for l in crate::i18n::Lang::ALL {
+                            if ui.selectable_label(crate::i18n::lang() == l, l.name()).clicked() {
+                                app.set_language(l);
+                                ui.close();
+                            }
+                        }
+                    });
+                    ui.separator();
+                    if ui.button(t("Zoom in    Ctrl+=")).clicked() {
                         app.set_zoom(app.zoom * 1.15);
                     }
-                    if ui.button("Zoom out    Ctrl+-").clicked() {
+                    if ui.button(t("Zoom out    Ctrl+-")).clicked() {
                         app.set_zoom(app.zoom / 1.15);
                     }
-                    if ui.button("Zoom 100%    Ctrl+0").clicked() {
+                    if ui.button(t("Zoom 100%    Ctrl+0")).clicked() {
                         app.set_zoom(7.5);
                     }
                     ui.separator();
-                    ui.checkbox(&mut app.show_palette, "Palettes");
-                    ui.checkbox(&mut app.show_properties, "Properties");
-                    ui.checkbox(&mut app.show_mixer, "Mixer    F10");
-                    if ui.button("Free sound libraries…").clicked() {
+                    ui.checkbox(&mut app.show_palette, t("Palettes"));
+                    ui.checkbox(&mut app.show_properties, t("Properties"));
+                    ui.checkbox(&mut app.show_mixer, t("Mixer    F10"));
+                    if ui.button(t("Free sound libraries…")).clicked() {
                         app.open_catalog();
                         ui.close();
                     }
-                    ui.checkbox(&mut app.sound_on_input, "Play notes while editing");
+                    ui.checkbox(&mut app.sound_on_input, t("Play notes while editing"));
                     ui.separator();
                     let dark = ui.ctx().global_style().visuals.dark_mode;
                     if ui
-                        .button(if dark { "Light theme" } else { "Dark theme" })
+                        .button(if dark { t("Light theme") } else { t("Dark theme") })
                         .clicked()
                     {
                         ui.ctx().set_theme(if dark {
@@ -257,12 +268,12 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         ui.close();
                     }
                 });
-                ui.menu_button("Help", |ui| {
-                    if ui.button("Keyboard shortcuts").clicked() {
+                ui.menu_button(t("Help"), |ui| {
+                    if ui.button(t("Keyboard shortcuts")).clicked() {
                         app.dialog = Some(Dialog::Shortcuts);
                         ui.close();
                     }
-                    if ui.button("About ScoreArt").clicked() {
+                    if ui.button(t("About ScoreArt")).clicked() {
                         app.dialog = Some(Dialog::About);
                         ui.close();
                     }
@@ -276,12 +287,12 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
 /// A square button showing a SMuFL glyph (or a text label), with a baseline at `base` (0–1 of
 /// the button height) and the glyph size in px.
 fn glyph_button(ui: &mut egui::Ui, label: GlyphLabel, selected: bool, tip: &str) -> egui::Response {
-    let t = Tokens::get(ui.ctx());
+    let tk = Tokens::get(ui.ctx());
     let size = Vec2::new(34.0, 34.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let resp = resp.on_hover_text(tip);
     let bg = if selected {
-        t.accent_soft
+        tk.accent_soft
     } else if resp.hovered() {
         ui.visuals().widgets.hovered.weak_bg_fill
     } else {
@@ -290,7 +301,7 @@ fn glyph_button(ui: &mut egui::Ui, label: GlyphLabel, selected: bool, tip: &str)
     ui.painter().rect_filled(rect, 6.0, bg);
     if selected {
         ui.painter()
-            .rect_stroke(rect, 6.0, Stroke::new(1.2, t.accent), egui::StrokeKind::Inside);
+            .rect_stroke(rect, 6.0, Stroke::new(1.2, tk.accent), egui::StrokeKind::Inside);
     }
     let fg = ui.visuals().text_color();
     match label {
@@ -337,11 +348,11 @@ fn duration_glyph(v: NoteValue) -> char {
 }
 
 pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
-    let t = Tokens::get(ui.ctx());
+    let tk = Tokens::get(ui.ctx());
     egui::Panel::top("toolbar")
         .frame(
             egui::Frame::NONE
-                .fill(t.toolbar)
+                .fill(tk.toolbar)
                 .inner_margin(egui::Margin::symmetric(8, 4)),
         )
         .show(ui, |ui| {
@@ -356,16 +367,16 @@ pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     GlyphLabel::Text("▶")
                 };
                 let tip = if playing {
-                    "Stop (Space)"
+                    t("Stop (Space)")
                 } else {
-                    "Play from the selection (Space)"
+                    t("Play from the selection (Space)")
                 };
                 if glyph_button(ui, label, playing, tip).clicked() {
                     app.toggle_playback();
                 }
                 ui.separator();
                 // Note input toggle: a pen.
-                if glyph_button(ui, GlyphLabel::Text("✏"), input.active, "Note input (N)").clicked() {
+                if glyph_button(ui, GlyphLabel::Text("✏"), input.active, t("Note input (N)")).clicked() {
                     app.run("input.toggle", json!({}));
                 }
                 ui.separator();
@@ -379,7 +390,7 @@ pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     NoteValue::Whole,
                 ] {
                     let selected = input.value == v && (input.active || app.session.selection.is_none());
-                    let tip = format!("{} ({})", v.xml_name(), v.digit());
+                    let tip = format!("{} ({})", t(v.xml_name()), v.digit());
                     let label = GlyphLabel::Glyph(duration_glyph(v), 26.0, 0.72, -3.0);
                     if glyph_button(ui, label, selected, &tip).clicked() {
                         app.run("input.duration", json!({ "value": v.digit() }));
@@ -389,7 +400,7 @@ pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     ui,
                     GlyphLabel::Glyph('\u{ECB7}', 30.0, 0.62, -1.0),
                     input.dots > 0,
-                    "Augmentation dot (.)",
+                    t("Augmentation dot (.)"),
                 )
                 .clicked()
                 {
@@ -400,31 +411,31 @@ pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     ui,
                     GlyphLabel::Glyph(g::REST_QUARTER, 26.0, 0.5, -3.0),
                     false,
-                    "Rest (0)",
+                    t("Rest (0)"),
                 )
                 .clicked()
                 {
                     app.run("note.rest", json!({}));
                 }
                 for (c, id, tip) in [
-                    (g::DOUBLE_FLAT, "double-flat", "Double flat"),
-                    (g::FLAT, "flat", "Flat"),
-                    (g::NATURAL, "natural", "Natural"),
-                    (g::SHARP, "sharp", "Sharp"),
-                    (g::DOUBLE_SHARP, "double-sharp", "Double sharp"),
+                    (g::DOUBLE_FLAT, "double-flat", t("Double flat")),
+                    (g::FLAT, "flat", t("Flat")),
+                    (g::NATURAL, "natural", t("Natural")),
+                    (g::SHARP, "sharp", t("Sharp")),
+                    (g::DOUBLE_SHARP, "double-sharp", t("Double sharp")),
                 ] {
                     if glyph_button(ui, GlyphLabel::Glyph(c, 26.0, 0.55, -4.0), false, tip).clicked() {
                         app.run("note.accidental", json!({ "type": id }));
                     }
                 }
-                if glyph_button(ui, GlyphLabel::Text("⌒"), false, "Tie (T)").clicked() {
+                if glyph_button(ui, GlyphLabel::Text("⌒"), false, t("Tie (T)")).clicked() {
                     app.run("note.tie", json!({}));
                 }
                 ui.separator();
                 for v in 0..4usize {
                     let selected = input.voice == v;
                     let (rect, resp) = ui.allocate_exact_size(Vec2::new(26.0, 34.0), Sense::click());
-                    let resp = resp.on_hover_text(format!("Voice {} (Ctrl+Alt+{})", v + 1, v + 1));
+                    let resp = resp.on_hover_text(tf("Voice {} (Ctrl+Alt+{})", &[&(v + 1), &(v + 1)]));
                     let c = voice_color(v);
                     let r = Rect::from_center_size(rect.center(), Vec2::new(22.0, 22.0));
                     ui.painter()
@@ -445,18 +456,18 @@ pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     }
                 }
                 ui.separator();
-                if glyph_button(ui, GlyphLabel::Text("↶"), false, "Undo (Ctrl+Z)").clicked() {
+                if glyph_button(ui, GlyphLabel::Text("↶"), false, t("Undo (Ctrl+Z)")).clicked() {
                     app.run("edit.undo", json!({}));
                 }
-                if glyph_button(ui, GlyphLabel::Text("↷"), false, "Redo (Ctrl+Y)").clicked() {
+                if glyph_button(ui, GlyphLabel::Text("↷"), false, t("Redo (Ctrl+Y)")).clicked() {
                     app.run("edit.redo", json!({}));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if glyph_button(ui, GlyphLabel::Text("+"), false, "Zoom in").clicked() {
+                    if glyph_button(ui, GlyphLabel::Text("+"), false, t("Zoom in")).clicked() {
                         app.set_zoom(app.zoom * 1.15);
                     }
                     ui.label(format!("{:.0}%", app.zoom / 7.5 * 100.0));
-                    if glyph_button(ui, GlyphLabel::Text("−"), false, "Zoom out").clicked() {
+                    if glyph_button(ui, GlyphLabel::Text("−"), false, t("Zoom out")).clicked() {
                         app.set_zoom(app.zoom / 1.15);
                     }
                     egui::ComboBox::from_id_salt("view-mode")
@@ -471,12 +482,12 @@ pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
 // ---------- status bar ----------
 
 pub fn status_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
-    let t = Tokens::get(ui.ctx());
+    let tk = Tokens::get(ui.ctx());
     egui::Panel::bottom("status_bar")
         .exact_size(26.0)
         .frame(
             egui::Frame::NONE
-                .fill(t.status)
+                .fill(tk.status)
                 .inner_margin(egui::Margin::symmetric(10, 0)),
         )
         .show(ui, |ui| {
@@ -484,14 +495,13 @@ pub fn status_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 let s = &app.session;
                 let mode = if s.input.active {
                     let dots = ".".repeat(usize::from(s.input.dots));
-                    RichText::new(format!(
-                        "● Note input · {}{dots} · Voice {}",
-                        s.input.value.xml_name(),
-                        s.input.voice + 1
+                    RichText::new(tf(
+                        "● Note input · {}{} · Voice {}",
+                        &[&t(s.input.value.xml_name()), &dots, &(s.input.voice + 1)],
                     ))
                     .color(voice_color(s.input.voice))
                 } else {
-                    RichText::new("Normal mode").color(t.text_dim)
+                    RichText::new(t("Normal mode")).color(tk.text_dim)
                 };
                 ui.label(mode);
                 ui.separator();
@@ -500,20 +510,19 @@ pub fn status_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 } else {
                     s.status.clone()
                 };
-                ui.label(msg);
+                ui.label(crate::i18n::tr(&msg));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
                         RichText::new(format!("{}{}", s.file_name, if s.dirty { " •" } else { "" }))
-                            .color(t.text_dim),
+                            .color(tk.text_dim),
                     );
                     ui.separator();
                     ui.label(
-                        RichText::new(format!(
+                        RichText::new(tf(
                             "{} measures · {} instruments",
-                            s.score.measures.len(),
-                            s.score.parts.len()
+                            &[&s.score.measures.len(), &s.score.parts.len()],
                         ))
-                        .color(t.text_dim),
+                        .color(tk.text_dim),
                     );
                 });
             });
@@ -535,13 +544,13 @@ fn section(ui: &mut egui::Ui, title: &str, open: bool, add: impl FnOnce(&mut egu
 
 /// A palette cell showing a SMuFL glyph scaled and centred to fit.
 fn smufl_button(ui: &mut egui::Ui, name: &str, tip: &str) -> egui::Response {
-    let t = Tokens::get(ui.ctx());
+    let tk = Tokens::get(ui.ctx());
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(34.0, 34.0), Sense::click());
     let resp = resp.on_hover_text(tip);
     let bg = if resp.hovered() {
         ui.visuals().widgets.hovered.weak_bg_fill
     } else {
-        t.toolbar
+        tk.toolbar
     };
     ui.painter().rect_filled(rect, 5.0, bg);
     if let Some((c, w, lo, hi)) = scoreart_engrave::smufl::get(name) {
@@ -563,13 +572,13 @@ fn text_button(ui: &mut egui::Ui, label: impl Into<egui::WidgetText>, tip: &str)
 
 /// A palette cell showing a dynamic in Bravura letters, sized to fit.
 fn dynamic_button(ui: &mut egui::Ui, id: &str) -> egui::Response {
-    let t = Tokens::get(ui.ctx());
+    let tk = Tokens::get(ui.ctx());
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(40.0, 30.0), Sense::click());
     let resp = resp.on_hover_text(id);
     let bg = if resp.hovered() {
         ui.visuals().widgets.hovered.weak_bg_fill
     } else {
-        t.toolbar
+        tk.toolbar
     };
     ui.painter().rect_filled(rect, 5.0, bg);
     let letters: Vec<(char, f32)> = id.chars().filter_map(g::dynamic_letter).collect();
@@ -588,23 +597,23 @@ fn dynamic_button(ui: &mut egui::Ui, id: &str) -> egui::Response {
 
 pub fn palette(app: &mut ScoreApp, ui: &mut egui::Ui) {
     use scoreart_model::marks::{self, MARKS};
-    let t = Tokens::get(ui.ctx());
+    let tk = Tokens::get(ui.ctx());
     egui::Panel::left("palette")
         .default_size(232.0)
         .resizable(true)
-        .frame(egui::Frame::NONE.fill(t.panel).inner_margin(8))
+        .frame(egui::Frame::NONE.fill(tk.panel).inner_margin(8))
         .show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.label(RichText::new("Palettes").size(15.0).strong());
+                ui.label(RichText::new(t("Palettes")).size(15.0).strong());
                 ui.label(
-                    RichText::new(
+                    RichText::new(t(
                         "Select notes or measures, then click. Shift+click or Shift+→ selects a range.",
-                    )
+                    ))
                     .small()
-                    .color(t.text_dim),
+                    .color(tk.text_dim),
                 );
                 ui.add_space(4.0);
-                section(ui, "Clefs", false, |ui| {
+                section(ui, t("Clefs"), false, |ui| {
                     for c in Clef::ALL {
                         let name = match c {
                             Clef::Treble => "gClef",
@@ -615,30 +624,33 @@ pub fn palette(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         };
                         let (gc, _, _) = g::clef(c);
                         let resp = if scoreart_engrave::smufl::get(name).is_some() {
-                            smufl_button(ui, name, c.label())
+                            smufl_button(ui, name, t(c.label()))
                         } else {
                             let base = match c {
                                 Clef::Bass => 0.45,
                                 Clef::Alto | Clef::Tenor | Clef::Percussion => 0.5,
                                 _ => 0.62,
                             };
-                            glyph_button(ui, GlyphLabel::Glyph(gc, 15.0, base, -5.0), false, c.label())
+                            glyph_button(ui, GlyphLabel::Glyph(gc, 15.0, base, -5.0), false, t(c.label()))
                         };
                         if resp.clicked() {
                             app.run("measure.clef", json!({ "clef": c.id() }));
                         }
                     }
                 });
-                section(ui, "Key signatures", false, |ui| {
+                section(ui, t("Key signatures"), false, |ui| {
                     for f in -7..=7i32 {
                         let k = KeySig::new(f);
-                        let tip = format!("{} major / {} accidentals", k.name(), f.abs());
+                        let tip = tf(
+                            "{} major / {} accidentals",
+                            &[&crate::i18n::note_name(k.name()), &f.abs()],
+                        );
                         if text_button(ui, RichText::new(key_label(f)).size(12.0), &tip).clicked() {
                             app.run("measure.key", json!({ "fifths": f }));
                         }
                     }
                 });
-                section(ui, "Time signatures", false, |ui| {
+                section(ui, t("Time signatures"), false, |ui| {
                     for ts in [
                         "2/4", "3/4", "4/4", "5/4", "6/8", "3/8", "9/8", "12/8", "2/2", "7/8", "common",
                         "cut",
@@ -661,35 +673,40 @@ pub fn palette(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     (marks::TECHNIQUES, false),
                     (marks::SLIDES, false),
                 ] {
-                    section(ui, group, open, |ui| {
+                    section(ui, t(group), open, |ui| {
                         for d in MARKS.iter().filter(|d| d.group == group) {
-                            if smufl_button(ui, d.glyph_above, d.label).clicked() {
+                            if smufl_button(ui, d.glyph_above, t(d.label)).clicked() {
                                 app.run("note.articulation", json!({ "type": d.id }));
                             }
                         }
                     });
                 }
-                section(ui, "Dynamics", true, |ui| {
+                section(ui, t("Dynamics"), true, |ui| {
                     for d in scoreart_model::Dynamic::all() {
                         if dynamic_button(ui, d.id()).clicked() {
                             app.run("note.dynamic", json!({ "type": d.id() }));
                         }
                     }
-                    if text_button(ui, "✕", "Remove dynamic").clicked() {
+                    if text_button(ui, "✕", t("Remove dynamic")).clicked() {
                         app.run("note.dynamic", json!({ "type": "none" }));
                     }
                 });
-                section(ui, "Lines", true, |ui| {
+                section(ui, t("Lines"), true, |ui| {
                     for k in scoreart_model::SpannerKind::ALL {
                         let (resp, _) = match k {
-                            scoreart_model::SpannerKind::Slur => (text_button(ui, "⌒", k.label()), ()),
-                            scoreart_model::SpannerKind::Crescendo => (text_button(ui, "<", k.label()), ()),
-                            scoreart_model::SpannerKind::Diminuendo => (text_button(ui, ">", k.label()), ()),
-                            scoreart_model::SpannerKind::CrescendoLine => {
-                                (text_button(ui, RichText::new("cresc.").italics(), k.label()), ())
+                            scoreart_model::SpannerKind::Slur => (text_button(ui, "⌒", t(k.label())), ()),
+                            scoreart_model::SpannerKind::Crescendo => {
+                                (text_button(ui, "<", t(k.label())), ())
                             }
+                            scoreart_model::SpannerKind::Diminuendo => {
+                                (text_button(ui, ">", t(k.label())), ())
+                            }
+                            scoreart_model::SpannerKind::CrescendoLine => (
+                                text_button(ui, RichText::new("cresc.").italics(), t(k.label())),
+                                (),
+                            ),
                             scoreart_model::SpannerKind::DiminuendoLine => {
-                                (text_button(ui, RichText::new("dim.").italics(), k.label()), ())
+                                (text_button(ui, RichText::new("dim.").italics(), t(k.label())), ())
                             }
                             scoreart_model::SpannerKind::Ottava(o) => {
                                 let name = match o {
@@ -700,60 +717,63 @@ pub fn palette(app: &mut ScoreApp, ui: &mut egui::Ui) {
                                     3 => "ventiduesimaAlta",
                                     _ => "ventiduesimaBassa",
                                 };
-                                (smufl_button(ui, name, k.label()), ())
+                                (smufl_button(ui, name, t(k.label())), ())
                             }
                             scoreart_model::SpannerKind::Pedal => {
-                                (smufl_button(ui, "keyboardPedalPed", k.label()), ())
+                                (smufl_button(ui, "keyboardPedalPed", t(k.label())), ())
                             }
                             scoreart_model::SpannerKind::TrillLine => (
-                                text_button(ui, RichText::new("tr~~").italics().strong(), k.label()),
+                                text_button(ui, RichText::new("tr~~").italics().strong(), t(k.label())),
                                 (),
                             ),
                             scoreart_model::SpannerKind::Vibrato => {
-                                (smufl_button(ui, "wiggleVibrato", k.label()), ())
+                                (smufl_button(ui, "wiggleVibrato", t(k.label())), ())
                             }
                             scoreart_model::SpannerKind::LetRing => {
-                                (text_button(ui, RichText::new("l.r.").italics(), k.label()), ())
+                                (text_button(ui, RichText::new("l.r.").italics(), t(k.label())), ())
                             }
                             scoreart_model::SpannerKind::PalmMute => {
-                                (text_button(ui, RichText::new("P.M.").italics(), k.label()), ())
+                                (text_button(ui, RichText::new("P.M.").italics(), t(k.label())), ())
                             }
-                            scoreart_model::SpannerKind::Glissando => (text_button(ui, "╲", k.label()), ()),
+                            scoreart_model::SpannerKind::Glissando => {
+                                (text_button(ui, "╲", t(k.label())), ())
+                            }
                             scoreart_model::SpannerKind::WavyGlissando => {
-                                (text_button(ui, "≀", k.label()), ())
+                                (text_button(ui, "≀", t(k.label())), ())
                             }
                         };
                         if resp.clicked() {
                             app.run("line.add", json!({ "type": k.id() }));
                         }
                     }
-                    if text_button(ui, "✕", "Remove lines starting or ending at the selection").clicked() {
+                    if text_button(ui, "✕", t("Remove lines starting or ending at the selection")).clicked()
+                    {
                         app.run("line.remove", json!({}));
                     }
                 });
-                section(ui, "Arpeggios & tremolos", false, |ui| {
+                section(ui, t("Arpeggios & tremolos"), false, |ui| {
                     for (label, id, tip) in [
-                        ("≀", "arpeggio", "Arpeggio"),
-                        ("≀↑", "arpeggio-up", "Arpeggio up"),
-                        ("≀↓", "arpeggio-down", "Arpeggio down"),
-                        ("[", "non-arpeggio", "Non-arpeggio bracket"),
+                        ("≀", "arpeggio", t("Arpeggio")),
+                        ("≀↑", "arpeggio-up", t("Arpeggio up")),
+                        ("≀↓", "arpeggio-down", t("Arpeggio down")),
+                        ("[", "non-arpeggio", t("Non-arpeggio bracket")),
                     ] {
                         if text_button(ui, label, tip).clicked() {
                             app.run("note.arpeggio", json!({ "type": id }));
                         }
                     }
                     for n in 1..=4 {
-                        if smufl_button(ui, &format!("tremolo{n}"), &format!("Tremolo, {n} stroke(s)"))
+                        if smufl_button(ui, &format!("tremolo{n}"), &tf("Tremolo, {} stroke(s)", &[&n]))
                             .clicked()
                         {
                             app.run("note.tremolo", json!({ "strokes": n }));
                         }
                     }
-                    if smufl_button(ui, "buzzRoll", "Buzz roll").clicked() {
+                    if smufl_button(ui, "buzzRoll", t("Buzz roll")).clicked() {
                         app.run("note.tremolo", json!({ "strokes": "buzz" }));
                     }
                 });
-                section(ui, "Grace notes", false, |ui| {
+                section(ui, t("Grace notes"), false, |ui| {
                     for (label, id) in [
                         ("♪̸", "acciaccatura"),
                         ("♪", "appoggiatura"),
@@ -764,17 +784,17 @@ pub fn palette(app: &mut ScoreApp, ui: &mut egui::Ui) {
                             app.run("note.grace", json!({ "type": id }));
                         }
                     }
-                    if text_button(ui, "↑", "Move grace note up").clicked() {
+                    if text_button(ui, "↑", t("Move grace note up")).clicked() {
                         app.run("note.grace-pitch", json!({ "delta": 1 }));
                     }
-                    if text_button(ui, "↓", "Move grace note down").clicked() {
+                    if text_button(ui, "↓", t("Move grace note down")).clicked() {
                         app.run("note.grace-pitch", json!({ "delta": -1 }));
                     }
-                    if text_button(ui, "✕", "Remove grace notes").clicked() {
+                    if text_button(ui, "✕", t("Remove grace notes")).clicked() {
                         app.run("note.grace-remove", json!({}));
                     }
                 });
-                section(ui, "Noteheads", false, |ui| {
+                section(ui, t("Noteheads"), false, |ui| {
                     for h in scoreart_model::NoteHead::ALL {
                         let (c, _) = g::head_for(h, NoteValue::Quarter);
                         let name = scoreart_engrave::smufl::TABLE
@@ -783,61 +803,63 @@ pub fn palette(app: &mut ScoreApp, ui: &mut egui::Ui) {
                             .map(|x| x.0)
                             .unwrap_or("noteheadBlack");
                         let resp = if name == "noteheadBlack" {
-                            glyph_button(ui, GlyphLabel::Glyph(c, 30.0, 0.55, -4.0), false, h.id())
+                            glyph_button(ui, GlyphLabel::Glyph(c, 30.0, 0.55, -4.0), false, t(h.id()))
                         } else {
-                            smufl_button(ui, name, h.id())
+                            smufl_button(ui, name, t(h.id()))
                         };
                         if resp.clicked() {
                             app.run("note.head", json!({ "type": h.id() }));
                         }
                     }
-                    if text_button(ui, "( )", "Parentheses (ghost note)").clicked() {
+                    if text_button(ui, "( )", t("Parentheses (ghost note)")).clicked() {
                         app.run("note.paren", json!({}));
                     }
                 });
-                section(ui, "Repeats & jumps", false, |ui| {
-                    if text_button(ui, "𝄆", "Start repeat").clicked() {
+                section(ui, t("Repeats & jumps"), false, |ui| {
+                    if text_button(ui, "𝄆", t("Start repeat")).clicked() {
                         app.run("measure.repeat-start", json!({}));
                     }
-                    if text_button(ui, "𝄇", "End repeat").clicked() {
+                    if text_button(ui, "𝄇", t("End repeat")).clicked() {
                         app.run("measure.barline", json!({ "type": "repeat-end" }));
                     }
                     for n in 1..=3 {
-                        if text_button(ui, format!("⌐{n}."), &format!("Volta {n}")).clicked() {
+                        if text_button(ui, format!("⌐{n}."), &tf("Volta {}", &[&n])).clicked() {
                             app.run("measure.volta", json!({ "number": n }));
                         }
                     }
-                    if text_button(ui, "⌐✕", "Remove volta").clicked() {
+                    if text_button(ui, "⌐✕", t("Remove volta")).clicked() {
                         app.run("measure.volta", json!({ "number": 0 }));
                     }
-                    if smufl_button(ui, "repeat1Bar", "One-measure repeat").clicked() {
+                    if smufl_button(ui, "repeat1Bar", t("One-measure repeat")).clicked() {
                         app.run("measure.repeat-sign", json!({}));
                     }
                     for j in scoreart_model::Jump::ALL {
                         let resp = match j {
-                            scoreart_model::Jump::Segno => smufl_button(ui, "segno", "Segno"),
-                            scoreart_model::Jump::Coda => smufl_button(ui, "coda", "Coda"),
-                            scoreart_model::Jump::VariedCoda => smufl_button(ui, "codaSquare", "Varied coda"),
+                            scoreart_model::Jump::Segno => smufl_button(ui, "segno", t("Segno")),
+                            scoreart_model::Jump::Coda => smufl_button(ui, "coda", t("Coda")),
+                            scoreart_model::Jump::VariedCoda => {
+                                smufl_button(ui, "codaSquare", t("Varied coda"))
+                            }
                             _ => ui
                                 .add_sized(
                                     Vec2::new(84.0, 26.0),
                                     egui::Button::new(RichText::new(j.text().unwrap_or("")).italics()),
                                 )
-                                .on_hover_text(j.id()),
+                                .on_hover_text(t(j.id())),
                         };
                         if resp.clicked() {
                             app.run("measure.jump", json!({ "type": j.id() }));
                         }
                     }
                 });
-                section(ui, "Barlines", false, |ui| {
+                section(ui, t("Barlines"), false, |ui| {
                     for (label, id) in [("‖", "double"), ("𝄂", "final"), ("|", "regular")] {
                         if text_button(ui, label, id).clicked() {
                             app.run("measure.barline", json!({ "type": id }));
                         }
                     }
                 });
-                section(ui, "Text", false, |ui| {
+                section(ui, t("Text"), false, |ui| {
                     let mut dlg = |ui: &mut egui::Ui,
                                    label: &str,
                                    title: &'static str,
@@ -858,46 +880,46 @@ pub fn palette(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     };
                     dlg(
                         ui,
-                        "Staff text…",
-                        "Staff text",
+                        t("Staff text…"),
+                        t("Staff text"),
                         "note.text",
                         "text",
                         String::new(),
                     );
                     dlg(
                         ui,
-                        "Chord symbol…",
-                        "Chord symbol (e.g. Cmaj7, F#m7/C#)",
+                        t("Chord symbol…"),
+                        t("Chord symbol (e.g. Cmaj7, F#m7/C#)"),
                         "note.chord-symbol",
                         "text",
                         String::new(),
                     );
                     dlg(
                         ui,
-                        "Tempo marking…",
-                        "Tempo marking (e.g. Allegro)",
+                        t("Tempo marking…"),
+                        t("Tempo marking (e.g. Allegro)"),
                         "measure.tempo-text",
                         "text",
                         "Allegro".into(),
                     );
                     dlg(
                         ui,
-                        "System text…",
-                        "System text",
+                        t("System text…"),
+                        t("System text"),
                         "measure.text",
                         "text",
                         String::new(),
                     );
                     dlg(
                         ui,
-                        "Fingering…",
-                        "Fingering",
+                        t("Fingering…"),
+                        t("Fingering"),
                         "note.fingering",
                         "text",
                         String::new(),
                     );
                     if ui
-                        .add_sized(Vec2::new(98.0, 26.0), egui::Button::new("Rehearsal mark"))
+                        .add_sized(Vec2::new(98.0, 26.0), egui::Button::new(t("Rehearsal mark")))
                         .clicked()
                     {
                         app.run("measure.rehearsal", json!({}));
@@ -905,14 +927,14 @@ pub fn palette(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     for f in ["1", "2", "3", "4", "5"] {
                         if ui
                             .add_sized(Vec2::new(26.0, 26.0), egui::Button::new(f))
-                            .on_hover_text("Fingering")
+                            .on_hover_text(t("Fingering"))
                             .clicked()
                         {
                             app.run("note.fingering", json!({ "text": f }));
                         }
                     }
                 });
-                section(ui, "Tempo", false, |ui| {
+                section(ui, t("Tempo"), false, |ui| {
                     for bpm in [60, 72, 80, 92, 100, 108, 120, 132, 144] {
                         if text_button(ui, bpm.to_string(), &format!("♩ = {bpm}")).clicked() {
                             app.run("measure.tempo", json!({ "bpm": bpm }));
@@ -949,7 +971,7 @@ pub struct Fields {
 }
 
 pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
-    let t = Tokens::get(ui.ctx());
+    let tk = Tokens::get(ui.ctx());
     // Refresh buffers when the score or selection changed.
     if app.fields.revision != app.session.revision || app.fields.sel != app.session.selection {
         let m = &app.session.score.meta;
@@ -979,18 +1001,18 @@ pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 .unwrap_or_default(),
         };
     }
-    egui::Panel::right("properties").default_size(240.0).resizable(true).frame(egui::Frame::NONE.fill(t.panel).inner_margin(10)).show(ui, |ui| {
+    egui::Panel::right("properties").default_size(240.0).resizable(true).frame(egui::Frame::NONE.fill(tk.panel).inner_margin(10)).show(ui, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.label(RichText::new("Properties").size(15.0).strong());
+            ui.label(RichText::new(t("Properties")).size(15.0).strong());
             ui.add_space(6.0);
-            egui::CollapsingHeader::new(RichText::new("Score").strong()).default_open(true).show(ui, |ui| {
+            egui::CollapsingHeader::new(RichText::new(t("Score")).strong()).default_open(true).show(ui, |ui| {
                 let mut changed = false;
                 egui::Grid::new("meta").num_columns(2).spacing([6.0, 6.0]).show(ui, |ui| {
                     for (label, field) in [
-                        ("Title", &mut app.fields.title),
-                        ("Subtitle", &mut app.fields.subtitle),
-                        ("Composer", &mut app.fields.composer),
-                        ("Lyricist", &mut app.fields.lyricist),
+                        (t("Title"), &mut app.fields.title),
+                        (t("Subtitle"), &mut app.fields.subtitle),
+                        (t("Composer"), &mut app.fields.composer),
+                        (t("Lyricist"), &mut app.fields.lyricist),
                     ] {
                         ui.label(label);
                         let r = ui.add(egui::TextEdit::singleline(field).desired_width(150.0));
@@ -1004,10 +1026,10 @@ pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 }
             });
             let sel = app.session.selection;
-            egui::CollapsingHeader::new(RichText::new("Selection").strong()).default_open(true).show(ui, |ui| {
+            egui::CollapsingHeader::new(RichText::new(t("Selection")).strong()).default_open(true).show(ui, |ui| {
                 match sel {
                     None => {
-                        ui.label(RichText::new("Nothing selected. Click a note, a rest or an empty part of a measure.").color(t.text_dim));
+                        ui.label(RichText::new(t("Nothing selected. Click a note, a rest or an empty part of a measure.")).color(tk.text_dim));
                     }
                     Some(_) => {
                         ui.label(app.session.describe_selection());
@@ -1018,13 +1040,13 @@ pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 {
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        ui.label("Lyric");
+                        ui.label(t("Lyric"));
                         egui::ComboBox::from_id_salt("verse")
                             .width(54.0)
-                            .selected_text(format!("v. {}", app.fields.verse + 1))
+                            .selected_text(tf("v. {}", &[&(app.fields.verse + 1)]))
                             .show_ui(ui, |ui| {
                                 for v in 0..6 {
-                                    if ui.selectable_label(app.fields.verse == v, format!("Verse {}", v + 1)).clicked() {
+                                    if ui.selectable_label(app.fields.verse == v, tf("Verse {}", &[&(v + 1)])).clicked() {
                                         app.fields.verse = v;
                                         app.fields.revision = 0;
                                     }
@@ -1042,7 +1064,7 @@ pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         }
                     });
                     ui.horizontal(|ui| {
-                        ui.label("Voice");
+                        ui.label(t("Voice"));
                         for v in 1..=4 {
                             if ui.selectable_label(ev.voice + 1 == v, v.to_string()).clicked() {
                                 app.run("note.voice", json!({ "voice": v }));
@@ -1051,9 +1073,9 @@ pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     });
                 }
             });
-            egui::CollapsingHeader::new(RichText::new("Instrument").strong()).default_open(false).show(ui, |ui| {
+            egui::CollapsingHeader::new(RichText::new(t("Instrument")).strong()).default_open(false).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("Name");
+                    ui.label(t("Name"));
                     let r = ui.add(egui::TextEdit::singleline(&mut app.fields.part_name).desired_width(130.0));
                     if r.lost_focus() {
                         let n = app.fields.part_name.clone();
@@ -1065,11 +1087,11 @@ pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 // Swap the whole part to another instrument.
                 let mut pick: Option<&'static str> = None;
                 egui::ComboBox::from_id_salt("change-instrument")
-                    .selected_text(format!("Change to … ({current})"))
+                    .selected_text(tf("Change to … ({})", &[&crate::i18n::tr(&current)]))
                     .width(200.0)
                     .show_ui(ui, |ui| {
                         for i in scoreart_model::INSTRUMENTS {
-                            if ui.selectable_label(i.name == current, i.name).clicked() {
+                            if ui.selectable_label(i.name == current || t(i.name) == current, t(i.name)).clicked() {
                                 pick = Some(i.id);
                             }
                         }
@@ -1089,12 +1111,12 @@ pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 let mut change: Option<&'static str> = None;
                 egui::ComboBox::from_id_salt("instrument-change")
                     .selected_text(match &here {
-                        Some(n) => format!("From m. {}: {n}", measure + 1),
-                        None => format!("Instrument change at m. {} …", measure + 1),
+                        Some(n) => tf("From m. {}: {}", &[&(measure + 1), &crate::i18n::tr(n)]),
+                        None => tf("Instrument change at m. {} …", &[&(measure + 1)]),
                     })
                     .width(200.0)
                     .show_ui(ui, |ui| {
-                        if here.is_some() && ui.selectable_label(false, "(remove the change)").clicked() {
+                        if here.is_some() && ui.selectable_label(false, t("(remove the change)")).clicked() {
                             change = Some("");
                         }
                         for i in scoreart_model::INSTRUMENTS {
@@ -1109,7 +1131,7 @@ pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         json!({ "part": part, "measure": measure, "instrument": id }),
                     );
                 }
-                if ui.button("Remove this instrument").clicked() {
+                if ui.button(t("Remove this instrument")).clicked() {
                     app.run("part.remove", json!({}));
                 }
             });
@@ -1126,13 +1148,13 @@ pub fn open_lyric_dialog(app: &mut ScoreApp) {
         .unwrap_or_default();
     if app.session.selected_event().is_some() {
         app.dialog = Some(Dialog::Text {
-            title: "Lyric (a trailing - joins it to the next syllable)",
+            title: t("Lyric (a trailing - joins it to the next syllable)"),
             command: "note.lyric",
             key: "text",
             value: current,
         });
     } else {
-        app.session.status = "Select a note first".into();
+        app.session.status = t("Select a note first").into();
     }
 }
 
@@ -1152,7 +1174,7 @@ pub struct NewScore {
 impl Default for NewScore {
     fn default() -> Self {
         NewScore {
-            title: "Untitled score".into(),
+            title: t("Untitled score").into(),
             composer: String::new(),
             instruments: vec!["piano"],
             time: "4/4",
@@ -1170,19 +1192,19 @@ pub fn dialogs(app: &mut ScoreApp, ctx: &egui::Context) {
         Dialog::NewScore(mut ns) => {
             let resp = egui::Modal::new(egui::Id::unique("new_score")).show(ctx, |ui| {
                 ui.set_width(420.0);
-                ui.heading("New score");
+                ui.heading(t("New score"));
                 ui.add_space(6.0);
                 egui::Grid::new("ns")
                     .num_columns(2)
                     .spacing([10.0, 8.0])
                     .show(ui, |ui| {
-                        ui.label("Title");
+                        ui.label(t("Title"));
                         ui.text_edit_singleline(&mut ns.title);
                         ui.end_row();
-                        ui.label("Composer");
+                        ui.label(t("Composer"));
                         ui.text_edit_singleline(&mut ns.composer);
                         ui.end_row();
-                        ui.label("Time");
+                        ui.label(t("Time"));
                         egui::ComboBox::from_id_salt("ns_time")
                             .selected_text(ns.time)
                             .show_ui(ui, |ui| {
@@ -1194,32 +1216,38 @@ pub fn dialogs(app: &mut ScoreApp, ctx: &egui::Context) {
                                 }
                             });
                         ui.end_row();
-                        ui.label("Key");
+                        ui.label(t("Key"));
                         egui::ComboBox::from_id_salt("ns_key")
-                            .selected_text(format!("{} major", KeySig::new(ns.key).name()))
+                            .selected_text(tf(
+                                "{} major",
+                                &[&crate::i18n::note_name(KeySig::new(ns.key).name())],
+                            ))
                             .show_ui(ui, |ui| {
                                 for f in -7..=7 {
                                     ui.selectable_value(
                                         &mut ns.key,
                                         f,
-                                        format!("{} major ({})", KeySig::new(f).name(), key_label(f)),
+                                        tf(
+                                            "{} major ({})",
+                                            &[&crate::i18n::note_name(KeySig::new(f).name()), &key_label(f)],
+                                        ),
                                     );
                                 }
                             });
                         ui.end_row();
-                        ui.label("Measures");
+                        ui.label(t("Measures"));
                         ui.add(egui::DragValue::new(&mut ns.measures).range(1..=999));
                         ui.end_row();
-                        ui.label("Tempo ♩=");
+                        ui.label(t("Tempo ♩="));
                         ui.add(egui::DragValue::new(&mut ns.tempo).range(20..=300));
                         ui.end_row();
                     });
                 ui.add_space(6.0);
-                ui.label(RichText::new("Instruments").strong());
+                ui.label(RichText::new(t("Instruments")).strong());
                 ui.horizontal_wrapped(|ui| {
                     for inst in INSTRUMENTS {
                         let mut on = ns.instruments.contains(&inst.id);
-                        if ui.checkbox(&mut on, inst.name).changed() {
+                        if ui.checkbox(&mut on, t(inst.name)).changed() {
                             if on {
                                 ns.instruments.push(inst.id);
                             } else {
@@ -1231,9 +1259,9 @@ pub fn dialogs(app: &mut ScoreApp, ctx: &egui::Context) {
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
                     let ok = ui
-                        .add_enabled(!ns.instruments.is_empty(), egui::Button::new("Create"))
+                        .add_enabled(!ns.instruments.is_empty(), egui::Button::new(t("Create")))
                         .clicked();
-                    let cancel = ui.button("Cancel").clicked();
+                    let cancel = ui.button(t("Cancel")).clicked();
                     (ok, cancel)
                 })
                 .inner
@@ -1242,7 +1270,9 @@ pub fn dialogs(app: &mut ScoreApp, ctx: &egui::Context) {
             if ok {
                 app.run(
                     "file.new",
-                    json!({ "title": ns.title, "composer": ns.composer, "instruments": ns.instruments, "time": ns.time,
+                    json!({ "title": ns.title, "composer": ns.composer, "instruments": ns.instruments,
+                            "names": ns.instruments.iter().map(|id| scoreart_model::instrument(id).map_or("", |i| t(i.name))).collect::<Vec<_>>(),
+                            "time": ns.time,
                             "key": ns.key, "measures": ns.measures, "tempo": ns.tempo }),
                 );
                 app.fields = Fields::default();
@@ -1265,8 +1295,13 @@ pub fn dialogs(app: &mut ScoreApp, ctx: &egui::Context) {
                 let r = ui.text_edit_singleline(&mut value);
                 r.request_focus();
                 let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                ui.horizontal(|ui| (ui.button("OK").clicked() || enter, ui.button("Cancel").clicked()))
-                    .inner
+                ui.horizontal(|ui| {
+                    (
+                        ui.button(t("OK")).clicked() || enter,
+                        ui.button(t("Cancel")).clicked(),
+                    )
+                })
+                .inner
             });
             let (ok, cancel) = resp.inner;
             if ok {
@@ -1293,19 +1328,19 @@ pub fn dialogs(app: &mut ScoreApp, ctx: &egui::Context) {
         Dialog::Shortcuts => {
             let resp = egui::Modal::new(egui::Id::unique("shortcuts")).show(ctx, |ui| {
                 ui.set_width(460.0);
-                ui.heading("Keyboard shortcuts");
+                ui.heading(t("Keyboard shortcuts"));
                 egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
                     egui::Grid::new("sc").striped(true).num_columns(2).show(ui, |ui| {
                         for c in scoreart_engine::registry() {
                             if let Some(s) = c.shortcut {
-                                ui.label(RichText::new(s).monospace());
-                                ui.label(c.label);
+                                ui.label(RichText::new(crate::i18n::keys(s)).monospace());
+                                ui.label(t(c.label));
                                 ui.end_row();
                             }
                         }
                     });
                 });
-                ui.button("Close").clicked()
+                ui.button(t("Close")).clicked()
             });
             close = resp.inner || resp.should_close();
         }
@@ -1314,13 +1349,13 @@ pub fn dialogs(app: &mut ScoreApp, ctx: &egui::Context) {
                 ui.set_width(440.0);
                 ui.heading("ScoreArt");
                 ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
-                ui.label("An open-source music notation editor written in Rust.");
+                ui.label(t("An open-source music notation editor written in Rust."));
                 ui.add_space(6.0);
-                ui.label("Licensed MIT OR Apache-2.0. Music font: Bravura by Steinberg Media Technologies GmbH, SIL Open Font License 1.1.");
-                ui.label("MusicXML and SMuFL are specifications of the W3C Music Notation Community Group.");
+                ui.label(t("Licensed MIT OR Apache-2.0. Music font: Bravura by Steinberg Media Technologies GmbH, SIL Open Font License 1.1."));
+                ui.label(t("MusicXML and SMuFL are specifications of the W3C Music Notation Community Group."));
                 ui.add_space(6.0);
-                ui.label(RichText::new("ScoreArt is independent and not affiliated with MuseScore / Muse Group or ArtCraft.").small());
-                ui.button("Close").clicked()
+                ui.label(RichText::new(t("ScoreArt is independent and not affiliated with MuseScore / Muse Group or ArtCraft.")).small());
+                ui.button(t("Close")).clicked()
             });
             close = resp.inner || resp.should_close();
         }

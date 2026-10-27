@@ -76,6 +76,16 @@ People trust ScoreArt with their music; a crash loses their work. This outranks 
   The UI is thin and reads `Session` state.
 - **Rust only** (no handwritten JS/TS). **Never break wasm** (`cargo xtask wasm`).
 
+## Languages
+
+- The interface is English and German. Every text the UI shows goes through
+  `crate::i18n::t("…")` (fixed text) or `tf("… {} …", &[…])` (with values); messages made in
+  the engine are translated with `tr(…)`. English is the key; the German text goes into
+  `crates/ui-egui/src/i18n_de.rs`. `i18n_tests::every_text_has_a_german_translation` fails for
+  any text without one (`cargo test -p scoreart-ui-egui dump_keys -- --ignored` lists them in
+  `target/i18n-keys.txt`). Labels from other crates (commands, marks, instruments, MIDI actions,
+  licence summaries) are checked the same way.
+
 ## Quality gates
 Before every commit: `cargo xtask ci` (fmt, clippy -D warnings, tests, assets, layers, wasm).
 

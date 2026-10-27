@@ -12,6 +12,8 @@ use serde_json::json;
 use crate::ScoreApp;
 use crate::theme::Tokens;
 
+use crate::i18n::{t, tf};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Mode {
     Merge,
@@ -47,7 +49,10 @@ pub(crate) fn request_change(app: &mut ScoreApp, part: usize, instrument: &'stat
     };
     let filled: Vec<Line> = p.lines().into_iter().filter(|l| p.line_has_notes(*l)).collect();
     if filled.len() < 2 {
-        app.run("part.change", json!({ "part": part, "instrument": instrument }));
+        app.run(
+            "part.change",
+            json!({ "part": part, "instrument": instrument, "name": instrument_name(instrument) }),
+        );
         return;
     }
     app.instruments.pending = Some(PendingChange {
@@ -66,6 +71,7 @@ fn split_line(app: &mut ScoreApp, part: usize, line: Line, instrument: &'static 
             "part": part,
             "instrument": instrument,
             "mode": "split",
+            "name": instrument_name(instrument),
             "staff": line.staff + 1,
             "voice": line.voice + 1,
         }),
@@ -73,7 +79,7 @@ fn split_line(app: &mut ScoreApp, part: usize, line: Line, instrument: &'static 
 }
 
 fn instrument_name(id: &str) -> &'static str {
-    INSTRUMENTS.iter().find(|i| i.id == id).map_or("", |i| i.name)
+    INSTRUMENTS.iter().find(|i| i.id == id).map_or("", |i| t(i.name))
 }
 
 pub(crate) fn window(app: &mut ScoreApp, ctx: &egui::Context) {
@@ -81,38 +87,40 @@ pub(crate) fn window(app: &mut ScoreApp, ctx: &egui::Context) {
     if !app.instruments.open {
         return;
     }
-    let t = Tokens::get(ctx);
+    let tk = Tokens::get(ctx);
     let mut open = true;
     let playing = app.is_playing();
-    egui::Window::new("Instruments and sounds")
+    egui::Window::new(t("Instruments and sounds"))
         .open(&mut open)
         .default_width(640.0)
         .pivot(egui::Align2::CENTER_TOP)
         .default_pos(egui::pos2(ctx.content_rect().center().x, 60.0))
         .show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("Sounds:").color(t.text_dim));
+                ui.label(RichText::new(t("Sounds:")).color(tk.text_dim));
                 if ui
-                    .button("Load sounds…")
-                    .on_hover_text("A SoundFont (.sf2), an SFZ instrument (.sfz) or a zip of SFZ instruments")
+                    .button(t("Load sounds…"))
+                    .on_hover_text(t(
+                        "A SoundFont (.sf2), an SFZ instrument (.sfz) or a zip of SFZ instruments",
+                    ))
                     .clicked()
                 {
                     app.host.request_sounds(false);
                 }
-                if app.host.can_load_folders() && ui.button("Load SFZ folder…").clicked() {
+                if app.host.can_load_folders() && ui.button(t("Load SFZ folder…")).clicked() {
                     app.host.request_sounds(true);
                 }
                 if ui
-                    .button("Get free sounds…")
-                    .on_hover_text("Free libraries (orchestra, piano …) with their licences")
+                    .button(t("Get free sounds…"))
+                    .on_hover_text(t("Free libraries (orchestra, piano …) with their licences"))
                     .clicked()
                 {
                     app.open_catalog();
                 }
-                ui.toggle_value(&mut app.show_mixer, "Mixer  F10");
+                ui.toggle_value(&mut app.show_mixer, t("Mixer  F10"));
                 if ui
-                    .button("MIDI input…")
-                    .on_hover_text("Connect a MIDI keyboard and set what each key does")
+                    .button(t("MIDI input…"))
+                    .on_hover_text(t("Connect a MIDI keyboard and set what each key does"))
                     .clicked()
                 {
                     app.open_midi();
@@ -122,26 +130,29 @@ pub(crate) fn window(app: &mut ScoreApp, ctx: &egui::Context) {
             let count = app.session.score.parts.len();
             egui::ScrollArea::vertical().max_height(460.0).show(ui, |ui| {
                 for pi in 0..count {
-                    part_row(app, ui, pi, count, playing, &t);
+                    part_row(app, ui, pi, count, playing, &tk);
                     ui.separator();
                 }
             });
             ui.horizontal(|ui| {
-                ui.label("Add instrument");
+                ui.label(t("Add instrument"));
                 let mut add: Option<&'static str> = None;
                 egui::ComboBox::from_id_salt("instruments-add")
-                    .selected_text("Choose …")
+                    .selected_text(t("Choose …"))
                     .width(180.0)
                     .height(420.0)
                     .show_ui(ui, |ui| {
                         for i in INSTRUMENTS {
-                            if ui.selectable_label(false, i.name).clicked() {
+                            if ui.selectable_label(false, t(i.name)).clicked() {
                                 add = Some(i.id);
                             }
                         }
                     });
                 if let Some(id) = add {
-                    app.run("part.add", json!({ "instrument": id }));
+                    app.run(
+                        "part.add",
+                        json!({ "instrument": id, "name": instrument_name(id) }),
+                    );
                 }
             });
         });
@@ -150,21 +161,21 @@ pub(crate) fn window(app: &mut ScoreApp, ctx: &egui::Context) {
     }
 }
 
-fn part_row(app: &mut ScoreApp, ui: &mut egui::Ui, pi: usize, count: usize, playing: bool, t: &Tokens) {
+fn part_row(app: &mut ScoreApp, ui: &mut egui::Ui, pi: usize, count: usize, playing: bool, tk: &Tokens) {
     let Some(part) = app.session.score.parts.get(pi).cloned() else {
         return;
     };
     ui.horizontal(|ui| {
         if ui
             .add_enabled(pi > 0, egui::Button::new("▲").small())
-            .on_hover_text("Move up")
+            .on_hover_text(t("Move up"))
             .clicked()
         {
             app.run("part.move", json!({ "part": pi, "to": pi - 1 }));
         }
         if ui
             .add_enabled(pi + 1 < count, egui::Button::new("▼").small())
-            .on_hover_text("Move down")
+            .on_hover_text(t("Move down"))
             .clicked()
         {
             app.run("part.move", json!({ "part": pi, "to": pi + 1 }));
@@ -172,19 +183,19 @@ fn part_row(app: &mut ScoreApp, ui: &mut egui::Ui, pi: usize, count: usize, play
         let mut shown = part.visible();
         if ui
             .checkbox(&mut shown, "")
-            .on_hover_text("Show in the score (hidden instruments still play)")
+            .on_hover_text(t("Show in the score (hidden instruments still play)"))
             .changed()
         {
             app.run("part.visible", json!({ "part": pi, "visible": shown }));
         }
         ui.label(RichText::new(&part.name).strong());
         if part.staff_count() > 1 {
-            ui.label(RichText::new(format!("{} staves", part.staff_count())).color(t.text_dim));
+            ui.label(RichText::new(tf("{} staves", &[&part.staff_count()])).color(tk.text_dim));
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
-                .add_enabled(count > 1, egui::Button::new("Remove"))
-                .on_hover_text("Remove this instrument and its music")
+                .add_enabled(count > 1, egui::Button::new(t("Remove")))
+                .on_hover_text(t("Remove this instrument and its music"))
                 .clicked()
             {
                 app.run("part.remove", json!({ "part": pi }));
@@ -195,12 +206,15 @@ fn part_row(app: &mut ScoreApp, ui: &mut egui::Ui, pi: usize, count: usize, play
         ui.add_space(52.0);
         let mut pick: Option<&'static str> = None;
         egui::ComboBox::from_id_salt(("instruments-change", pi))
-            .selected_text("Change instrument …")
+            .selected_text(t("Change instrument …"))
             .width(170.0)
             .height(420.0)
             .show_ui(ui, |ui| {
                 for i in INSTRUMENTS {
-                    if ui.selectable_label(i.name == part.name, i.name).clicked() {
+                    if ui
+                        .selectable_label(i.name == part.name || t(i.name) == part.name, t(i.name))
+                        .clicked()
+                    {
                         pick = Some(i.id);
                     }
                 }
@@ -208,7 +222,7 @@ fn part_row(app: &mut ScoreApp, ui: &mut egui::Ui, pi: usize, count: usize, play
         if let Some(id) = pick {
             request_change(app, pi, id);
         }
-        ui.label(RichText::new("Sound").color(t.text_dim));
+        ui.label(RichText::new(t("Sound")).color(tk.text_dim));
         crate::mixer::sound_picker(app, ui, pi, &part.sound, playing, 150.0);
     });
     // Lines that could become instruments of their own.
@@ -221,16 +235,18 @@ fn part_row(app: &mut ScoreApp, ui: &mut egui::Ui, pi: usize, count: usize, play
         for line in lines {
             ui.horizontal(|ui| {
                 ui.add_space(52.0);
-                ui.label(RichText::new(part.line_label(line)).color(t.text_dim));
+                ui.label(RichText::new(crate::i18n::line_label(&part, line)).color(tk.text_dim));
                 let mut pick: Option<&'static str> = None;
                 egui::ComboBox::from_id_salt(("instruments-line", pi, line.staff, line.voice))
-                    .selected_text("Own instrument …")
+                    .selected_text(t("Own instrument …"))
                     .width(170.0)
                     .height(420.0)
                     .show_ui(ui, |ui| {
-                        ui.label(RichText::new("Moves this line into a new instrument").color(t.text_dim));
+                        ui.label(
+                            RichText::new(t("Moves this line into a new instrument")).color(tk.text_dim),
+                        );
                         for i in INSTRUMENTS {
-                            if ui.selectable_label(false, i.name).clicked() {
+                            if ui.selectable_label(false, t(i.name)).clicked() {
                                 pick = Some(i.id);
                             }
                         }
@@ -261,58 +277,62 @@ fn confirm(app: &mut ScoreApp, ctx: &egui::Context) {
     let mut done: Option<bool> = None;
     egui::Modal::new(egui::Id::unique("instrument-change-confirm")).show(ctx, |ui| {
         ui.set_width(460.0);
-        ui.heading(format!("Change {} to {new}", part.name));
-        ui.label(format!(
+        ui.heading(tf("Change {} to {}", &[&part.name, &new]));
+        ui.label(tf(
             "{} holds {} lines. What should happen to them?",
-            part.name,
-            lines.len()
+            &[&part.name, &lines.len()],
         ));
         ui.add_space(6.0);
         ui.radio_value(
             &mut pc.mode,
             Mode::Merge,
-            format!("Merge: all lines go into {new}"),
+            tf("Merge: all lines go into {}", &[&new]),
         );
         ui.label(
-            RichText::new("    Staves the new instrument does not have become extra voices.")
-                .small()
-                .weak(),
+            RichText::new(t(
+                "    Staves the new instrument does not have become extra voices.",
+            ))
+            .small()
+            .weak(),
         );
         ui.radio_value(
             &mut pc.mode,
             Mode::Split,
-            format!("Split: one line becomes {new}, {} keeps the rest", part.name),
+            tf(
+                "Split: one line becomes {}, {} keeps the rest",
+                &[&new, &part.name],
+            ),
         );
         ui.radio_value(
             &mut pc.mode,
             Mode::Discard,
-            format!("Keep one line as {new}, discard the others"),
+            tf("Keep one line as {}, discard the others", &[&new]),
         );
         if pc.mode != Mode::Merge {
             ui.horizontal(|ui| {
                 ui.add_space(20.0);
-                ui.label("Line");
+                ui.label(t("Line"));
                 egui::ComboBox::from_id_salt("instrument-change-line")
-                    .selected_text(part.line_label(pc.keep))
+                    .selected_text(crate::i18n::line_label(&part, pc.keep))
                     .show_ui(ui, |ui| {
                         for l in &lines {
-                            ui.selectable_value(&mut pc.keep, *l, part.line_label(*l));
+                            ui.selectable_value(&mut pc.keep, *l, crate::i18n::line_label(&part, *l));
                         }
                     });
             });
         }
         if pc.mode == Mode::Discard {
             ui.label(
-                RichText::new("The other lines are deleted (Undo brings them back).")
+                RichText::new(t("The other lines are deleted (Undo brings them back)."))
                     .color(egui::Color32::from_rgb(200, 90, 60)),
             );
         }
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            if ui.button("Change").clicked() {
+            if ui.button(t("Change")).clicked() {
                 done = Some(true);
             }
-            if ui.button("Cancel").clicked() {
+            if ui.button(t("Cancel")).clicked() {
                 done = Some(false);
             }
         });
@@ -331,6 +351,7 @@ fn confirm(app: &mut ScoreApp, ctx: &egui::Context) {
                     "part": pc.part,
                     "instrument": pc.instrument,
                     "mode": mode,
+                    "name": instrument_name(pc.instrument),
                     "staff": pc.keep.staff + 1,
                     "voice": pc.keep.voice + 1,
                 }),
