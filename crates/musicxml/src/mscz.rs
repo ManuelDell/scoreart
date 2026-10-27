@@ -138,19 +138,77 @@ fn harmony_text(h: &Element) -> Option<String> {
         };
         format!("{}{acc}", step.letter())
     };
+    // MuseScore 4.6+ wraps root, name and bass in <harmonyInfo>.
+    let h = h.child("harmonyInfo").unwrap_or(h);
     let root = h.child_num("root").map(|r| r as i32)?;
     let name = h.child("name").map(flat_text).unwrap_or_default();
     let bass = h
-        .child_num("base")
+        .child_num("bass")
+        .or_else(|| h.child_num("base"))
         .map(|b| format!("/{}", spell(b as i32)))
         .unwrap_or_default();
     Some(clip(&format!("{}{}{}", spell(root), name, bass)))
+}
+
+/// The line kind of a `<Spanner>` (voltas, ties and glissandos are read elsewhere).
+fn line_kind(c: &Element) -> Option<SpannerKind> {
+    match c.attr("type").unwrap_or("") {
+        "Slur" => Some(SpannerKind::Slur),
+        "HairPin" => {
+            let sub = c
+                .path(&["HairPin", "subtype"])
+                .map(|s| s.text.trim().to_string())
+                .unwrap_or_default();
+            Some(match sub.as_str() {
+                "1" => SpannerKind::Diminuendo,
+                "2" => SpannerKind::CrescendoLine,
+                "3" => SpannerKind::DiminuendoLine,
+                _ => SpannerKind::Crescendo,
+            })
+        }
+        "Ottava" => {
+            let sub = c
+                .path(&["Ottava", "subtype"])
+                .map(|s| s.text.trim().to_string())
+                .unwrap_or_default();
+            Some(SpannerKind::Ottava(match sub.as_str() {
+                "1" | "8vb" => -1,
+                "2" | "15ma" => 2,
+                "3" | "15mb" => -2,
+                "4" | "22ma" => 3,
+                "5" | "22mb" => -3,
+                _ => 1,
+            }))
+        }
+        "Pedal" => Some(SpannerKind::Pedal),
+        "Trill" => Some(SpannerKind::TrillLine),
+        "Vibrato" => Some(SpannerKind::Vibrato),
+        // Imported scores carry these as plain text lines.
+        "TextLine" => {
+            let begin = c
+                .path(&["TextLine", "beginText"])
+                .map(flat_text)
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            match begin.trim_end_matches('.') {
+                "cresc" | "crescendo" => Some(SpannerKind::CrescendoLine),
+                "dim" | "decresc" | "diminuendo" | "decrescendo" => Some(SpannerKind::DiminuendoLine),
+                "let ring" => Some(SpannerKind::LetRing),
+                "p.m" | "pm" | "palm mute" => Some(SpannerKind::PalmMute),
+                _ => None,
+            }
+        }
+        "LetRing" => Some(SpannerKind::LetRing),
+        "PalmMute" => Some(SpannerKind::PalmMute),
+        _ => None,
+    }
 }
 
 fn jump_of_label(label: &str) -> Option<Jump> {
     Some(match label.trim().to_ascii_lowercase().as_str() {
         "segno" | "varsegno" => Jump::Segno,
         "coda" | "codab" => Jump::Coda,
+        "codasquare" => Jump::VariedCoda,
         "varcoda" => Jump::VariedCoda,
         "fine" => Jump::Fine,
         "tocoda" | "tocodasym" => Jump::ToCoda,
@@ -220,6 +278,7 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
 
     // Parts and their staves: score-level <Staff id> → (part, staff index).
     let mut staff_map: HashMap<String, (usize, usize)> = HashMap::new();
+    let mut next_staff_id = 0usize;
     for (pi, p) in sc.children_named("Part").enumerate().take(limits::MAX_PARTS) {
         let inst = p.child("Instrument");
         let name = inst
@@ -236,9 +295,14 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
             .and_then(|v| v.parse::<i32>().ok())
             .map(|v| v.clamp(0, 127) as u8)
             .unwrap_or(0);
+        // MuseScore 4.6+ leaves out the id: staves are then numbered in order.
         let ids: Vec<String> = p
             .children_named("Staff")
-            .filter_map(|s| s.attr("id").map(str::to_string))
+            .map(|s| {
+                next_staff_id += 1;
+                s.attr("id")
+                    .map_or_else(|| next_staff_id.to_string(), str::to_string)
+            })
             .collect();
         let mut clefs = Vec::new();
         for (si, id) in ids.iter().enumerate().take(limits::MAX_STAVES) {
@@ -356,6 +420,9 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                 let mut pending_marks: Vec<Articulation> = Vec::new();
                 let mut pending_text: Option<String> = None;
                 let mut pending_chord: Option<String> = None;
+                // Pending moves of the voice position by <location>; MuseScore may step back
+                // to anchor a line and forward again, so only the net move counts.
+                let mut moved: i64 = 0;
                 let mut graces: Vec<Grace> = Vec::new();
                 let push_event = |voice: &mut Voice, t: &mut i64, e: Event| {
                     *t += i64::from(e.ticks());
@@ -413,7 +480,29 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                                         bpm: (qps * 60.0).round().clamp(10.0, 400.0) as u16,
                                     });
                                 }
-                                let word = text.split('=').next().unwrap_or("").trim().to_string();
+                                // The element tree keeps no order between text and child elements:
+                                // prefer the formatted runs (<b>Allegro</b>) when there are any.
+                                let runs: Vec<String> = c
+                                    .child("text")
+                                    .map(|t| {
+                                        t.children
+                                            .iter()
+                                            .filter(|x| x.name != "sym")
+                                            .map(flat_text)
+                                            .filter(|x| !x.is_empty())
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                let source = if runs.is_empty() {
+                                    text.clone()
+                                } else {
+                                    runs.join(" ")
+                                };
+                                let word = source
+                                    .split_whitespace()
+                                    .filter(|w| !w.contains('=') && !w.chars().all(|ch| ch.is_ascii_digit()))
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
                                 if !word.is_empty() && !word.chars().all(|ch| ch.is_ascii_digit()) {
                                     info.tempo_text = Some(clip(&word));
                                 }
@@ -431,7 +520,25 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                         }
                         "StaffText" | "Expression" | "PlayTechAnnotation" => {
                             let txt = flat_text(c.child("text").unwrap_or(c));
-                            if !txt.is_empty() {
+                            // Imported scores carry segno, coda and D.S./D.C. as plain staff text.
+                            let sym_jump = c
+                                .child("text")
+                                .into_iter()
+                                .flat_map(|t| t.children_named("sym"))
+                                .find_map(|x| jump_of_label(x.text.trim()));
+                            let jump = if txt.is_empty() {
+                                sym_jump
+                            } else {
+                                jump_of_text(&txt)
+                            };
+                            if let Some(j) = jump {
+                                if top_staff
+                                    && let Some(info) = score.measures.get_mut(mi)
+                                    && !info.jumps.contains(&j)
+                                {
+                                    info.jumps.push(j);
+                                }
+                            } else if !txt.is_empty() {
                                 pending_text = Some(match pending_text.take() {
                                     Some(p) => format!("{p} {txt}"),
                                     None => txt,
@@ -464,11 +571,7 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                         "location" => {
                             // Moves the voice position (gaps in secondary voices).
                             let dt = c.child_text("fractions").map(fraction_ticks).unwrap_or(0);
-                            if dt > 0 {
-                                for d in Duration::decompose(dt.min(i64::from(u32::MAX)) as u32) {
-                                    push_event(&mut voice, &mut t, Event::rest(d));
-                                }
-                            }
+                            moved = moved.saturating_add(dt);
                         }
                         "Tuplet" => {
                             let a = c.child_num("actualNotes").unwrap_or(3.0) as i64;
@@ -488,38 +591,6 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                         "endTuplet" => tuplet = None,
                         "Spanner" => {
                             let kind = match c.attr("type").unwrap_or("") {
-                                "Slur" => Some(SpannerKind::Slur),
-                                "HairPin" => {
-                                    let sub = c
-                                        .path(&["HairPin", "subtype"])
-                                        .map(|s| s.text.trim().to_string())
-                                        .unwrap_or_default();
-                                    Some(match sub.as_str() {
-                                        "1" => SpannerKind::Diminuendo,
-                                        "2" => SpannerKind::CrescendoLine,
-                                        "3" => SpannerKind::DiminuendoLine,
-                                        _ => SpannerKind::Crescendo,
-                                    })
-                                }
-                                "Ottava" => {
-                                    let sub = c
-                                        .path(&["Ottava", "subtype"])
-                                        .map(|s| s.text.trim().to_string())
-                                        .unwrap_or_default();
-                                    Some(SpannerKind::Ottava(match sub.as_str() {
-                                        "1" | "8vb" => -1,
-                                        "2" | "15ma" => 2,
-                                        "3" | "15mb" => -2,
-                                        "4" | "22ma" => 3,
-                                        "5" | "22mb" => -3,
-                                        _ => 1,
-                                    }))
-                                }
-                                "Pedal" => Some(SpannerKind::Pedal),
-                                "Trill" => Some(SpannerKind::TrillLine),
-                                "Vibrato" => Some(SpannerKind::Vibrato),
-                                "LetRing" => Some(SpannerKind::LetRing),
-                                "PalmMute" => Some(SpannerKind::PalmMute),
                                 "Volta" => {
                                     // A volta: the ending number over the measures it spans.
                                     if top_staff && let Some(next) = c.path(&["next", "location"]) {
@@ -546,9 +617,14 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                                     }
                                     None
                                 }
-                                _ => None,
+                                _ => line_kind(c),
                             };
-                            if let (Some(kind), Some(next)) = (kind, c.path(&["next", "location"])) {
+                            let at = t.saturating_add(moved);
+                            if let (Some(kind), Some(next), true) = (
+                                kind,
+                                c.path(&["next", "location"]),
+                                (0..i64::from(score.measure_ticks(mi))).contains(&at),
+                            ) {
                                 let dm = next.child_num("measures").unwrap_or(0.0) as i64;
                                 let dt = next.child_text("fractions").map(fraction_ticks).unwrap_or(0);
                                 lines.push(OpenLine {
@@ -556,7 +632,7 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                                     part: pi,
                                     staff: si,
                                     voice: vi,
-                                    start: (mi, t.max(0).min(i64::from(u32::MAX)) as u32),
+                                    start: (mi, at as u32),
                                     end: (dm, dt),
                                 });
                             }
@@ -564,6 +640,12 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                         "Chord" | "Rest" | "MeasureRepeat" | "RepeatMeasure" => {
                             if c.name == "MeasureRepeat" || c.name == "RepeatMeasure" {
                                 pm_staff.measure_repeat = true;
+                            }
+                            // A gap before this event (secondary voices) becomes rests.
+                            let room = i64::from(score.measure_ticks(mi)).saturating_sub(t);
+                            let gap = std::mem::take(&mut moved).clamp(0, room.max(0));
+                            for d in Duration::decompose(gap.min(i64::from(u32::MAX)) as u32) {
+                                push_event(&mut voice, &mut t, Event::rest(d));
                             }
                             // Grace notes come before their main note and take no time.
                             let grace = if c.has("acciaccatura") {
@@ -627,6 +709,23 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                                 continue;
                             }
                             if c.name == "Chord" {
+                                for sp in c.children_named("Spanner") {
+                                    if let (Some(kind), Some(next)) =
+                                        (line_kind(sp), sp.path(&["next", "location"]))
+                                    {
+                                        lines.push(OpenLine {
+                                            kind,
+                                            part: pi,
+                                            staff: si,
+                                            voice: vi,
+                                            start: (mi, t.max(0).min(i64::from(u32::MAX)) as u32),
+                                            end: (
+                                                next.child_num("measures").unwrap_or(0.0) as i64,
+                                                next.child_text("fractions").map(fraction_ticks).unwrap_or(0),
+                                            ),
+                                        });
+                                    }
+                                }
                                 let mut notes = Vec::new();
                                 for n in c.children_named("Note").take(limits::MAX_CHORD_NOTES) {
                                     let p = pitch_of(
@@ -687,6 +786,23 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                                     }
                                     notes.push(note);
                                 }
+                                // MuseScore 4.6+ parenthesises notes through <NoteParenGroup>.
+                                for g in c.children_named("NoteParenGroup") {
+                                    for idx in g
+                                        .children_named("Notes")
+                                        .flat_map(|n| n.children_named("NoteIdx"))
+                                    {
+                                        if let Some(n) = idx
+                                            .text
+                                            .trim()
+                                            .parse::<usize>()
+                                            .ok()
+                                            .and_then(|i| notes.get_mut(i))
+                                        {
+                                            n.paren = true;
+                                        }
+                                    }
+                                }
                                 if !notes.is_empty() {
                                     e = Event::chord(notes, dur);
                                 }
@@ -705,13 +821,29 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                                 for chord_line in c.children_named("ChordLine") {
                                     let sub = chord_line.child_text("subtype").unwrap_or("0");
                                     let id = match sub {
-                                        "0" | "fall" => "fall",
-                                        "1" | "doit" => "doit",
-                                        "2" | "plop" => "plop",
-                                        _ => "scoop",
+                                        "1" | "fall" => "fall",
+                                        "2" | "doit" => "doit",
+                                        "3" | "plop" => "plop",
+                                        "4" | "scoop" => "scoop",
+                                        _ => continue,
                                     };
-                                    if let Some(m) = Articulation::from_id(id) {
+                                    if let Some(m) = Articulation::from_id(id)
+                                        && !e.articulations.contains(&m)
+                                    {
                                         e.articulations.push(m);
+                                    }
+                                }
+                                // MusicXML imports keep portato as staccato + tenuto.
+                                if let (Some(st), Some(te), Some(po)) = (
+                                    Articulation::from_id("staccato"),
+                                    Articulation::from_id("tenuto"),
+                                    Articulation::from_id("portato"),
+                                ) && e.articulations.contains(&st)
+                                    && e.articulations.contains(&te)
+                                {
+                                    e.articulations.retain(|a| *a != st && *a != te);
+                                    if !e.articulations.contains(&po) {
+                                        e.articulations.push(po);
                                     }
                                 }
                                 let trem = c.child("Tremolo").or_else(|| c.child("TremoloSingleChord"));
@@ -853,6 +985,41 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                 tick: et,
             },
         });
+    }
+    // MuseScore keeps notes under an octave line at their written position; ScoreArt keeps the
+    // sounding pitch and displaces them only on screen.
+    let ottavas: Vec<(i8, Spanner)> = score
+        .spanners
+        .iter()
+        .filter_map(|s| match s.kind {
+            SpannerKind::Ottava(o) => Some((o, *s)),
+            _ => None,
+        })
+        .collect();
+    for (o, sp) in ottavas {
+        let last = sp.end.measure.min(score.measures.len().saturating_sub(1));
+        for m in sp.start.measure..=last {
+            for v in 0..limits::MAX_VOICES {
+                let Some(voice) = score.voice_mut(sp.part, sp.staff, m, v) else {
+                    break;
+                };
+                let onsets = voice.onsets();
+                for (e, at) in voice.events.iter_mut().zip(onsets) {
+                    if (m, at) < (sp.start.measure, sp.start.tick) || (m, at) > (sp.end.measure, sp.end.tick)
+                    {
+                        continue;
+                    }
+                    let shift =
+                        |p: &mut Pitch| *p = Pitch::new(p.step, p.alter, i32::from(p.octave) + i32::from(o));
+                    for n in e.notes_mut() {
+                        shift(&mut n.pitch);
+                    }
+                    for g in &mut e.grace {
+                        g.pitches.iter_mut().for_each(shift);
+                    }
+                }
+            }
+        }
     }
     score.normalize();
     Ok(score)

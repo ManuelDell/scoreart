@@ -235,3 +235,99 @@ fn hostile_musescore_files_do_not_panic() {
         let _ = from_bytes(&mscz(junk));
     }
 }
+
+/// Conventions of newer MuseScore 4 files (4.6 and later) and of scores MuseScore imported
+/// from MusicXML: staves without ids, `<harmonyInfo>`, `<NoteParenGroup>`, lines that start
+/// inside a chord, numbered chord lines, text lines, jumps as staff text, back-and-forth
+/// `<location>` moves and notes under an octave line kept at their written position.
+const MS46: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<museScore version="4.70">
+  <Score>
+    <Division>480</Division>
+    <Part id="1">
+      <Staff><StaffType group="pitched"><name>stdNormal</name></StaffType></Staff>
+      <trackName>Flute</trackName>
+      <Instrument id="flute"><longName>Flute</longName></Instrument>
+    </Part>
+    <Staff id="1">
+      <Measure>
+        <voice>
+          <KeySig><concertKey>-2</concertKey></KeySig>
+          <TimeSig><sigN>4</sigN><sigD>4</sigD></TimeSig>
+          <Tempo><tempo>1.2</tempo><followText>1</followText><text><b>Andante</b> <sym>metNoteQuarterUp</sym> = 72</text></Tempo>
+          <StaffText><text><sym>segno</sym></text></StaffText>
+          <Harmony><harmonyInfo><name>maj7</name><root>12</root><bass>14</bass></harmonyInfo></Harmony>
+          <Chord>
+            <durationType>quarter</durationType>
+            <Spanner type="Slur"><Slur/><next><location><fractions>1/2</fractions></location></next></Spanner>
+            <Articulation><subtype>articStaccatoAbove</subtype></Articulation>
+            <Articulation><subtype>articTenutoAbove</subtype></Articulation>
+            <Note><pitch>70</pitch><tpc>12</tpc></Note>
+            <NoteParenGroup><Notes><NoteIdx>0</NoteIdx></Notes></NoteParenGroup>
+            <ChordLine><subtype>4</subtype></ChordLine>
+          </Chord>
+          <Chord>
+            <durationType>quarter</durationType>
+            <Note><pitch>72</pitch><tpc>14</tpc></Note>
+            <ChordLine><subtype>1</subtype></ChordLine>
+          </Chord>
+          <Chord>
+            <durationType>quarter</durationType>
+            <Spanner type="Slur"><prev><location><fractions>-1/2</fractions></location></prev></Spanner>
+            <Note><pitch>74</pitch><tpc>16</tpc></Note>
+          </Chord>
+          <location><fractions>-40/1</fractions></location>
+          <location><fractions>40/1</fractions></location>
+          <Spanner type="TextLine"><TextLine><beginText>cresc.</beginText></TextLine><next><location><measures>1</measures><fractions>-1/4</fractions></location></next></Spanner>
+          <Chord><durationType>quarter</durationType><Note><pitch>74</pitch><tpc>16</tpc></Note></Chord>
+          <StaffText><text><i>D.S. al Coda</i></text></StaffText>
+        </voice>
+      </Measure>
+      <Measure>
+        <voice>
+          <Spanner type="TextLine"><prev><location><measures>-1</measures><fractions>1/4</fractions></location></prev></Spanner>
+          <Spanner type="Ottava"><Ottava><subtype>8va</subtype></Ottava><next><location><fractions>1/2</fractions></location></next></Spanner>
+          <Chord><durationType>quarter</durationType><Note><pitch>62</pitch><tpc>16</tpc></Note></Chord>
+          <Chord><durationType>quarter</durationType><Note><pitch>60</pitch><tpc>14</tpc></Note></Chord>
+          <Spanner type="Ottava"><prev><location><fractions>-1/2</fractions></location></prev></Spanner>
+          <Chord><durationType>half</durationType><Note><pitch>60</pitch><tpc>14</tpc></Note></Chord>
+        </voice>
+      </Measure>
+    </Staff>
+  </Score>
+</museScore>
+"#;
+
+#[test]
+fn reads_musescore_4_6_conventions() {
+    let s = from_bytes(MS46.as_bytes()).unwrap();
+    assert_eq!(s.parts.len(), 1);
+    assert_eq!(s.measures.len(), 2);
+    assert_eq!(s.key_at(0).fifths, -2);
+    let m0 = &s.measures[0];
+    assert_eq!(m0.tempo.map(|t| t.bpm), Some(72));
+    assert_eq!(m0.tempo_text.as_deref(), Some("Andante"));
+    assert!(m0.jumps.contains(&Jump::Segno), "{:?}", m0.jumps);
+    assert!(m0.jumps.contains(&Jump::DalSegnoAlCoda), "{:?}", m0.jumps);
+
+    let v = s.voice(0, 0, 0, 0).unwrap();
+    assert_eq!(v.events.len(), 4, "the location moves cancel out");
+    let first = &v.events[0];
+    assert_eq!(first.chord_symbol.as_deref(), Some("Bbmaj7/C"));
+    assert!(first.notes()[0].paren);
+    let ids: Vec<&str> = first.articulations.iter().map(|a| a.id()).collect();
+    assert!(ids.contains(&"portato") && !ids.contains(&"staccato"), "{ids:?}");
+    assert!(ids.contains(&"scoop"), "{ids:?}");
+    assert!(v.events[1].articulations.iter().any(|a| a.id() == "fall"));
+    assert!(v.events[3].text.is_none());
+
+    let slur = s.spanners.iter().find(|x| x.kind == SpannerKind::Slur).unwrap();
+    assert_eq!((slur.start.tick, slur.end.tick), (0, 2 * TPQ));
+    assert!(s.spanners.iter().any(|x| x.kind == SpannerKind::CrescendoLine));
+    assert!(s.spanners.iter().any(|x| x.kind == SpannerKind::Ottava(1)));
+
+    // Under the 8va the notes sound an octave above their written position.
+    let v1 = s.voice(0, 0, 1, 0).unwrap();
+    let names: Vec<String> = v1.events.iter().map(|e| e.notes()[0].pitch.name()).collect();
+    assert_eq!(names, ["D5", "C5", "C4"]);
+}

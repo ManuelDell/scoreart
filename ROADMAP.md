@@ -2,7 +2,7 @@
 
 **Stage: early alpha** · target: MuseScore Studio parity for everyday engraving
 
-> **Last updated:** 2026-10-25 · first public state
+> **Last updated:** 2026-10-27
 
 ## Done (M0–M3)
 
@@ -48,5 +48,8 @@
   imported with the first part's key).
 - MuseScore files (`.mscz`/`.mscx`, versions 3 and 4) open read-only; layout settings, beaming
   overrides, multi-staff spans and some text styles are not taken over. MuseScore 1/2 files must
-  be re-saved in MuseScore 3 or 4 first. The reader is tested with hand-written files; a test
-  against real MuseScore-made files is still open.
+  be re-saved in MuseScore 3 or 4 first. The reader was checked black-box against files saved by
+  MuseScore Studio 4.7 (ScoreArt score → MusicXML → MuseScore → `.mscz` → ScoreArt gives the same
+  score back); the conventions found are covered by hand-written test files. Marks that
+  MuseScore's own MusicXML import drops (shake, circled notehead, vibrato line, wavy glissando)
+  cannot come back that way.
