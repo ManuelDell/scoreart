@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 
 use scoreart_model::{
-    Barline, Clef, Instrument, KeySig, Score, Tempo, TimeSig, TimeSymbol, clip, instrument, limits,
+    Barline, Clef, Instrument, KeySig, PartSound, Score, Tempo, TimeSig, TimeSymbol, clip, instrument, limits,
 };
 
 use super::{CommandSpec, always, need_i64, need_str, p_i64, p_str, p_usize};
@@ -100,8 +100,10 @@ pub fn commands() -> Vec<CommandSpec> {
                     });
                 }
                 let style = s.style.clone();
+                let sounds = std::mem::take(&mut s.sounds);
                 *s = Session {
                     style,
+                    sounds,
                     ..Session::new(score)
                 };
                 s.dirty = true;
@@ -389,6 +391,80 @@ pub fn commands() -> Vec<CommandSpec> {
                 Ok(Value::Null)
             },
             undoable: true,
+        },
+        CommandSpec {
+            id: "part.sound",
+            label: "Choose sound",
+            menu: &[],
+            shortcut: None,
+            params: "library (\"\" = automatic, \"ScoreArt\" = built-in, or a loaded library), preset?, part? (default: the selected part)",
+            enabled: has_parts,
+            run: |s, p| {
+                let part = p_usize(p, "part").unwrap_or_else(|| s.focus().0);
+                let library = clip(p_str(p, "library").unwrap_or(""));
+                let preset = clip(p_str(p, "preset").unwrap_or(""));
+                let known = library.is_empty()
+                    || library == PartSound::BUILT_IN
+                    || s.sounds.iter().any(|b| b.name == library);
+                if !known {
+                    return Err(Error::Param(format!("sound library \"{library}\" is not loaded")));
+                }
+                let pt = s
+                    .score
+                    .parts
+                    .get_mut(part)
+                    .ok_or_else(|| Error::Param("no such part".into()))?;
+                pt.sound.library = library;
+                pt.sound.preset = preset;
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "part.mix",
+            label: "Instrument volume and pan",
+            menu: &[],
+            shortcut: None,
+            params: "volume? 0…100, pan? -100 (left)…100 (right), part? (default: the selected part)",
+            enabled: has_parts,
+            run: |s, p| {
+                let part = p_usize(p, "part").unwrap_or_else(|| s.focus().0);
+                let pt = s
+                    .score
+                    .parts
+                    .get_mut(part)
+                    .ok_or_else(|| Error::Param("no such part".into()))?;
+                if let Some(v) = p_i64(p, "volume") {
+                    pt.sound.volume = v.clamp(0, 100) as u8;
+                }
+                if let Some(v) = p_i64(p, "pan") {
+                    pt.sound.pan = v.clamp(-100, 100) as i8;
+                }
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "sound.list",
+            label: "List sound libraries",
+            menu: &[],
+            shortcut: None,
+            params: "",
+            enabled: always,
+            run: |s, _| {
+                let libs: Vec<Value> = s
+                    .sounds
+                    .iter()
+                    .map(|b| {
+                        json!({
+                            "name": b.name,
+                            "presets": b.presets().into_iter().map(|p| p.name).collect::<Vec<_>>(),
+                        })
+                    })
+                    .collect();
+                Ok(Value::Array(libs))
+            },
+            undoable: false,
         },
         CommandSpec {
             id: "score.transpose",

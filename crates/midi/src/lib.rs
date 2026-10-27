@@ -347,6 +347,21 @@ pub fn to_smf(score: &Score) -> Vec<u8> {
                 },
             },
         ));
+        // Mixer: channel volume (CC 7) and pan (CC 10).
+        let volume = (u32::from(part.sound.volume.min(100)) * 127 / 100) as u8;
+        let pan = (64 + i32::from(part.sound.pan.clamp(-100, 100)) * 63 / 100).clamp(0, 127) as u8;
+        for (controller, value) in [(7u8, volume), (10, pan)] {
+            abs.push((
+                0,
+                TrackEventKind::Midi {
+                    channel: ch,
+                    message: MidiMessage::Controller {
+                        controller: u7::new(controller),
+                        value: u7::new(value),
+                    },
+                },
+            ));
+        }
         for n in seq.notes.iter().filter(|n| n.part == pi) {
             let key = u7::new(n.key.min(127));
             abs.push((

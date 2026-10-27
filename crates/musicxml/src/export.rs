@@ -330,17 +330,30 @@ pub fn write(score: &Score) -> String {
                 esc(&p.abbreviation)
             );
         }
+        // The chosen sound library and preset travel as a virtual instrument.
+        let virtual_instrument = if p.sound.library.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<virtual-instrument><virtual-library>{}</virtual-library><virtual-name>{}</virtual-name></virtual-instrument>",
+                esc(&p.sound.library),
+                esc(&p.sound.preset)
+            )
+        };
         let _ = writeln!(
             x,
-            "      <score-instrument id=\"{}-I1\"><instrument-name>{}</instrument-name></score-instrument>",
+            "      <score-instrument id=\"{}-I1\"><instrument-name>{}</instrument-name>{virtual_instrument}</score-instrument>",
             esc(&p.id),
             esc(&p.name)
         );
         let _ = writeln!(
             x,
-            "      <midi-instrument id=\"{}-I1\"><midi-program>{}</midi-program></midi-instrument>",
+            "      <midi-instrument id=\"{}-I1\"><midi-program>{}</midi-program><volume>{}</volume><pan>{}</pan></midi-instrument>",
             esc(&p.id),
-            u32::from(p.program) + 1
+            u32::from(p.program) + 1,
+            p.sound.volume.min(100),
+            // MusicXML pans in degrees: -90 left … 90 right.
+            i32::from(p.sound.pan.clamp(-100, 100)) * 9 / 10
         );
         x.push_str("    </score-part>\n");
     }

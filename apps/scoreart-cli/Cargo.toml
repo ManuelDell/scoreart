@@ -13,4 +13,5 @@ workspace = true
 scoreart-engine = { workspace = true }
 scoreart-engrave = { workspace = true }
 scoreart-render = { workspace = true }
+scoreart-synth = { workspace = true }
 serde_json = { workspace = true }

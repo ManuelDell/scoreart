@@ -57,7 +57,7 @@ Source: `storytold/wordcraft`, `storytold/gridcraft` (MIT OR Apache-2.0) and
 | Engraving rules (e.g. from *Behind Bars*) | facts and conventions are not copyrightable; the book's text and examples are | rules implemented from general knowledge; never copy text or example scores. |
 | Keyboard shortcuts / workflow (N, A–G, 1–8 durations …) | functional, not copyrightable | MuseScore-like note input so users feel at home; own UI design, own icons. |
 | Sample scores | must be our own or public domain | only scores written for this repo or public-domain melodies (e.g. folk tunes), recorded in `ATTRIBUTION.md`. |
-| Sound (later) | soundfonts carry their own licences | built-in synthesis first; any soundfont later only with a permissive licence and an `ATTRIBUTION.md` row. |
+| Sound | sample libraries carry their own licences; Muse Sounds are proprietary (licence limited to Muse products) | built-in synthesis by default; **user-loaded** SoundFont (`rustysynth`, MIT) and SFZ (own sampler from the public sfzformat.com description; FLAC via `claxon`, Apache-2.0). Nothing bundled; recommended free libraries (VSCO 2 CE / VCSL CC0, Salamander CC BY, GeneralUser GS) in `docs/sounds.md`. Bundling one later needs a permissive licence and an `ATTRIBUTION.md` row. |
 
 **Name check:** a web search for "ScoreArt" as music software found no product. ("ScoreCloud",
 "ScoreWriter" exist.) The name contains neither "MuseScore" nor "ArtCraft". Before a public

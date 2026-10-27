@@ -14,8 +14,12 @@
   times, barlines, repeats, braces, brackets, articulations, dynamics, lyrics, tempo, text.
 - Playback (alpha): built-in synthesizer with eight instrument families, playhead, note
   audition while editing, repeats, dynamics; cpal on desktop, Web Audio in the browser; WAV export.
-  Next for playback: mute/solo and volume per instrument, swing, metronome, loop, ritardando,
-  better instrument sounds (optional permissively licensed soundfonts).
+- Sample playback: SoundFont 2 (`rustysynth`) and an own SFZ sampler (WAV/FLAC, layers, round
+  robins, release samples, crossfades, loops); mixer with one track per instrument (sound,
+  volume, pan, mute, solo, meters), saved in MusicXML; stems export (one WAV per instrument);
+  libraries remembered on desktop, zip/sf2 in the browser, `--sounds` on the CLI.
+  Next for playback: articulation keyswitches driven by the notation, swing, metronome, loop,
+  ritardando, reverb send, SFZ filters/LFOs, loading libraries by URL in the browser.
 - The full catalogue of notation marks (articulations, fermatas, breaths, ornaments, techniques,
   slides, 30 dynamics, all lines incl. slurs/hairpins/8va/pedal/trill/glissando, grace notes,
   tremolos, arpeggios, noteheads, voltas, jumps, rehearsal marks, chord symbols, fingerings,

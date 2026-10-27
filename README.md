@@ -70,6 +70,15 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   followed, dynamics, accents, hairpins, grace notes, arpeggios, pedal and
   one-measure repeats are heard. Desktop audio via cpal, Web Audio in the
   browser; **WAV** export.
+- **Sample playback and a mixer** (`F10`): load free sample libraries — **SoundFont** (`.sf2`)
+  and **SFZ** (`.sfz` with WAV/FLAC samples, also as a folder or zip), e.g. VSCO 2 CE (CC0),
+  Salamander Grand Piano, GeneralUser GS. **Every instrument is its own track** with its own
+  sound (library and preset), volume, pan, mute, solo and level meter; the choice is saved in
+  the score. **Audio per instrument** export writes one WAV per instrument (stems). See
+  [docs/sounds.md](docs/sounds.md) for the libraries, their licences and how they compare with
+  Muse Sounds.
+
+![The mixer: the violin plays a SoundFont preset, the piano the built-in sound](docs/images/mixer.png)
 - **CLI** for conversion and for driving every command headlessly (agents, scripts).
 
 Not yet: PDF export, tuplet input, multi-measure rests, part extraction, transposing
@@ -82,6 +91,8 @@ Needs Rust ≥ 1.90. On Linux the desktop app needs the ALSA headers (`libasound
 ```bash
 cargo run --release -p scoreart -- [score.musicxml]        # desktop app
 cargo run --release -p scoreart-cli -- convert sample out.svg
+cargo run --release -p scoreart-cli -- convert sample out.wav --sounds GeneralUser-GS.sf2   # samples
+cargo run --release -p scoreart-cli -- convert score.musicxml stems.zip    # one WAV per instrument
 cargo run --release -p scoreart-cli -- commands             # every command id
 cargo run --release -p scoreart-cli -- run --new \
   --cmd 'note.enter={"step":"c"}' --cmd 'note.enter={"step":"e"}' --save out.musicxml
@@ -113,6 +124,7 @@ attribution, crate layering, wasm build).
 | `S` | slur over the selection | `<` / `>` | crescendo / diminuendo hairpin |
 | `/` | grace note | `Shift+→` | extend the selection |
 | `Ctrl+K` | chord symbol | `Ctrl+T` / `Ctrl+M` | staff text / rehearsal mark |
+| `F10` | mixer | | |
 
 ## How it is built
 
@@ -120,7 +132,7 @@ attribution, crate layering, wasm build).
 |---|---|---|
 | L1 | `model` | score model and edit primitives |
 | L2 | `musicxml`, `midi`, `engrave` | MusicXML I/O · MIDI · layout to a display list |
-| L3 | `render`, `synth` | SVG export with Bravura outlines · built-in synthesizer |
+| L3 | `render`, `synth` | SVG export with Bravura outlines · sound engine: mixer, built-in synthesizer, SoundFont and SFZ sampler |
 | L4 | `engine` | session, undo, command registry |
 | L6 | `ui-egui` | the egui front end |
 | apps | `scoreart`, `scoreart-cli`, `scoreart-web` | desktop, CLI, browser |
@@ -130,6 +142,8 @@ Details: [docs/architecture.md](docs/architecture.md). Research and plan: [docs/
 ## Legal
 
 - Code: **MIT OR Apache-2.0** ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)).
+- Sounds: **no sample library is bundled**; users load their own (see [docs/sounds.md](docs/sounds.md)).
+  Muse Sounds are proprietary and not used.
 - Music font: **Bravura** © Steinberg Media Technologies GmbH, SIL Open Font License 1.1,
   bundled unmodified ([assets/fonts/OFL-Bravura.txt](assets/fonts/OFL-Bravura.txt)). Every asset
   is listed in [ATTRIBUTION.md](ATTRIBUTION.md); see also [NOTICE](NOTICE).

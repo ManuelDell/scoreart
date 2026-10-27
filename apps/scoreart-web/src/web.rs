@@ -13,6 +13,8 @@ const CANVAS_ID: &str = "scoreart_canvas";
 const LOADING_ID: &str = "scoreart_loading";
 
 type Inbox = Rc<RefCell<Vec<(String, Vec<u8>)>>>;
+/// Sound libraries the user picked, read and parsed.
+type SoundInbox = Rc<RefCell<Vec<Result<scoreart_synth::SoundBank, String>>>>;
 
 fn query_param(name: &str) -> Option<String> {
     let search = web_sys::window()?.location().search().ok()?;
@@ -126,6 +128,7 @@ struct WebHost {
     bridge: Option<Bridge>,
     audio: crate::audio::WebAudio,
     rate: u32,
+    sounds: SoundInbox,
 }
 
 fn download(name: &str, bytes: &[u8]) -> Result<(), JsValue> {
@@ -167,6 +170,30 @@ impl Host for WebHost {
 
     fn take_opened(&mut self) -> Option<(String, Vec<u8>)> {
         self.inbox.borrow_mut().pop()
+    }
+
+    fn request_sounds(&mut self, _folder: bool) {
+        let inbox = self.sounds.clone();
+        let ctx = self.ctx.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            // Browsers cannot open folders: SFZ libraries come as a zip with their samples.
+            let file = rfd::AsyncFileDialog::new()
+                .add_filter("Sound libraries (SoundFont .sf2, zip of SFZ)", &["sf2", "zip"])
+                .pick_file()
+                .await;
+            if let Some(f) = file {
+                let name = f.file_name();
+                let bytes = f.read().await;
+                let bank =
+                    scoreart_synth::SoundBank::from_bytes(&name, bytes).map_err(|e| format!("{name}: {e}"));
+                inbox.borrow_mut().push(bank);
+                ctx.request_repaint();
+            }
+        });
+    }
+
+    fn take_sounds(&mut self) -> Option<Result<scoreart_synth::SoundBank, String>> {
+        self.sounds.borrow_mut().pop()
     }
 
     fn save(&mut self, name: &str, bytes: Vec<u8>, _save_as: bool) -> Option<String> {
@@ -284,6 +311,7 @@ pub fn start() {
                         bridge: app_bridge.clone(),
                         audio: crate::audio::WebAudio::default(),
                         rate: 44_100,
+                        sounds: SoundInbox::default(),
                     };
                     let mut host = host;
                     host.rate = host.audio.rate();

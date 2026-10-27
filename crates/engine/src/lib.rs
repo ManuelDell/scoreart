@@ -16,8 +16,10 @@ pub mod sample;
 use scoreart_engrave::{Layout, Style};
 use scoreart_model::edit::{EventRef, Pos};
 use scoreart_model::{NoteValue, Pitch, Score};
+use scoreart_synth::{SoundBank, Synth};
 use serde::Serialize;
 use serde_json::Value;
+use std::sync::Arc;
 
 pub use cmd::{CommandInfo, CommandSpec, registry};
 
@@ -77,6 +79,8 @@ pub enum Format {
     Midi,
     Svg,
     Wav,
+    /// One WAV file per instrument, in a zip archive.
+    Stems,
 }
 
 impl Format {
@@ -89,6 +93,7 @@ impl Format {
             "mid" | "midi" => Some(Format::Midi),
             "svg" => Some(Format::Svg),
             "wav" => Some(Format::Wav),
+            "zip" => Some(Format::Stems),
             _ => None,
         }
     }
@@ -112,6 +117,8 @@ pub struct Session {
     pub last_pitch: Option<Pitch>,
     /// One-line feedback for the status bar.
     pub status: String,
+    /// Sound libraries loaded for playback and audio export (not part of the score).
+    pub sounds: Vec<Arc<SoundBank>>,
     undo: Vec<Score>,
     redo: Vec<Score>,
     layout: Option<(u64, std::sync::Arc<Layout>)>,
@@ -139,6 +146,7 @@ impl Session {
             revision: 1,
             last_pitch: None,
             status: String::new(),
+            sounds: Vec::new(),
             undo: Vec::new(),
             redo: Vec::new(),
             layout: None,
@@ -304,6 +312,7 @@ impl Session {
         *self = Session {
             file_name,
             style: self.style.clone(),
+            sounds: std::mem::take(&mut self.sounds),
             ..Session::new(score)
         };
         let lower = self.file_name.to_ascii_lowercase();
@@ -323,7 +332,8 @@ impl Session {
                 scoreart_musicxml::to_mxl(&self.score).map_err(|e| Error::File(e.to_string()))
             }
             Some(Format::Midi) => Ok(scoreart_midi::to_smf(&self.score)),
-            Some(Format::Wav) => Ok(wav(&self.score)),
+            Some(Format::Wav) => Ok(wav_with(&self.score, &self.sounds)),
+            Some(Format::Stems) => stems(&self.score, &self.sounds),
             Some(Format::Svg) => {
                 let l = scoreart_engrave::layout(&self.score, &self.style);
                 Ok(scoreart_render::svg_pages(&l, &self.style)
@@ -496,15 +506,12 @@ fn beat_label(score: &Score, p: Pos) -> String {
 #[cfg(test)]
 mod tests;
 
-/// Renders the whole score with the built-in synth as a 16-bit stereo WAV file.
-pub fn wav(score: &Score) -> Vec<u8> {
-    const RATE: u32 = 44_100;
-    let seq = scoreart_midi::sequence(score);
-    let mut synth = scoreart_synth::Synth::new(&seq, 0, RATE);
-    // Cap at 30 minutes.
-    let frames = ((synth.duration().min(1800.0)) * f64::from(RATE)) as usize;
-    let mut pcm = vec![0.0f32; frames * 2];
-    synth.render(&mut pcm);
+const WAV_RATE: u32 = 44_100;
+/// Longest audio export.
+const WAV_MAX_SECS: f64 = 1800.0;
+
+/// A 16-bit WAV file from interleaved stereo samples.
+fn wav_file(pcm: &[f32], rate: u32) -> Vec<u8> {
     let data_len = (pcm.len() * 2) as u32;
     let mut out = Vec::with_capacity(44 + pcm.len() * 2);
     out.extend_from_slice(b"RIFF");
@@ -513,8 +520,8 @@ pub fn wav(score: &Score) -> Vec<u8> {
     out.extend_from_slice(&16u32.to_le_bytes());
     out.extend_from_slice(&1u16.to_le_bytes()); // PCM
     out.extend_from_slice(&2u16.to_le_bytes()); // stereo
-    out.extend_from_slice(&RATE.to_le_bytes());
-    out.extend_from_slice(&(RATE * 4).to_le_bytes());
+    out.extend_from_slice(&rate.to_le_bytes());
+    out.extend_from_slice(&(rate * 4).to_le_bytes());
     out.extend_from_slice(&4u16.to_le_bytes());
     out.extend_from_slice(&16u16.to_le_bytes());
     out.extend_from_slice(b"data");
@@ -523,4 +530,52 @@ pub fn wav(score: &Score) -> Vec<u8> {
         out.extend_from_slice(&((v.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
     }
     out
+}
+
+/// Renders the whole score with the built-in synth as a 16-bit stereo WAV file.
+pub fn wav(score: &Score) -> Vec<u8> {
+    wav_with(score, &[])
+}
+
+/// Renders the whole score with each part's chosen sound as a 16-bit stereo WAV file.
+pub fn wav_with(score: &Score, sounds: &[Arc<SoundBank>]) -> Vec<u8> {
+    let seq = scoreart_midi::sequence(score);
+    let (mut synth, _) = Synth::for_score(score, &seq, 0, WAV_RATE, sounds, None);
+    let frames = (synth.duration().min(WAV_MAX_SECS) * f64::from(WAV_RATE)) as usize;
+    let mut pcm = vec![0.0f32; frames * 2];
+    synth.render(&mut pcm);
+    wav_file(&pcm, WAV_RATE)
+}
+
+/// One WAV file per instrument ("stems") in a zip archive, numbered in score order.
+pub fn stems(score: &Score, sounds: &[Arc<SoundBank>]) -> Result<Vec<u8>> {
+    use std::io::Write;
+    let seq = scoreart_midi::sequence(score);
+    let (mut synth, _) = Synth::for_score(score, &seq, 0, WAV_RATE, sounds, None);
+    let tracks = synth.render_stems(WAV_MAX_SECS);
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut z = zip::ZipWriter::new(&mut buf);
+        let opts =
+            zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        for (part, pcm) in tracks {
+            let name = score.parts.get(part).map_or("Part", |p| p.name.as_str());
+            let safe: String = name
+                .chars()
+                .map(|c| {
+                    if c.is_alphanumeric() || c == ' ' || c == '-' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .collect();
+            let file = format!("{:02} {}.wav", part + 1, safe.trim());
+            z.start_file(file, opts).map_err(|e| Error::File(e.to_string()))?;
+            z.write_all(&wav_file(&pcm, WAV_RATE))
+                .map_err(|e| Error::File(e.to_string()))?;
+        }
+        z.finish().map_err(|e| Error::File(e.to_string()))?;
+    }
+    Ok(buf.into_inner())
 }

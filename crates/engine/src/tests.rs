@@ -213,3 +213,42 @@ fn opens_musescore_and_saves_musicxml() {
             .contains("<part-name>Oboe</part-name>")
     );
 }
+
+#[test]
+fn sound_and_mix_per_instrument() {
+    let mut s = Session::default();
+    s.execute("part.add", &json!({ "instrument": "violin" })).unwrap();
+    assert!(
+        s.execute("part.sound", &json!({ "part": 1, "library": "Not loaded" }))
+            .is_err(),
+        "only loaded libraries can be chosen"
+    );
+    s.execute("part.sound", &json!({ "part": 1, "library": "ScoreArt" }))
+        .unwrap();
+    s.execute("part.mix", &json!({ "part": 1, "volume": 55, "pan": -40 }))
+        .unwrap();
+    s.execute("part.mix", &json!({ "part": 0, "volume": 900, "pan": 900 }))
+        .unwrap();
+    assert_eq!(s.score.parts[1].sound.library, "ScoreArt");
+    assert_eq!(
+        (s.score.parts[1].sound.volume, s.score.parts[1].sound.pan),
+        (55, -40)
+    );
+    assert_eq!(
+        (s.score.parts[0].sound.volume, s.score.parts[0].sound.pan),
+        (100, 100)
+    );
+    // Undoable like any edit.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.score.parts[0].sound.volume, 80);
+    // Saved in MusicXML and read back.
+    let back = scoreart_musicxml::from_str(&scoreart_musicxml::to_string(&s.score)).unwrap();
+    assert_eq!(back.parts[1].sound, s.score.parts[1].sound);
+    assert_eq!(back.parts[0].sound, s.score.parts[0].sound);
+    // One WAV per instrument.
+    let zip = s.save_bytes("Ode.zip").unwrap();
+    let archive = zip::ZipArchive::new(std::io::Cursor::new(zip)).unwrap();
+    let names: Vec<&str> = archive.file_names().collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert!(names.contains(&"02 Violin.wav"), "{names:?}");
+}

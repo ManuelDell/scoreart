@@ -11,6 +11,7 @@
 
 mod canvas;
 pub mod glyph;
+mod mixer;
 mod panels;
 mod playback;
 pub mod theme;
@@ -48,6 +49,19 @@ pub trait Host {
     fn audio_position(&mut self) -> Option<f64> {
         None
     }
+    /// Ask the user for a sound library (a file, or with `folder` a folder of SFZ
+    /// instruments); it arrives through [`Host::take_sounds`].
+    fn request_sounds(&mut self, _folder: bool) {}
+    /// Whether [`Host::request_sounds`] can pick folders.
+    fn can_load_folders(&self) -> bool {
+        false
+    }
+    /// A sound library that finished loading (or why it failed), if any.
+    fn take_sounds(&mut self) -> Option<Result<scoreart_synth::SoundBank, String>> {
+        None
+    }
+    /// The user removed a library: do not load it again next time.
+    fn forget_sounds(&mut self, _name: &str) {}
 }
 
 /// Commands after which the selected notes are auditioned.
@@ -104,6 +118,8 @@ pub struct ScoreApp {
     pub(crate) playback: Option<playback::Playback>,
     /// Play notes as they are entered or changed.
     pub sound_on_input: bool,
+    pub show_mixer: bool,
+    pub(crate) mixer: mixer::Mixer,
 }
 
 impl ScoreApp {
@@ -121,6 +137,8 @@ impl ScoreApp {
             show_properties: true,
             playback: None,
             sound_on_input: true,
+            show_mixer: false,
+            mixer: mixer::Mixer::default(),
         }
     }
 
@@ -197,12 +215,21 @@ impl ScoreApp {
         if let Some((name, bytes)) = self.host.take_opened() {
             self.open_bytes(&name, &bytes);
         }
+        while let Some(loaded) = self.host.take_sounds() {
+            match loaded {
+                Ok(bank) => self.add_sounds(bank),
+                Err(e) => self.session.status = format!("Sounds: {e}"),
+            }
+        }
         self.keyboard(&ctx);
         self.host.tick();
         self.follow_playback(&ctx);
         panels::menu_bar(self, ui);
         panels::toolbar(self, ui);
         panels::status_bar(self, ui);
+        if self.show_mixer {
+            mixer::panel(self, ui);
+        }
         if self.show_palette {
             panels::palette(self, ui);
         }
@@ -290,6 +317,7 @@ impl ScoreApp {
             (Key::N, _, _) if cmd_only => self.dialog = Some(Dialog::NewScore(panels::NewScore::default())),
             (Key::T, _, _) if plain => self.run("note.tie", json!({})),
             (Key::Space, _, _) if plain => self.toggle_playback(),
+            (Key::F10, _, _) if plain => self.show_mixer = !self.show_mixer,
             (Key::Escape, _, _) if self.is_playing() => self.stop_playback(),
             (Key::Escape, _, _) => self.run("edit.escape", json!({})),
             (Key::ArrowUp, _, _) if plain => self.run("note.pitch-up", json!({})),

@@ -333,6 +333,7 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
             program,
             clefs,
             measures: Vec::new(),
+            sound: Default::default(),
         });
     }
     if score.parts.is_empty() {

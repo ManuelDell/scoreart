@@ -45,6 +45,11 @@ People trust ScoreArt with their music; a crash loses their work. This outranks 
 - **Every asset file has a row in [`ATTRIBUTION.md`](ATTRIBUTION.md)**; `cargo xtask assets`
   (part of `cargo xtask ci`) fails otherwise. Add the row in the same commit as the file.
 - Sample scores are written for this repo or are public-domain melodies; record the source.
+- **Sample libraries are never committed** (no `.sf2`, `.sfz` libraries, sample WAV/FLAC files);
+  users load their own. Muse Sounds are proprietary and must not be used, imitated or loaded by
+  default. Sampler tests use tiny samples and SFZ text written in the test. The SFZ reader is
+  written from the public format description (sfzformat.com) only, never from other samplers'
+  source code.
 - Never use the ArtCraft or MuseScore names, logos or icons for ScoreArt (names may appear only
   descriptively, e.g. "opens MusicXML exported from MuseScore").
 

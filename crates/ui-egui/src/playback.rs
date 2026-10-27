@@ -43,7 +43,15 @@ impl ScoreApp {
                     .map(|(_, t)| *t)
             })
             .unwrap_or(0);
-        let synth = Synth::new(&seq, from_tick, self.host.audio_rate());
+        self.mixer.sync(&self.session.score, self.session.revision);
+        let (synth, warnings) = Synth::for_score(
+            &self.session.score,
+            &seq,
+            from_tick,
+            self.host.audio_rate(),
+            &self.session.sounds,
+            Some(self.mixer.controls.clone()),
+        );
         match self.host.audio_start(synth) {
             Ok(()) => {
                 let from_secs = seq.seconds_at(from_tick);
@@ -52,7 +60,10 @@ impl ScoreApp {
                     from_secs,
                     at: None,
                 });
-                self.session.status = "Playing — Space stops".into();
+                self.session.status = match warnings.first() {
+                    Some(w) => format!("Playing — {w}"),
+                    None => "Playing — Space stops".into(),
+                };
             }
             Err(e) => self.session.status = format!("Playback: {e}"),
         }
@@ -108,14 +119,11 @@ impl ScoreApp {
         if keys.is_empty() {
             return;
         }
-        let program = self
-            .session
-            .score
-            .parts
-            .get(ev.part)
-            .map(|p| p.program)
-            .unwrap_or(0);
-        let synth = Synth::preview(&keys, program, self.host.audio_rate());
+        let Some(part) = self.session.score.parts.get(ev.part) else {
+            return;
+        };
+        let (sound, _) = scoreart_synth::resolve(&self.session.sounds, &part.sound, part.program);
+        let synth = Synth::preview_sound(&keys, &sound, self.host.audio_rate());
         // A failed preview is not worth a message: playback reports audio problems.
         let _ = self.host.audio_start(synth);
     }

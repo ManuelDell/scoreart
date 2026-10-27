@@ -413,6 +413,39 @@ pub struct Part {
     /// Initial clef of every staff; its length is the staff count.
     pub clefs: Vec<Clef>,
     pub measures: Vec<PartMeasure>,
+    /// Playback sound and mixer settings.
+    #[serde(default)]
+    pub sound: PartSound,
+}
+
+/// Which sound plays a part, and its mixer channel.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PartSound {
+    /// Name of a loaded sound library (SoundFont or SFZ); empty = automatic (the first loaded
+    /// SoundFont with the part's MIDI program, else the built-in synthesizer).
+    pub library: String,
+    /// Preset (SoundFont) or instrument (SFZ) inside the library.
+    pub preset: String,
+    /// 0…100.
+    pub volume: u8,
+    /// -100 (left) … 100 (right).
+    pub pan: i8,
+}
+
+impl Default for PartSound {
+    fn default() -> Self {
+        PartSound {
+            library: String::new(),
+            preset: String::new(),
+            volume: 80,
+            pan: 0,
+        }
+    }
+}
+
+impl PartSound {
+    /// The library name that forces the built-in synthesizer.
+    pub const BUILT_IN: &'static str = "ScoreArt";
 }
 
 impl Part {
@@ -663,6 +696,7 @@ impl Score {
             program: inst.program,
             clefs: inst.clefs.to_vec(),
             measures: Vec::new(),
+            sound: Default::default(),
         });
         self.normalize();
     }

@@ -1,6 +1,6 @@
 [package]
 name = "scoreart-synth"
-description = "ScoreArt's built-in software synthesizer: original instrument sounds generated in code"
+description = "ScoreArt's sound engine: a mixer with the built-in synthesizer, SoundFont and SFZ sample playback"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,7 +9,8 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-scoreart-midi = { workspace = true }
-
-[dev-dependencies]
 scoreart-model = { workspace = true }
+scoreart-midi = { workspace = true }
+rustysynth = { workspace = true }
+claxon = { workspace = true }
+zip = { workspace = true }

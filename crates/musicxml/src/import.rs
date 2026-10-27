@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, HashMap};
 use scoreart_model::marks::{MARKS, XmlGroup};
 use scoreart_model::{
     Anchor, Arpeggio, Articulation, Barline, Clef, Duration, Dynamic, Event, EventKind, Grace, Jump, KeySig,
-    MeasureInfo, Meta, Note, NoteHead, NoteValue, Part, PartMeasure, Pitch, Score, Spanner, SpannerKind,
-    StaffMeasure, Step, TPQ, Tempo, TimeSig, TimeSymbol, Tremolo, Tuplet, Voice, clip, limits,
+    MeasureInfo, Meta, Note, NoteHead, NoteValue, Part, PartMeasure, PartSound, Pitch, Score, Spanner,
+    SpannerKind, StaffMeasure, Step, TPQ, Tempo, TimeSig, TimeSymbol, Tremolo, Tuplet, Voice, clip, limits,
 };
 
 use crate::Error;
@@ -51,7 +51,7 @@ pub fn read(root: &Element) -> Result<Score, Error> {
     };
 
     // Part list: names and MIDI programs.
-    let mut infos: Vec<(String, String, String, u8)> = Vec::new();
+    let mut infos: Vec<(String, String, String, u8, PartSound)> = Vec::new();
     if let Some(list) = root.child("part-list") {
         for sp in list.children_named("score-part") {
             let id = sp.attr("id").unwrap_or_default().to_string();
@@ -62,7 +62,28 @@ pub fn read(root: &Element) -> Result<Score, Error> {
                 .and_then(|e| e.text.trim().parse::<i32>().ok())
                 .map(|p| (p - 1).clamp(0, 127) as u8)
                 .unwrap_or(0);
-            infos.push((id, name, abbr, program));
+            let mut sound = PartSound::default();
+            if let Some(v) = sp.path(&["score-instrument", "virtual-instrument"]) {
+                sound.library = clip(v.child_text("virtual-library").unwrap_or_default().trim());
+                sound.preset = clip(v.child_text("virtual-name").unwrap_or_default().trim());
+            }
+            if let Some(v) = sp
+                .path(&["midi-instrument", "volume"])
+                .and_then(|e| e.text.trim().parse::<f64>().ok())
+                .filter(|v| v.is_finite())
+            {
+                sound.volume = v.round().clamp(0.0, 100.0) as u8;
+            }
+            if let Some(v) = sp
+                .path(&["midi-instrument", "pan"])
+                .and_then(|e| e.text.trim().parse::<f64>().ok())
+                .filter(|v| v.is_finite())
+            {
+                // Degrees (-180…180, ±90 = hard left/right) → -100…100.
+                let deg = if v.abs() > 90.0 { v.signum() * 180.0 - v } else { v };
+                sound.pan = (deg / 0.9).round().clamp(-100.0, 100.0) as i8;
+            }
+            infos.push((id, name, abbr, program, sound));
         }
     }
 
@@ -71,12 +92,13 @@ pub fn read(root: &Element) -> Result<Score, Error> {
             break;
         }
         let id = part_el.attr("id").unwrap_or_default().to_string();
-        let (name, abbr, program) = infos
+        let (name, abbr, program, sound) = infos
             .iter()
             .find(|i| i.0 == id)
-            .map(|i| (i.1.clone(), i.2.clone(), i.3))
-            .unwrap_or_else(|| (format!("Part {}", pi + 1), String::new(), 0));
-        let part = read_part(&mut score, pi, part_el, id, name, abbr, program)?;
+            .map(|i| (i.1.clone(), i.2.clone(), i.3, i.4.clone()))
+            .unwrap_or_else(|| (format!("Part {}", pi + 1), String::new(), 0, PartSound::default()));
+        let mut part = read_part(&mut score, pi, part_el, id, name, abbr, program)?;
+        part.sound = sound;
         score.parts.push(part);
     }
     if score.parts.is_empty() {
@@ -1017,5 +1039,6 @@ fn read_part(
         program,
         clefs: clef_list,
         measures,
+        sound: Default::default(),
     })
 }

@@ -62,6 +62,7 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                             ("MIDI (.mid)", "mid"),
                             ("SVG, first page (.svg)", "svg"),
                             ("Audio (.wav)", "wav"),
+                            ("Audio per instrument (.zip of .wav)", "zip"),
                         ] {
                             if ui.button(label).clicked() {
                                 let name = format!("{stem}.{ext}");
@@ -170,6 +171,7 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     ui.separator();
                     ui.checkbox(&mut app.show_palette, "Palettes");
                     ui.checkbox(&mut app.show_properties, "Properties");
+                    ui.checkbox(&mut app.show_mixer, "Mixer    F10");
                     ui.checkbox(&mut app.sound_on_input, "Play notes while editing");
                     ui.separator();
                     let dark = ui.ctx().global_style().visuals.dark_mode;

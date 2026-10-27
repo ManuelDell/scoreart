@@ -6,6 +6,9 @@
 //! scoreart-cli run [--in FILE | --sample | --new] [--cmd 'id' | --cmd 'id={json}']… [--save OUT]
 //! scoreart-cli info <file>
 //! ```
+//!
+//! Every form takes `--sounds PATH` (repeatable): a SoundFont (`.sf2`), an SFZ instrument, a
+//! folder of SFZ instruments or a zip of them, used for `.wav` and stems (`.zip`) output.
 #![deny(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -25,17 +28,46 @@ macro_rules! out {
     }};
 }
 
+use std::sync::{Arc, OnceLock};
+
 use scoreart_engine::{Format, Session};
+use scoreart_synth::SoundBank;
 use serde_json::{Value, json};
+
+/// Sound libraries given with `--sounds`.
+static SOUNDS: OnceLock<Vec<Arc<SoundBank>>> = OnceLock::new();
+
+fn new_session() -> Session {
+    let mut s = Session::default();
+    s.sounds = SOUNDS.get().cloned().unwrap_or_default();
+    s
+}
 
 fn load(input: &str) -> Result<Session, String> {
     if input == "sample" {
-        return Ok(Session::default());
+        return Ok(new_session());
     }
     let bytes = std::fs::read(input).map_err(|e| format!("{input}: {e}"))?;
-    let mut s = Session::default();
+    let mut s = new_session();
     s.open_bytes(input, &bytes).map_err(|e| format!("{input}: {e}"))?;
     Ok(s)
+}
+
+/// Takes every `--sounds PATH` out of the arguments and loads the libraries.
+fn take_sounds(args: &mut Vec<String>) -> Result<(), String> {
+    let mut banks = Vec::new();
+    while let Some(i) = args.iter().position(|a| a == "--sounds") {
+        args.remove(i);
+        if i >= args.len() {
+            return Err("--sounds needs a path".into());
+        }
+        let path = args.remove(i);
+        let bank = SoundBank::from_path(std::path::Path::new(&path)).map_err(|e| format!("{path}: {e}"))?;
+        eprintln!("sounds: {} ({} presets)", bank.name, bank.presets().len());
+        banks.push(Arc::new(bank));
+    }
+    let _ = SOUNDS.set(banks);
+    Ok(())
 }
 
 fn write_out(s: &Session, out: &str) -> Result<Vec<String>, String> {
@@ -73,13 +105,17 @@ fn parse_cmd(spec: &str) -> Result<(String, Value), String> {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  scoreart-cli convert <in> <out>\n  scoreart-cli commands [--json]\n  scoreart-cli run [--in FILE | --sample | --new] [--cmd ID[=JSON]]… [--save OUT]\n  scoreart-cli info <file>"
+        "usage:\n  scoreart-cli convert <in> <out>\n  scoreart-cli commands [--json]\n  scoreart-cli run [--in FILE | --sample | --new] [--cmd ID[=JSON]]… [--save OUT]\n  scoreart-cli info <file>\n  (all forms: --sounds <file.sf2|file.sfz|folder|file.zip>, repeatable)"
     );
     ExitCode::from(2)
 }
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if let Err(e) = take_sounds(&mut args) {
+        eprintln!("scoreart-cli: {e}");
+        return ExitCode::FAILURE;
+    }
     let result: Result<(), String> = match args.first().map(String::as_str) {
         Some("convert") => match (args.get(1), args.get(2)) {
             (Some(i), Some(o)) => load(i).and_then(|s| write_out(&s, o)).map(|w| {
@@ -117,7 +153,7 @@ fn main() -> ExitCode {
             None => return usage(),
         },
         Some("run") => {
-            let mut s = Session::default();
+            let mut s = new_session();
             let mut save: Option<String> = None;
             let mut i = 1;
             let mut out = Ok(());
@@ -125,7 +161,7 @@ fn main() -> ExitCode {
                 let a = args.get(i).map(String::as_str).unwrap_or("");
                 let next = args.get(i + 1).cloned();
                 match a {
-                    "--sample" => s = Session::default(),
+                    "--sample" => s = new_session(),
                     "--new" => {
                         let _ = s.execute("file.new", &json!({}));
                     }
