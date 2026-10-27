@@ -85,7 +85,11 @@ pub fn crescent(p: [(f32, f32); 4], thick: f32) -> [(f32, f32); 6] {
 
 /// One page as a standalone SVG document sized in millimetres.
 pub fn page_svg(page: &Page, style: &Style) -> String {
-    let mm = style.staff_space_mm.clamp(0.5, 10.0);
+    let mm = if style.staff_space_mm.is_finite() {
+        style.staff_space_mm.clamp(0.5, 10.0)
+    } else {
+        1.75
+    };
     let mut defs: BTreeMap<char, String> = BTreeMap::new();
     let mut body = String::new();
     for it in &page.items {

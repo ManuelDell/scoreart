@@ -13,7 +13,9 @@ mod canvas;
 mod catalog;
 pub mod glyph;
 mod instruments;
+mod midi;
 mod mixer;
+mod page;
 mod panels;
 mod playback;
 pub mod theme;
@@ -76,6 +78,27 @@ pub trait Host {
         None
     }
     fn cancel_download(&mut self) {}
+    /// MIDI input devices that can be opened (may ask the user for permission first).
+    fn midi_ports(&mut self) -> Vec<String> {
+        Vec::new()
+    }
+    /// Opens a MIDI input device, or closes the open one with `None`.
+    fn midi_open(&mut self, _port: Option<&str>) -> Result<(), String> {
+        Err("MIDI input is not available here".into())
+    }
+    /// The open MIDI device's name.
+    fn midi_connected(&self) -> Option<String> {
+        None
+    }
+    /// MIDI messages received since the last call.
+    fn take_midi(&mut self) -> Vec<Vec<u8>> {
+        Vec::new()
+    }
+    /// A small setting kept between sessions (e.g. the MIDI bindings).
+    fn load_setting(&self, _name: &str) -> Option<String> {
+        None
+    }
+    fn save_setting(&mut self, _name: &str, _value: &str) {}
 }
 
 pub use catalog::DownloadStatus;
@@ -93,6 +116,7 @@ pub fn acceptance_text(library: &scoreart_synth::catalog::Library, unix_secs: u6
 const PREVIEW_AFTER: &[&str] = &[
     "note.enter",
     "note.add",
+    "note.midi",
     "note.pitch-up",
     "note.pitch-down",
     "note.step-up",
@@ -149,9 +173,18 @@ pub struct ScoreApp {
     pub(crate) catalog: Option<catalog::CatalogState>,
     /// The "Instruments and sounds" window and a pending instrument change.
     pub(crate) instruments: instruments::InstrumentsState,
+    /// The page settings being edited, while the dialog is open.
+    pub(crate) page_settings: Option<scoreart_model::PageFormat>,
+    /// MIDI keyboard input and its bindings.
+    pub(crate) midi: midi::MidiUi,
 }
 
 impl ScoreApp {
+    /// Opens the "MIDI input" window.
+    pub fn open_midi(&mut self) {
+        self.midi.open = true;
+    }
+
     /// Opens the "Instruments and sounds" window.
     pub fn open_instruments(&mut self) {
         self.instruments.open = true;
@@ -182,6 +215,8 @@ impl ScoreApp {
             mixer: mixer::Mixer::default(),
             catalog: None,
             instruments: Default::default(),
+            page_settings: None,
+            midi: Default::default(),
         }
     }
 
@@ -266,6 +301,7 @@ impl ScoreApp {
         }
         self.keyboard(&ctx);
         self.host.tick();
+        midi::poll(self);
         self.follow_playback(&ctx);
         panels::menu_bar(self, ui);
         panels::toolbar(self, ui);
@@ -288,6 +324,8 @@ impl ScoreApp {
         panels::dialogs(self, &ctx);
         catalog::window(self, &ctx);
         instruments::window(self, &ctx);
+        page::dialog(self, &ctx);
+        midi::window(self, &ctx);
         // Ctrl + mouse wheel zooms.
         let (zoom_delta, cmd) = ctx.input(|i| (i.zoom_delta(), i.modifiers.command));
         if (zoom_delta - 1.0).abs() > 1e-3 {
@@ -303,7 +341,11 @@ impl ScoreApp {
     }
 
     fn keyboard(&mut self, ctx: &egui::Context) {
-        if ctx.egui_wants_keyboard_input() || self.dialog.is_some() || self.instruments.has_pending() {
+        if ctx.egui_wants_keyboard_input()
+            || self.dialog.is_some()
+            || self.instruments.has_pending()
+            || self.page_settings.is_some()
+        {
             return;
         }
         let events = ctx.input(|i| i.events.clone());

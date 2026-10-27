@@ -672,6 +672,98 @@ pub struct Score {
     /// Slurs, hairpins, octave lines, pedal, trill lines, glissandos …
     #[serde(default)]
     pub spanners: Vec<Spanner>,
+    /// Page size, margins and spacing.
+    #[serde(default)]
+    pub page: PageFormat,
+}
+
+/// Page size, margins and spacing of the printed score.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PageFormat {
+    pub width_mm: f32,
+    pub height_mm: f32,
+    pub margin_top_mm: f32,
+    pub margin_bottom_mm: f32,
+    pub margin_left_mm: f32,
+    pub margin_right_mm: f32,
+    /// Staff size: the distance between two staff lines.
+    pub staff_space_mm: f32,
+    /// Gap between the staves of one instrument (bottom line to top line), staff spaces.
+    pub staff_gap: f32,
+    /// Gap between instruments, staff spaces.
+    pub part_gap: f32,
+    /// Gap between systems, staff spaces.
+    pub system_gap: f32,
+    /// Horizontal note spacing (1.0 = normal).
+    pub spacing: f32,
+}
+
+impl Default for PageFormat {
+    fn default() -> Self {
+        PageFormat {
+            width_mm: 210.0,
+            height_mm: 297.0,
+            margin_top_mm: 15.0,
+            margin_bottom_mm: 15.0,
+            margin_left_mm: 15.0,
+            margin_right_mm: 15.0,
+            staff_space_mm: 1.75,
+            staff_gap: 6.0,
+            part_gap: 7.0,
+            system_gap: 9.0,
+            spacing: 1.0,
+        }
+    }
+}
+
+impl PageFormat {
+    /// Common paper sizes, portrait, in millimetres.
+    pub const SIZES: &'static [(&'static str, f32, f32)] = &[
+        ("A4", 210.0, 297.0),
+        ("Letter", 215.9, 279.4),
+        ("A3", 297.0, 420.0),
+        ("A5", 148.0, 210.0),
+        ("B4", 250.0, 353.0),
+        ("Legal", 215.9, 355.6),
+        ("Tabloid", 279.4, 431.8),
+    ];
+
+    pub fn landscape(&self) -> bool {
+        self.width_mm > self.height_mm
+    }
+
+    /// The paper size's name, if it is a common one (either orientation).
+    pub fn size_name(&self) -> Option<&'static str> {
+        let (a, b) = if self.landscape() {
+            (self.height_mm, self.width_mm)
+        } else {
+            (self.width_mm, self.height_mm)
+        };
+        Self::SIZES
+            .iter()
+            .find(|(_, w, h)| (w - a).abs() < 1.0 && (h - b).abs() < 1.0)
+            .map(|s| s.0)
+    }
+
+    /// Keeps every value in a sensible range (also for hostile files).
+    pub fn clamped(self) -> PageFormat {
+        let c = |v: f32, lo: f32, hi: f32, d: f32| if v.is_finite() { v.clamp(lo, hi) } else { d };
+        let d = PageFormat::default();
+        PageFormat {
+            width_mm: c(self.width_mm, 50.0, 2000.0, d.width_mm),
+            height_mm: c(self.height_mm, 50.0, 2000.0, d.height_mm),
+            margin_top_mm: c(self.margin_top_mm, 0.0, 100.0, d.margin_top_mm),
+            margin_bottom_mm: c(self.margin_bottom_mm, 0.0, 100.0, d.margin_bottom_mm),
+            margin_left_mm: c(self.margin_left_mm, 0.0, 100.0, d.margin_left_mm),
+            margin_right_mm: c(self.margin_right_mm, 0.0, 100.0, d.margin_right_mm),
+            staff_space_mm: c(self.staff_space_mm, 0.5, 10.0, d.staff_space_mm),
+            staff_gap: c(self.staff_gap, 1.0, 40.0, d.staff_gap),
+            part_gap: c(self.part_gap, 1.0, 40.0, d.part_gap),
+            system_gap: c(self.system_gap, 1.0, 60.0, d.system_gap),
+            spacing: c(self.spacing, 0.5, 2.0, d.spacing),
+        }
+    }
 }
 
 /// An instrument template for new parts. Programs follow General MIDI (0-based).
@@ -982,6 +1074,7 @@ impl Score {
     /// exists everywhere and every voice exactly fills its measure (padding with rests, cutting
     /// overflow). Safe to call after any edit or import.
     pub fn normalize(&mut self) {
+        self.page = self.page.clamped();
         self.measures.truncate(limits::MAX_MEASURES);
         self.parts.truncate(limits::MAX_PARTS);
         if self.measures.is_empty() {

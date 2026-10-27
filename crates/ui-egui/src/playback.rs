@@ -101,6 +101,26 @@ impl ScoreApp {
         }
     }
 
+    /// Plays MIDI keys briefly with the sound of the selected (or first) instrument.
+    pub(crate) fn preview_keys(&mut self, keys: &[u8]) {
+        if self.playback.is_some() || keys.is_empty() {
+            return;
+        }
+        let part = self.session.focus().0;
+        let Some(p) = self
+            .session
+            .score
+            .parts
+            .get(part)
+            .or(self.session.score.parts.first())
+        else {
+            return;
+        };
+        let (sound, _) = scoreart_synth::resolve(&self.session.sounds, &p.sound, p.program);
+        let synth = Synth::preview_sound(keys, &sound, self.host.audio_rate());
+        let _ = self.host.audio_start(synth);
+    }
+
     /// Plays the selected chord briefly after a pitch was entered or changed.
     pub(crate) fn preview_selection(&mut self) {
         if self.playback.is_some() || !self.sound_on_input {

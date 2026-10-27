@@ -97,6 +97,36 @@ pub fn commands() -> Vec<CommandSpec> {
             undoable: true,
         },
         CommandSpec {
+            id: "note.midi",
+            label: "Enter a played note",
+            menu: &[],
+            shortcut: None,
+            params: "key: 0…127 (MIDI note number, 60 = middle C), chord?: true adds it to the chord just entered. Spelled in the key signature",
+            enabled: |s| {
+                if s.input.active {
+                    Ok(())
+                } else {
+                    Err("Note input is off (N)".into())
+                }
+            },
+            run: |s, p| {
+                let key = p_i64(p, "key")
+                    .filter(|k| (0..=127).contains(k))
+                    .ok_or_else(|| Error::Param("key: 0…127".into()))?;
+                let pitch = Pitch::from_midi(key as i32, s.score.key_at(s.cursor.measure));
+                if p.get("chord").and_then(Value::as_bool) == Some(true)
+                    && let Some(Selection::Event { ev, .. }) = s.selection
+                    && s.score.event(ev).is_some_and(|e| !e.is_rest())
+                {
+                    s.score.add_to_chord(ev, pitch)?;
+                    s.last_pitch = Some(pitch);
+                    return Ok(Value::Null);
+                }
+                enter(s, EventKind::Chord(vec![Note::new(pitch)]))
+            },
+            undoable: true,
+        },
+        CommandSpec {
             id: "note.rest",
             label: "Enter rest",
             menu: &[],

@@ -1092,6 +1092,60 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
             }
         }
     }
+    if let Some(st) = sc.child("Style") {
+        apply_style(&mut score, st);
+    }
     score.normalize();
     Ok(score)
+}
+
+/// Page size, margins, staff size and distances from a MuseScore style (inline `<Style>` or
+/// the `score_style.mss` of an `.mscz`). Page lengths are in inches, the staff space in mm,
+/// distances in staff spaces.
+pub(crate) fn apply_style(score: &mut Score, st: &Element) {
+    let num = |k: &str| st.child_num(k).filter(|v| v.is_finite() && *v > 0.0);
+    let inch = |v: f64| (v * 25.4) as f32;
+    let f = &mut score.page;
+    if let Some(s) = num("spatium").or_else(|| num("Spatium")) {
+        f.staff_space_mm = s as f32;
+    }
+    if let Some(w) = num("pageWidth") {
+        f.width_mm = inch(w);
+        if let (Some(pw), Some(l)) = (num("pagePrintableWidth"), num("pageOddLeftMargin")) {
+            f.margin_left_mm = inch(l);
+            f.margin_right_mm = inch((w - pw - l).max(0.0));
+        }
+    }
+    if let Some(h) = num("pageHeight") {
+        f.height_mm = inch(h);
+    }
+    if let Some(t) = num("pageOddTopMargin") {
+        f.margin_top_mm = inch(t);
+    }
+    if let Some(b) = num("pageOddBottomMargin") {
+        f.margin_bottom_mm = inch(b);
+    }
+    if let Some(d) = num("akkoladeDistance") {
+        f.staff_gap = d as f32;
+    }
+    if let Some(d) = num("staffDistance") {
+        f.part_gap = d as f32;
+    }
+    if let Some(d) = num("minSystemDistance") {
+        f.system_gap = d as f32;
+    }
+    score.page = score.page.clamped();
+}
+
+/// Applies a `score_style.mss` file.
+pub(crate) fn apply_style_file(score: &mut Score, mss: &str) {
+    if let Ok(root) = dom::parse(mss)
+        && let Some(st) = if root.name == "Style" {
+            Some(&root)
+        } else {
+            root.child("Style")
+        }
+    {
+        apply_style(score, st);
+    }
 }

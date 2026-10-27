@@ -196,6 +196,7 @@ struct WebHost {
     stores: Rc<RefCell<std::collections::HashMap<&'static str, scoreart_synth::files::Mem>>>,
     download: Rc<RefCell<Option<scoreart_ui_egui::DownloadStatus>>>,
     cancel: Rc<Cell<bool>>,
+    midi: crate::midi::WebMidi,
 }
 
 fn download(name: &str, bytes: &[u8]) -> Result<(), JsValue> {
@@ -301,6 +302,30 @@ impl Host for WebHost {
 
     fn cancel_download(&mut self) {
         self.cancel.set(true);
+    }
+
+    fn midi_ports(&mut self) -> Vec<String> {
+        self.midi.ports(&self.ctx)
+    }
+
+    fn midi_open(&mut self, port: Option<&str>) -> Result<(), String> {
+        self.midi.open(port, &self.ctx)
+    }
+
+    fn midi_connected(&self) -> Option<String> {
+        self.midi.connected()
+    }
+
+    fn take_midi(&mut self) -> Vec<Vec<u8>> {
+        self.midi.take()
+    }
+
+    fn load_setting(&self, name: &str) -> Option<String> {
+        crate::midi::load_setting(name)
+    }
+
+    fn save_setting(&mut self, name: &str, value: &str) {
+        crate::midi::save_setting(name, value);
     }
 
     fn save(&mut self, name: &str, bytes: Vec<u8>, _save_as: bool) -> Option<String> {
@@ -422,6 +447,7 @@ pub fn start() {
                         stores: Rc::default(),
                         download: Rc::default(),
                         cancel: Rc::default(),
+                        midi: Default::default(),
                     };
                     let mut host = host;
                     host.rate = host.audio.rate();

@@ -120,7 +120,8 @@ fn hostile_style_does_not_panic() {
             ..Style::default()
         },
         Style {
-            margin_mm: 1e9,
+            margin_left_mm: 1e9,
+            margin_top_mm: f32::INFINITY,
             spacing: 0.0,
             ..Style::default()
         },
@@ -168,4 +169,25 @@ fn hidden_staves_and_breaks() {
     s.parts[0].set_visible(false);
     let l = layout(&s, &Style::default());
     assert!(l.staves.iter().any(|b| b.part == 1));
+}
+
+#[test]
+fn continuous_views_have_one_endless_page() {
+    let s = melody();
+    let page = layout(&s, &Style::default());
+    let wide = layout(&s, &Style::new(&s.page, crate::View::Horizontal));
+    assert_eq!(wide.pages.len(), 1);
+    assert!(
+        wide.pages[0].width > page.pages[0].width,
+        "the page grows to the right"
+    );
+    assert!(wide.pages[0].height < page.pages[0].height);
+    let tall = layout(&s, &Style::new(&s.page, crate::View::Vertical));
+    assert_eq!(tall.pages.len(), 1);
+    assert_eq!(tall.pages[0].width, page.pages[0].width);
+    // Landscape A4 is wider than portrait.
+    let mut fmt = s.page;
+    (fmt.width_mm, fmt.height_mm) = (fmt.height_mm, fmt.width_mm);
+    let land = layout(&s, &Style::new(&fmt, crate::View::Page));
+    assert!(land.pages[0].width > page.pages[0].width);
 }

@@ -63,6 +63,13 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   also get an instrument of its own. **Instrument changes inside a part**
   ("To Flute", played and exported to MIDI); show or hide instruments; line and page breaks;
   **lyrics with several verses and hyphens**; transpose; score properties; unlimited undo/redo.
+- **Views and page format**: page view, continuous view (one endless system) and continuous
+  vertical view; **Format → Page settings**: paper size (A4, Letter, A3 …), portrait or
+  landscape, all four margins, staff size, distances between staves, instruments and systems,
+  note spacing. Saved in the file (MusicXML `<defaults>`), read from MuseScore styles.
+- **MIDI keyboard input** (desktop and browser): connect a device, play notes and chords into
+  the score; **every key and controller can be given its own action** (note value, rest, tie,
+  undo, play …) by clicking it on the keyboard picture or with *Learn*. Bindings are kept.
 - **Files**: **MusicXML 4.0** is the native format (`.musicxml` and compressed `.mxl`, read and
   write — exchange scores with MuseScore, Dorico, Sibelius, Finale), **MuseScore files**
   (`.mscz`, `.mscx` of MuseScore 3 and 4, checked against files saved by MuseScore Studio 4.7)

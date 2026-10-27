@@ -3,12 +3,12 @@
 use serde_json::{Value, json};
 
 use scoreart_model::{
-    Barline, Clef, Instrument, InstrumentChange, KeySig, Line, PartSound, Rearrange, Score, Tempo, TimeSig,
-    TimeSymbol, clip, instrument, limits,
+    Barline, Clef, Instrument, InstrumentChange, KeySig, Line, PageFormat, PartSound, Rearrange, Score,
+    Tempo, TimeSig, TimeSymbol, clip, instrument, limits,
 };
 
 use super::{CommandSpec, always, need_i64, need_str, p_i64, p_str, p_usize};
-use crate::{Error, Result, Selection, Session};
+use crate::{Error, Result, Selection, Session, View};
 
 fn has_parts(s: &Session) -> std::result::Result<(), String> {
     if s.score.parts.is_empty() {
@@ -100,10 +100,10 @@ pub fn commands() -> Vec<CommandSpec> {
                         bpm: t.clamp(10, 400) as u16,
                     });
                 }
-                let style = s.style.clone();
+                let view = s.view;
                 let sounds = std::mem::take(&mut s.sounds);
                 *s = Session {
-                    style,
+                    view,
                     sounds,
                     ..Session::new(score)
                 };
@@ -650,7 +650,98 @@ pub fn commands() -> Vec<CommandSpec> {
                     .and_then(Value::as_f64)
                     .filter(|f| f.is_finite())
                     .ok_or_else(|| Error::Param("factor".into()))?;
-                s.style.spacing = f.clamp(0.5, 2.0) as f32;
+                s.score.page.spacing = f.clamp(0.5, 2.0) as f32;
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "page.format",
+            label: "Page settings",
+            menu: &["Format"],
+            shortcut: None,
+            params: "any of: size (A4, Letter, A3, A5, B4, Legal, Tabloid), orientation (portrait|landscape), width_mm, height_mm, margin_mm (all four), margin_top_mm, margin_bottom_mm, margin_left_mm, margin_right_mm, staff_space_mm (staff size), staff_gap, part_gap, system_gap (staff spaces), spacing (0.5…2), reset: true (defaults)",
+            enabled: always,
+            run: |s, p| {
+                let num = |k: &str| -> Result<Option<f32>> {
+                    match p.get(k) {
+                        None | Some(Value::Null) => Ok(None),
+                        Some(v) => v
+                            .as_f64()
+                            .filter(|f| f.is_finite())
+                            .map(|f| Some(f as f32))
+                            .ok_or_else(|| Error::Param(format!("{k} must be a number"))),
+                    }
+                };
+                let mut f = if p.get("reset").and_then(Value::as_bool) == Some(true) {
+                    PageFormat::default()
+                } else {
+                    s.score.page
+                };
+                if let Some(name) = p_str(p, "size") {
+                    let (_, w, h) = PageFormat::SIZES
+                        .iter()
+                        .find(|(n, ..)| n.eq_ignore_ascii_case(name))
+                        .ok_or_else(|| Error::Param(format!("unknown size {name}")))?;
+                    (f.width_mm, f.height_mm) = if f.landscape() { (*h, *w) } else { (*w, *h) };
+                }
+                if let Some(w) = num("width_mm")? {
+                    f.width_mm = w;
+                }
+                if let Some(h) = num("height_mm")? {
+                    f.height_mm = h;
+                }
+                match p_str(p, "orientation") {
+                    None => {}
+                    Some("portrait") if f.landscape() => {
+                        (f.width_mm, f.height_mm) = (f.height_mm, f.width_mm)
+                    }
+                    Some("landscape") if !f.landscape() => {
+                        (f.width_mm, f.height_mm) = (f.height_mm, f.width_mm)
+                    }
+                    Some("portrait" | "landscape") => {}
+                    Some(o) => return Err(Error::Param(format!("unknown orientation {o}"))),
+                }
+                if let Some(m) = num("margin_mm")? {
+                    f.margin_top_mm = m;
+                    f.margin_bottom_mm = m;
+                    f.margin_left_mm = m;
+                    f.margin_right_mm = m;
+                }
+                for (k, slot) in [
+                    ("margin_top_mm", &mut f.margin_top_mm),
+                    ("margin_bottom_mm", &mut f.margin_bottom_mm),
+                    ("margin_left_mm", &mut f.margin_left_mm),
+                    ("margin_right_mm", &mut f.margin_right_mm),
+                    ("staff_space_mm", &mut f.staff_space_mm),
+                    ("staff_gap", &mut f.staff_gap),
+                    ("part_gap", &mut f.part_gap),
+                    ("system_gap", &mut f.system_gap),
+                    ("spacing", &mut f.spacing),
+                ] {
+                    if let Some(v) = num(k)? {
+                        *slot = v;
+                    }
+                }
+                s.score.page = f.clamped();
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "view.mode",
+            label: "View",
+            menu: &["View"],
+            shortcut: None,
+            params: "mode: page | horizontal (one endless system) | vertical (systems without page breaks)",
+            enabled: always,
+            run: |s, p| {
+                s.view = match need_str(p, "mode")? {
+                    "page" => View::Page,
+                    "horizontal" | "continuous" => View::Horizontal,
+                    "vertical" => View::Vertical,
+                    m => return Err(Error::Param(format!("unknown view {m}"))),
+                };
                 s.touch();
                 Ok(Value::Null)
             },

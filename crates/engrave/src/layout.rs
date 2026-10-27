@@ -6,7 +6,7 @@ use scoreart_model::{
 };
 
 use crate::glyphs as g;
-use crate::{Align, Hit, Item, Layout, Page, Shape, StaffBox, Style, Target};
+use crate::{Align, Hit, Item, Layout, Page, Shape, StaffBox, Style, Target, View};
 
 /// Key into the accidental table: (part, staff, measure, voice, event, note).
 type NoteKey = (usize, usize, usize, usize, usize, usize);
@@ -363,6 +363,31 @@ fn name_indent(score: &Score, first: bool) -> f32 {
     if w > 0.0 { w + 1.5 + bracket } else { bracket }
 }
 
+/// Every measure in one system at natural spacing (continuous view).
+fn one_system(score: &Score, plans: &[MeasurePlan]) -> System {
+    System {
+        measures: (0..plans.len()).collect(),
+        stretch: 1.0,
+        indent: name_indent(score, true),
+        header: header_width(score, 0),
+    }
+}
+
+/// The width a system takes at its stretch.
+fn natural_width(sys: &System, plans: &[MeasurePlan]) -> f32 {
+    let body: f32 = sys
+        .measures
+        .iter()
+        .enumerate()
+        .filter_map(|(i, m)| {
+            plans
+                .get(*m)
+                .map(|p| p.fixed() + p.stretch() * sys.stretch + if i == 0 { 0.0 } else { p.prefix })
+        })
+        .sum();
+    sys.indent + sys.header + body + 0.5
+}
+
 fn break_systems(score: &Score, plans: &[MeasurePlan], width: f32) -> Vec<System> {
     let mut systems = Vec::new();
     let mut m = 0usize;
@@ -641,12 +666,21 @@ struct Ctx<'a> {
 }
 
 pub fn layout(score: &Score, style: &Style) -> Layout {
-    let (pw, ph) = style.page_sp();
-    let margin = style.margin_sp().min(pw / 4.0).min(ph / 4.0);
-    let width = pw - 2.0 * margin;
+    let (mut pw, mut ph) = style.page_sp();
+    let [mt, mb, ml, mr] = style.margins_sp().map(|m| m.min(pw / 4.0).min(ph / 4.0));
+    let mut width = pw - ml - mr;
     let acc = accidentals(score);
     let plans = plan_measures(score, &acc, style);
-    let systems = break_systems(score, &plans, width);
+    let systems = if style.view == View::Horizontal {
+        // One system at natural spacing; the page grows to fit it.
+        let sys = one_system(score, &plans);
+        width = natural_width(&sys, &plans);
+        pw = ml + width + mr;
+        vec![sys]
+    } else {
+        break_systems(score, &plans, width)
+    };
+    let endless = style.view != View::Page;
 
     let mut out = Layout::default();
     let mut ctx = Ctx {
@@ -664,9 +698,9 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
     let mut page_index = 0usize;
 
     // Title block.
-    let mut y = margin;
+    let mut y = mt;
     let meta = &score.meta;
-    {
+    if style.view != View::Horizontal {
         let mut o = Out {
             page: &mut page,
             page_index,
@@ -684,12 +718,12 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
         }
         if !meta.composer.is_empty() || !meta.lyricist.is_empty() {
             y += 2.2;
-            o.text(&meta.composer, pw - margin, y, 1.9, Align::Right, false, false);
-            o.text(&meta.lyricist, margin, y, 1.9, Align::Left, false, false);
+            o.text(&meta.composer, pw - mr, y, 1.9, Align::Right, false, false);
+            o.text(&meta.lyricist, ml, y, 1.9, Align::Left, false, false);
             // Keep rehearsal marks and tempo above the first system clear of this line.
             y += 1.5;
         }
-        if y > margin {
+        if y > mt {
             y += 3.0;
         }
     }
@@ -761,7 +795,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                 .and_then(|p| p.measures.last())
                 .and_then(|m| score.measures.get(*m))
                 .is_some_and(|i| i.page_break);
-        if (y + sys_h > ph - margin || forced) && !page.items.is_empty() && si > 0 {
+        if !endless && (y + sys_h > ph - mb || forced) && !page.items.is_empty() && si > 0 {
             out.pages.push(std::mem::take(&mut page));
             page = Page {
                 width: pw,
@@ -769,7 +803,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                 items: Vec::new(),
             };
             page_index += 1;
-            y = margin;
+            y = mt;
             let mut o = Out {
                 page: &mut page,
                 page_index,
@@ -777,8 +811,8 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             };
             o.text(
                 &(page_index + 1).to_string(),
-                pw - margin,
-                margin - 1.5,
+                pw - mr,
+                mt - 1.5,
                 1.6,
                 Align::Right,
                 false,
@@ -788,9 +822,15 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
         }
         let top = y;
         draw_system(
-            &mut ctx, &mut page, page_index, &mut out, sys, si, &plans, margin, width, top, &tops, sys_h,
+            &mut ctx, &mut page, page_index, &mut out, sys, si, &plans, ml, width, top, &tops, sys_h,
         );
         y += sys_h + style.system_gap;
+    }
+    if endless {
+        // The page ends below the last system.
+        ph = (y - style.system_gap + mb + 4.0).max(ph.min(40.0));
+        page.width = pw;
+        page.height = ph;
     }
     // Ties need both ends placed.
     draw_ties(&ctx, &mut out, &mut page, page_index);

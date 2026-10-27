@@ -76,8 +76,8 @@ fn take_sounds(args: &mut Vec<String>) -> Result<(), String> {
 fn write_out(s: &Session, out: &str) -> Result<Vec<String>, String> {
     if Format::from_name(out) == Some(Format::Svg) {
         // One file per page: out.svg, or out-1.svg, out-2.svg … for longer scores.
-        let layout = scoreart_engrave::layout(&s.score, &s.style);
-        let pages = scoreart_render::svg_pages(&layout, &s.style);
+        let layout = scoreart_engrave::layout(&s.score, &s.style());
+        let pages = scoreart_render::svg_pages(&layout, &s.style());
         let stem = out.strip_suffix(".svg").unwrap_or(out);
         let mut written = Vec::new();
         for (i, svg) in pages.iter().enumerate() {

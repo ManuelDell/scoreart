@@ -17,3 +17,4 @@ eframe = { workspace = true, features = ["default_fonts", "glow", "wayland", "x1
 rfd = { workspace = true }
 scoreart-synth = { workspace = true, features = ["download"] }
 cpal = { workspace = true }
+midir = { workspace = true }

@@ -110,6 +110,13 @@ pub(crate) fn window(app: &mut ScoreApp, ctx: &egui::Context) {
                     app.open_catalog();
                 }
                 ui.toggle_value(&mut app.show_mixer, "Mixer  F10");
+                if ui
+                    .button("MIDI input…")
+                    .on_hover_text("Connect a MIDI keyboard and set what each key does")
+                    .clicked()
+                {
+                    app.open_midi();
+                }
             });
             ui.separator();
             let count = app.session.score.parts.len();

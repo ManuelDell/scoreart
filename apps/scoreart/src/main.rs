@@ -42,6 +42,9 @@ struct NativeHost {
     dropped_sounds: Arc<Mutex<Vec<PathBuf>>>,
     /// The catalogue download in progress.
     download: Option<Download>,
+    /// The open MIDI input device and the messages it sent.
+    midi: Option<(String, midir::MidiInputConnection<()>)>,
+    midi_queue: Arc<Mutex<Vec<Vec<u8>>>>,
 }
 
 struct Download {
@@ -52,6 +55,23 @@ struct Download {
 
 /// The file that lists the sound libraries to load at start.
 fn sounds_list() -> Option<PathBuf> {
+    Some(config_dir()?.join("sounds.txt"))
+}
+
+/// A setting's file (`name` is a plain word like `midi-map`).
+fn setting_file(name: &str) -> Option<PathBuf> {
+    let safe: String = name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect();
+    if safe.is_empty() {
+        return None;
+    }
+    Some(config_dir()?.join(format!("{safe}.txt")))
+}
+
+/// ScoreArt's settings folder.
+fn config_dir() -> Option<PathBuf> {
     let base = if cfg!(target_os = "windows") {
         std::env::var_os("APPDATA").map(PathBuf::from)
     } else if cfg!(target_os = "macos") {
@@ -61,7 +81,7 @@ fn sounds_list() -> Option<PathBuf> {
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
     }?;
-    Some(base.join("ScoreArt").join("sounds.txt"))
+    Some(base.join("ScoreArt"))
 }
 
 /// Whether a dropped file is a sound library rather than a score.
@@ -263,6 +283,72 @@ impl Host for NativeHost {
     fn cancel_download(&mut self) {
         if let Some(d) = &self.download {
             d.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    fn midi_ports(&mut self) -> Vec<String> {
+        let Ok(input) = midir::MidiInput::new("ScoreArt") else {
+            return Vec::new();
+        };
+        input
+            .ports()
+            .iter()
+            .filter_map(|p| input.port_name(p).ok())
+            .collect()
+    }
+
+    fn midi_open(&mut self, port: Option<&str>) -> Result<(), String> {
+        // Closing the old connection first frees the device.
+        self.midi = None;
+        let Some(want) = port else { return Ok(()) };
+        let mut input = midir::MidiInput::new("ScoreArt").map_err(|e| e.to_string())?;
+        input.ignore(midir::Ignore::All);
+        let ports = input.ports();
+        let p = ports
+            .iter()
+            .find(|p| input.port_name(p).is_ok_and(|n| n == want))
+            .ok_or_else(|| format!("MIDI device {want} not found"))?;
+        let queue = self.midi_queue.clone();
+        let conn = input
+            .connect(
+                p,
+                "ScoreArt input",
+                move |_, msg, _| {
+                    if let Ok(mut q) = queue.lock()
+                        && q.len() < 4096
+                    {
+                        q.push(msg.to_vec());
+                    }
+                },
+                (),
+            )
+            .map_err(|e| e.to_string())?;
+        self.midi = Some((want.to_string(), conn));
+        Ok(())
+    }
+
+    fn midi_connected(&self) -> Option<String> {
+        self.midi.as_ref().map(|(n, _)| n.clone())
+    }
+
+    fn take_midi(&mut self) -> Vec<Vec<u8>> {
+        match self.midi_queue.lock() {
+            Ok(mut q) => std::mem::take(&mut *q),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    fn load_setting(&self, name: &str) -> Option<String> {
+        std::fs::read_to_string(setting_file(name)?).ok()
+    }
+
+    fn save_setting(&mut self, name: &str, value: &str) {
+        let Some(file) = setting_file(name) else { return };
+        if let Some(dir) = file.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Err(e) = std::fs::write(&file, value) {
+            eprintln!("scoreart: cannot write {}: {e}", file.display());
         }
     }
 

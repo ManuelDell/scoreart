@@ -49,8 +49,12 @@ pub fn from_bytes(bytes: &[u8]) -> Result<Score, Error> {
     }
     if bytes.starts_with(b"PK") {
         // A MuseScore .mscz holds an .mscx; a compressed MusicXML (.mxl) a container.xml.
-        if let Some(mscx) = read_mscz(bytes)? {
-            return mscz::from_mscx(&mscx);
+        if let Some((mscx, style)) = read_mscz(bytes)? {
+            let mut score = mscz::from_mscx(&mscx)?;
+            if let Some(mss) = style {
+                mscz::apply_style_file(&mut score, &mss);
+            }
+            return Ok(score);
         }
         return from_str(&read_mxl(bytes)?);
     }
@@ -87,8 +91,8 @@ fn decode_text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-/// The `.mscx` inside a MuseScore `.mscz`, if this zip is one.
-fn read_mscz(bytes: &[u8]) -> Result<Option<String>, Error> {
+/// The `.mscx` inside a MuseScore `.mscz`, if this zip is one, and its style file.
+fn read_mscz(bytes: &[u8]) -> Result<Option<(String, Option<String>)>, Error> {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| Error::Zip(e.to_string()))?;
     let Some(name) = zip
         .file_names()
@@ -97,17 +101,27 @@ fn read_mscz(bytes: &[u8]) -> Result<Option<String>, Error> {
     else {
         return Ok(None);
     };
-    let f = zip
-        .by_name(&name)
-        .map_err(|e| Error::Zip(format!("{name}: {e}")))?;
-    let mut out = Vec::new();
-    f.take(MAX_FILE_BYTES as u64 + 1)
-        .read_to_end(&mut out)
-        .map_err(|e| Error::Zip(e.to_string()))?;
-    if out.len() > MAX_FILE_BYTES {
-        return Err(Error::Invalid("file too large".into()));
-    }
-    Ok(Some(decode_text(&out)))
+    let style_name = zip
+        .file_names()
+        .find(|n| n.to_ascii_lowercase().ends_with(".mss") && !n.contains('/'))
+        .map(str::to_string);
+    let mut read = |name: &str| -> Result<String, Error> {
+        let f = zip
+            .by_name(name)
+            .map_err(|e| Error::Zip(format!("{name}: {e}")))?;
+        let mut out = Vec::new();
+        f.take(MAX_FILE_BYTES as u64 + 1)
+            .read_to_end(&mut out)
+            .map_err(|e| Error::Zip(e.to_string()))?;
+        if out.len() > MAX_FILE_BYTES {
+            return Err(Error::Invalid("file too large".into()));
+        }
+        Ok(decode_text(&out))
+    };
+    let mscx = read(&name)?;
+    // A broken style file only costs the page settings.
+    let style = style_name.and_then(|n| read(&n).ok());
+    Ok(Some((mscx, style)))
 }
 
 fn read_mxl(bytes: &[u8]) -> Result<String, Error> {

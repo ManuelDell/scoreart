@@ -5,8 +5,8 @@ use std::fmt::Write as _;
 
 use scoreart_model::marks::XmlGroup;
 use scoreart_model::{
-    Accidental, Arpeggio, Barline, Clef, Event, EventKind, Jump, MeasureInfo, Pitch, Placement, Score,
-    Spanner, SpannerKind, TPQ, TimeSymbol, Tremolo,
+    Accidental, Arpeggio, Barline, Clef, Event, EventKind, Jump, MeasureInfo, PageFormat, Pitch, Placement,
+    Score, Spanner, SpannerKind, TPQ, TimeSymbol, Tremolo,
 };
 
 use crate::dom::esc;
@@ -319,7 +319,9 @@ pub fn write(score: &Score) -> String {
         "    <encoding><software>ScoreArt {}</software><supports element=\"accidental\" type=\"no\"/><supports element=\"stem\" type=\"no\"/></encoding>",
         env!("CARGO_PKG_VERSION")
     );
-    x.push_str("  </identification>\n  <part-list>\n");
+    x.push_str("  </identification>\n");
+    write_defaults(&mut x, &score.page);
+    x.push_str("  <part-list>\n");
     for p in &score.parts {
         let _ = writeln!(x, "    <score-part id=\"{}\">", esc(&p.id));
         let _ = writeln!(x, "      <part-name>{}</part-name>", esc(&p.name));
@@ -941,4 +943,43 @@ fn write_event(
             }
         }
     }
+}
+
+/// Page size, margins and distances as `<defaults>` (lengths in tenths of a staff space).
+fn write_defaults(x: &mut String, f: &PageFormat) {
+    let f = f.clamped();
+    let t = |mm: f32| mm / f.staff_space_mm * 10.0;
+    let _ = writeln!(x, "  <defaults>");
+    let _ = writeln!(
+        x,
+        "    <scaling><millimeters>{:.4}</millimeters><tenths>40</tenths></scaling>",
+        f.staff_space_mm * 4.0
+    );
+    let _ = writeln!(
+        x,
+        "    <page-layout><page-height>{:.4}</page-height><page-width>{:.4}</page-width><page-margins type=\"both\"><left-margin>{:.4}</left-margin><right-margin>{:.4}</right-margin><top-margin>{:.4}</top-margin><bottom-margin>{:.4}</bottom-margin></page-margins></page-layout>",
+        t(f.height_mm),
+        t(f.width_mm),
+        t(f.margin_left_mm),
+        t(f.margin_right_mm),
+        t(f.margin_top_mm),
+        t(f.margin_bottom_mm)
+    );
+    let _ = writeln!(
+        x,
+        "    <system-layout><system-distance>{:.1}</system-distance></system-layout>",
+        f.system_gap * 10.0
+    );
+    let _ = writeln!(
+        x,
+        "    <staff-layout><staff-distance>{:.1}</staff-distance></staff-layout>",
+        f.staff_gap * 10.0
+    );
+    let _ = writeln!(
+        x,
+        "    <appearance><other-appearance type=\"scoreart-part-distance\">{:.1}</other-appearance><other-appearance type=\"scoreart-note-spacing\">{:.3}</other-appearance></appearance>",
+        f.part_gap * 10.0,
+        f.spacing
+    );
+    let _ = writeln!(x, "  </defaults>");
 }

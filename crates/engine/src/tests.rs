@@ -439,3 +439,47 @@ fn moving_and_removing_parts_keeps_lines_attached() {
     assert_eq!(s.score.spanners.len(), 1);
     assert_eq!((s.score.spanners[0].part, s.score.spanners[0].staff), (0, 1));
 }
+
+#[test]
+fn page_format_and_view() {
+    let mut s = Session::default();
+    s.execute(
+        "page.format",
+        &json!({ "size": "A5", "orientation": "landscape", "margin_mm": 10, "staff_space_mm": 1.5 }),
+    )
+    .unwrap();
+    let p = s.score.page;
+    assert_eq!(
+        (p.width_mm, p.height_mm, p.margin_left_mm, p.staff_space_mm),
+        (210.0, 148.0, 10.0, 1.5)
+    );
+    assert_eq!(p.size_name(), Some("A5"));
+    assert!(s.execute("page.format", &json!({ "size": "A9" })).is_err());
+    assert!(s.execute("page.format", &json!({ "width_mm": "wide" })).is_err());
+    // Saved with the score.
+    let back = scoreart_musicxml::from_str(&scoreart_musicxml::to_string(&s.score)).unwrap();
+    assert_eq!(back.page, s.score.page);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.score.page, scoreart_model::PageFormat::default());
+    // The view is not part of the score and not undone.
+    s.execute("view.mode", &json!({ "mode": "horizontal" })).unwrap();
+    assert_eq!(s.layout().pages.len(), 1);
+    assert!(s.execute("view.mode", &json!({ "mode": "sideways" })).is_err());
+}
+
+#[test]
+fn midi_keys_enter_notes_and_chords() {
+    let mut s = blank();
+    assert!(s.execute("note.midi", &json!({ "key": 60 })).is_err(), "only in note input");
+    s.execute("input.toggle", &json!({})).unwrap();
+    s.execute("note.midi", &json!({ "key": 61 })).unwrap();
+    s.execute("note.midi", &json!({ "key": 64, "chord": true })).unwrap();
+    s.execute("note.midi", &json!({ "key": 67 })).unwrap();
+    let v = s.score.voice(0, 0, 0, 0).unwrap();
+    let names: Vec<Vec<String>> = v.events[..2]
+        .iter()
+        .map(|e| e.notes().iter().map(|n| n.pitch.name()).collect())
+        .collect();
+    assert_eq!(names, [vec!["C#4".to_string(), "E4".into()], vec!["G4".into()]]);
+    assert!(s.execute("note.midi", &json!({ "key": 200 })).is_err());
+}

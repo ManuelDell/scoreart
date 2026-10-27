@@ -18,8 +18,20 @@ mod layout;
 pub mod smufl;
 
 pub use layout::layout;
-use scoreart_model::Clef;
 use scoreart_model::edit::EventRef;
+use scoreart_model::{Clef, PageFormat};
+
+/// How the score is laid out on screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum View {
+    /// Pages as printed.
+    #[default]
+    Page,
+    /// One endless system from left to right.
+    Horizontal,
+    /// Systems one below the other on one endless page.
+    Vertical,
+}
 
 /// Page and spacing settings.
 #[derive(Clone, Debug, PartialEq)]
@@ -27,7 +39,10 @@ pub struct Style {
     pub staff_space_mm: f32,
     pub page_width_mm: f32,
     pub page_height_mm: f32,
-    pub margin_mm: f32,
+    pub margin_top_mm: f32,
+    pub margin_bottom_mm: f32,
+    pub margin_left_mm: f32,
+    pub margin_right_mm: f32,
     /// Gap between the staves of one part (bottom line to top line), sp.
     pub staff_gap: f32,
     /// Gap between parts, sp.
@@ -36,36 +51,63 @@ pub struct Style {
     pub system_gap: f32,
     /// Horizontal spacing factor (1.0 = default).
     pub spacing: f32,
+    pub view: View,
 }
 
 impl Default for Style {
     fn default() -> Self {
-        Style {
-            staff_space_mm: 1.75,
-            page_width_mm: 210.0,
-            page_height_mm: 297.0,
-            margin_mm: 15.0,
-            staff_gap: 6.0,
-            part_gap: 7.0,
-            system_gap: 9.0,
-            spacing: 1.0,
-        }
+        Style::new(&PageFormat::default(), View::Page)
     }
 }
 
 impl Style {
+    /// The style for a score's page format, shown in `view`.
+    pub fn new(page: &PageFormat, view: View) -> Style {
+        let p = page.clamped();
+        Style {
+            staff_space_mm: p.staff_space_mm,
+            page_width_mm: p.width_mm,
+            page_height_mm: p.height_mm,
+            margin_top_mm: p.margin_top_mm,
+            margin_bottom_mm: p.margin_bottom_mm,
+            margin_left_mm: p.margin_left_mm,
+            margin_right_mm: p.margin_right_mm,
+            staff_gap: p.staff_gap,
+            part_gap: p.part_gap,
+            system_gap: p.system_gap,
+            spacing: p.spacing,
+            view,
+        }
+    }
+
     /// Page size in staff spaces.
     pub fn page_sp(&self) -> (f32, f32) {
-        let s = self.staff_space_mm.clamp(0.5, 10.0);
+        let s = self.space();
         (
-            self.page_width_mm.clamp(50.0, 2000.0) / s,
-            self.page_height_mm.clamp(50.0, 2000.0) / s,
+            fin(self.page_width_mm, 210.0).clamp(50.0, 2000.0) / s,
+            fin(self.page_height_mm, 297.0).clamp(50.0, 2000.0) / s,
         )
     }
 
-    pub fn margin_sp(&self) -> f32 {
-        self.margin_mm.clamp(0.0, 100.0) / self.staff_space_mm.clamp(0.5, 10.0)
+    /// Margins in staff spaces: top, bottom, left, right.
+    pub fn margins_sp(&self) -> [f32; 4] {
+        let s = self.space();
+        [
+            self.margin_top_mm,
+            self.margin_bottom_mm,
+            self.margin_left_mm,
+            self.margin_right_mm,
+        ]
+        .map(|m| fin(m, 15.0).clamp(0.0, 100.0) / s)
     }
+
+    fn space(&self) -> f32 {
+        fin(self.staff_space_mm, 1.75).clamp(0.5, 10.0)
+    }
+}
+
+fn fin(v: f32, d: f32) -> f32 {
+    if v.is_finite() { v } else { d }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

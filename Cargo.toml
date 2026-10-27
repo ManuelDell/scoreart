@@ -39,6 +39,7 @@ eframe = { version = "0.37", default-features = false }
 egui_kittest = "0.37"
 rfd = "0.15"
 cpal = "0.16"
+midir = "0.11"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -593,3 +593,23 @@ fn reads_odd_meters_and_fine_rhythms() {
     assert_eq!(back.voice(0, 0, 2, 0).unwrap().events, *tuplets);
     assert_eq!(back.measures[1].time, s.measures[1].time);
 }
+
+#[test]
+fn reads_page_settings_from_the_style() {
+    let xml = MS_RHYTHMS.replace(
+        "<Score>",
+        "<Score><Style><pageWidth>11.69</pageWidth><pageHeight>8.27</pageHeight><pagePrintableWidth>10.5</pagePrintableWidth><pageOddLeftMargin>0.5</pageOddLeftMargin><pageOddTopMargin>0.4</pageOddTopMargin><pageOddBottomMargin>0.6</pageOddBottomMargin><spatium>2</spatium><staffDistance>8</staffDistance><akkoladeDistance>5</akkoladeDistance><minSystemDistance>10</minSystemDistance></Style>",
+    );
+    let s = from_bytes(xml.as_bytes()).unwrap();
+    let p = s.page;
+    assert!(
+        (p.width_mm - 296.9).abs() < 0.1 && (p.height_mm - 210.0).abs() < 0.1,
+        "A4 landscape"
+    );
+    assert!((p.margin_left_mm - 12.7).abs() < 0.01 && (p.margin_right_mm - 17.5).abs() < 0.1);
+    assert!((p.margin_top_mm - 10.16).abs() < 0.01 && (p.margin_bottom_mm - 15.24).abs() < 0.01);
+    assert_eq!(
+        (p.staff_space_mm, p.part_gap, p.staff_gap, p.system_gap),
+        (2.0, 8.0, 5.0, 10.0)
+    );
+}

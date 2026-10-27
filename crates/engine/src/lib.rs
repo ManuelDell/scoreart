@@ -11,8 +11,10 @@
 )]
 
 pub mod cmd;
+pub mod midi_input;
 pub mod sample;
 
+pub use scoreart_engrave::View;
 use scoreart_engrave::{Layout, Style};
 use scoreart_model::edit::{EventRef, Pos};
 use scoreart_model::{NoteValue, Pitch, Score};
@@ -101,7 +103,8 @@ impl Format {
 
 pub struct Session {
     pub score: Score,
-    pub style: Style,
+    /// Page view or one of the continuous views (not saved with the score).
+    pub view: View,
     /// Where the next note goes in note-input mode.
     pub cursor: Pos,
     pub selection: Option<Selection>,
@@ -136,7 +139,7 @@ impl Session {
     pub fn new(score: Score) -> Session {
         Session {
             score,
-            style: Style::default(),
+            view: View::Page,
             cursor: Pos::default(),
             selection: None,
             range_end: None,
@@ -290,12 +293,17 @@ impl Session {
         }
     }
 
+    /// Engraving settings: the score's page format in the current view.
+    pub fn style(&self) -> Style {
+        Style::new(&self.score.page, self.view)
+    }
+
     /// The engraved layout of the current score (cached per revision).
     pub fn layout(&mut self) -> std::sync::Arc<Layout> {
         match &self.layout {
             Some((r, l)) if *r == self.revision => l.clone(),
             _ => {
-                let l = std::sync::Arc::new(scoreart_engrave::layout(&self.score, &self.style));
+                let l = std::sync::Arc::new(scoreart_engrave::layout(&self.score, &self.style()));
                 self.layout = Some((self.revision, l.clone()));
                 l
             }
@@ -316,7 +324,7 @@ impl Session {
             .unwrap_or_else(|| "Untitled.musicxml".into());
         *self = Session {
             file_name,
-            style: self.style.clone(),
+            view: self.view,
             sounds: std::mem::take(&mut self.sounds),
             ..Session::new(score)
         };
@@ -345,8 +353,8 @@ impl Session {
             Some(Format::Wav) => Ok(wav_with(&self.score, &self.sounds)),
             Some(Format::Stems) => stems(&self.score, &self.sounds),
             Some(Format::Svg) => {
-                let l = scoreart_engrave::layout(&self.score, &self.style);
-                Ok(scoreart_render::svg_pages(&l, &self.style)
+                let l = scoreart_engrave::layout(&self.score, &self.style());
+                Ok(scoreart_render::svg_pages(&l, &self.style())
                     .into_iter()
                     .next()
                     .unwrap_or_default()

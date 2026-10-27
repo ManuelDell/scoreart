@@ -96,6 +96,10 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                             ui.close();
                         }
                     }
+                    if ui.button("MIDI input device…").clicked() {
+                        app.open_midi();
+                        ui.close();
+                    }
                     ui.separator();
                     if ui.button("Transpose up a semitone").clicked() {
                         app.run("score.transpose", json!({ "semitones": 1 }));
@@ -181,6 +185,10 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         }
                     });
                     ui.checkbox(&mut app.show_mixer, "Mixer    F10");
+                    if ui.button("MIDI input device…").clicked() {
+                        app.open_midi();
+                        ui.close();
+                    }
                     ui.separator();
                     if ui.button("Load sounds…").clicked() {
                         app.host.request_sounds(false);
@@ -191,7 +199,32 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         ui.close();
                     }
                 });
+                ui.menu_button("Format", |ui| {
+                    if ui.button("Page settings…").clicked() {
+                        crate::page::open(app);
+                        ui.close();
+                    }
+                    ui.menu_button("Note spacing", |ui| {
+                        for (label, f) in [
+                            ("Tight", 0.8),
+                            ("Normal", 1.0),
+                            ("Wide", 1.25),
+                            ("Very wide", 1.5),
+                        ] {
+                            if ui.button(label).clicked() {
+                                app.run("style.spacing", json!({ "factor": f }));
+                                ui.close();
+                            }
+                        }
+                    });
+                    if ui.button("Reset page settings").clicked() {
+                        app.run("page.format", json!({ "reset": true }));
+                        ui.close();
+                    }
+                });
                 ui.menu_button("View", |ui| {
+                    crate::page::view_choices(app, ui);
+                    ui.separator();
                     if ui.button("Zoom in    Ctrl+=").clicked() {
                         app.set_zoom(app.zoom * 1.15);
                     }
@@ -426,6 +459,10 @@ pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     if glyph_button(ui, GlyphLabel::Text("−"), false, "Zoom out").clicked() {
                         app.set_zoom(app.zoom / 1.15);
                     }
+                    egui::ComboBox::from_id_salt("view-mode")
+                        .selected_text(crate::page::view_label(app.session.view))
+                        .width(190.0)
+                        .show_ui(ui, |ui| crate::page::view_choices(app, ui));
                 });
             });
         });

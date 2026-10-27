@@ -6,9 +6,9 @@ use std::collections::{BTreeMap, HashMap};
 use scoreart_model::marks::{MARKS, XmlGroup};
 use scoreart_model::{
     Anchor, Arpeggio, Articulation, Barline, Clef, Duration, Dynamic, Event, EventKind, Grace,
-    InstrumentChange, Jump, KeySig, MeasureInfo, Meta, Note, NoteHead, NoteValue, Part, PartMeasure,
-    PartSound, Pitch, Placement, Score, Spanner, SpannerKind, StaffMeasure, Step, TPQ, Tempo, TimeSig,
-    TimeSymbol, Tremolo, Tuplet, Voice, clip, limits,
+    InstrumentChange, Jump, KeySig, MeasureInfo, Meta, Note, NoteHead, NoteValue, PageFormat, Part,
+    PartMeasure, PartSound, Pitch, Placement, Score, Spanner, SpannerKind, StaffMeasure, Step, TPQ, Tempo,
+    TimeSig, TimeSymbol, Tremolo, Tuplet, Voice, clip, limits,
 };
 
 use crate::Error;
@@ -124,8 +124,88 @@ pub fn read(root: &Element) -> Result<Score, Error> {
     {
         last.barline = Barline::Final;
     }
+    if let Some(d) = root.child("defaults") {
+        score.page = read_defaults(d);
+    }
     score.normalize();
     Ok(score)
+}
+
+/// Page size, margins and distances from `<defaults>` (lengths in tenths of a staff space).
+fn read_defaults(d: &Element) -> PageFormat {
+    let mut f = PageFormat::default();
+    if let Some(s) = d.child("scaling")
+        && let (Some(mm), Some(tenths)) = (s.child_num("millimeters"), s.child_num("tenths"))
+        && mm > 0.0
+        && tenths > 0.0
+    {
+        f.staff_space_mm = (mm / tenths * 10.0) as f32;
+    }
+    let mm = |tenths: f64| (tenths / 10.0) as f32 * f.staff_space_mm;
+    if let Some(p) = d.child("page-layout") {
+        if let Some(w) = p.child_num("page-width") {
+            f.width_mm = mm(w);
+        }
+        if let Some(h) = p.child_num("page-height") {
+            f.height_mm = mm(h);
+        }
+        // Odd (or both) pages' margins.
+        if let Some(m) = p
+            .children_named("page-margins")
+            .find(|m| m.attr("type") != Some("even"))
+        {
+            for (k, slot) in [
+                ("left-margin", &mut f.margin_left_mm),
+                ("right-margin", &mut f.margin_right_mm),
+                ("top-margin", &mut f.margin_top_mm),
+                ("bottom-margin", &mut f.margin_bottom_mm),
+            ] {
+                if let Some(v) = m.child_num(k) {
+                    *slot = mm(v);
+                }
+            }
+        }
+    }
+    if let Some(v) = d
+        .path(&["system-layout", "system-distance"])
+        .and_then(|e| e.text.trim().parse::<f32>().ok())
+    {
+        f.system_gap = v / 10.0;
+    }
+    if let Some(v) = d
+        .path(&["staff-layout", "staff-distance"])
+        .and_then(|e| e.text.trim().parse::<f32>().ok())
+    {
+        f.staff_gap = v / 10.0;
+    }
+    if let Some(a) = d.child("appearance") {
+        for o in a.children_named("other-appearance") {
+            let v = o.text.trim().parse::<f32>().ok();
+            match (o.attr("type"), v) {
+                (Some("scoreart-part-distance"), Some(v)) => f.part_gap = v / 10.0,
+                (Some("scoreart-note-spacing"), Some(v)) => f.spacing = v,
+                _ => {}
+            }
+        }
+    }
+    // Undo the rounding of the written tenths (15 mm stays 15 mm).
+    let r = |v: &mut f32| *v = (*v * 100.0).round() / 100.0;
+    for v in [
+        &mut f.width_mm,
+        &mut f.height_mm,
+        &mut f.margin_top_mm,
+        &mut f.margin_bottom_mm,
+        &mut f.margin_left_mm,
+        &mut f.margin_right_mm,
+        &mut f.staff_space_mm,
+        &mut f.staff_gap,
+        &mut f.part_gap,
+        &mut f.system_gap,
+        &mut f.spacing,
+    ] {
+        r(v);
+    }
+    f.clamped()
 }
 
 fn read_meta(root: &Element) -> Meta {
