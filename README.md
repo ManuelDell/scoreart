@@ -58,8 +58,9 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
 - **Editing**: selection of notes, rests, note ranges (`Shift+click`, `Shift+→`) and measure ranges; palettes for every mark above; add/insert/delete measures; add,
   rename and remove instruments (17 built-in); transpose; score properties; unlimited undo/redo.
 - **Files**: **MusicXML 4.0** is the native format (`.musicxml` and compressed `.mxl`, read and
-  write — exchange scores with MuseScore, Dorico, Sibelius, Finale), **MIDI** export, **SVG**
-  export with real glyph outlines.
+  write — exchange scores with MuseScore, Dorico, Sibelius, Finale), **MuseScore files**
+  (`.mscz`, `.mscx` of MuseScore 3 and 4) open directly (saving writes MusicXML), **MIDI** export,
+  **SVG** export with real glyph outlines, **WAV** export.
 - **Web build** with a `?host=parent` `postMessage` bridge (`scoreart:ready/open/save/dirty`) so
   a same-origin page — for example a Nextcloud app — can open and save scores in it.
 - **Playback** with ScoreArt's own built-in synthesizer (no soundfont needed): `Space` plays

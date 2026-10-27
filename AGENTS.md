@@ -29,8 +29,9 @@ People trust ScoreArt with their music; a crash loses their work. This outranks 
   scores, screenshot their window into `plan/screenshots/` (git-ignored, never committed). Never
   disassemble or copy anything inside an installed application; never commit files they produced.
 - File formats come from **public specifications**: MusicXML 4.0 (W3C Community Group), SMuFL 1.4,
-  Standard MIDI File 1.0. `.mscz` is out of scope until it can be done from public information
-  and from observing files we created ourselves.
+  Standard MIDI File 1.0. The MuseScore reader (`crates/musicxml/src/mscz.rs`) is built only from
+  publicly known facts about `.mscz`/`.mscx` and from observing files — never from MuseScore source.
+  Test files for it are written by hand for this repo; never commit files MuseScore produced.
 - Engraving rules come from general music-engraving knowledge. Never copy text or music examples
   from books (*Behind Bars*, *The Art of Music Engraving* …).
 - Never copy vendor wording beyond feature names.

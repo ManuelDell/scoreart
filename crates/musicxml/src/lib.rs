@@ -12,6 +12,7 @@
 mod dom;
 mod export;
 mod import;
+pub mod mscz;
 
 use std::io::{Cursor, Read, Write};
 
@@ -47,9 +48,17 @@ pub fn from_bytes(bytes: &[u8]) -> Result<Score, Error> {
         return Err(Error::Invalid("file too large".into()));
     }
     if bytes.starts_with(b"PK") {
+        // A MuseScore .mscz holds an .mscx; a compressed MusicXML (.mxl) a container.xml.
+        if let Some(mscx) = read_mscz(bytes)? {
+            return mscz::from_mscx(&mscx);
+        }
         return from_str(&read_mxl(bytes)?);
     }
     let text = decode_text(bytes);
+    let head: String = text.chars().take(2000).collect();
+    if head.contains("<museScore") {
+        return mscz::from_mscx(&text);
+    }
     from_str(&text)
 }
 
@@ -76,6 +85,29 @@ fn decode_text(bytes: &[u8]) -> String {
         return utf16(false, rest);
     }
     String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// The `.mscx` inside a MuseScore `.mscz`, if this zip is one.
+fn read_mscz(bytes: &[u8]) -> Result<Option<String>, Error> {
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| Error::Zip(e.to_string()))?;
+    let Some(name) = zip
+        .file_names()
+        .find(|n| n.to_ascii_lowercase().ends_with(".mscx") && !n.contains('/'))
+        .map(str::to_string)
+    else {
+        return Ok(None);
+    };
+    let f = zip
+        .by_name(&name)
+        .map_err(|e| Error::Zip(format!("{name}: {e}")))?;
+    let mut out = Vec::new();
+    f.take(MAX_FILE_BYTES as u64 + 1)
+        .read_to_end(&mut out)
+        .map_err(|e| Error::Zip(e.to_string()))?;
+    if out.len() > MAX_FILE_BYTES {
+        return Err(Error::Invalid("file too large".into()));
+    }
+    Ok(Some(decode_text(&out)))
 }
 
 fn read_mxl(bytes: &[u8]) -> Result<String, Error> {
@@ -135,5 +167,7 @@ pub fn to_mxl(score: &Score) -> Result<Vec<u8>, Error> {
     Ok(buf.into_inner())
 }
 
+#[cfg(test)]
+mod mscz_tests;
 #[cfg(test)]
 mod tests;

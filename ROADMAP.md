@@ -46,4 +46,7 @@
 - A time signature change cuts or pads the following measures instead of re-barring.
 - Only the first part's key/time/tempo is read from MusicXML (scores with per-part keys are
   imported with the first part's key).
-- `.mscz` is not supported (no public specification; see `docs/plan.md`).
+- MuseScore files (`.mscz`/`.mscx`, versions 3 and 4) open read-only; layout settings, beaming
+  overrides, multi-staff spans and some text styles are not taken over. MuseScore 1/2 files must
+  be re-saved in MuseScore 3 or 4 first. The reader is tested with hand-written files; a test
+  against real MuseScore-made files is still open.

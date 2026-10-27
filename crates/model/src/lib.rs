@@ -782,6 +782,11 @@ impl Score {
                     sm.voices.truncate(limits::MAX_VOICES);
                     for (vi, v) in sm.voices.iter_mut().enumerate() {
                         fit_voice(v, len, vi == 0);
+                        // Marks in catalogue order, each once.
+                        for e in &mut v.events {
+                            e.articulations.sort();
+                            e.articulations.dedup();
+                        }
                     }
                     // Drop secondary voices that hold nothing but rests.
                     let mut i = 1;

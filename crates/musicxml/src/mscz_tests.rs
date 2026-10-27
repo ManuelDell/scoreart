@@ -1,0 +1,237 @@
+//! MuseScore reading, tested with small files written by hand for this repository.
+
+use scoreart_model::*;
+
+use crate::*;
+
+/// MuseScore 4 style: a piano part (two staves), title frame, signatures, tempo, tuplets,
+/// voices, ties, lines and marks.
+const MS4: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<museScore version="4.40">
+  <Score>
+    <Division>480</Division>
+    <metaTag name="composer">Test Composer</metaTag>
+    <metaTag name="workTitle">Work</metaTag>
+    <Part id="1">
+      <Staff id="1"><StaffType group="pitched"/></Staff>
+      <Staff id="2"><StaffType group="pitched"/><defaultClef>F</defaultClef></Staff>
+      <trackName>Piano</trackName>
+      <Instrument id="piano"><longName>Piano</longName><shortName>Pno.</shortName><Channel><program value="0"/></Channel></Instrument>
+    </Part>
+    <Staff id="1">
+      <VBox><Text><style>title</style><text>Hand <b>Made</b></text></Text><Text><style>composer</style><text>Somebody</text></Text></VBox>
+      <Measure>
+        <voice>
+          <Clef><concertClefType>G</concertClefType><transposingClefType>G</transposingClefType></Clef>
+          <KeySig><concertKey>2</concertKey></KeySig>
+          <TimeSig><sigN>3</sigN><sigD>4</sigD></TimeSig>
+          <Tempo><tempo>2</tempo><followText>1</followText><text>Allegro <sym>metNoteQuarterUp</sym> = 120</text></Tempo>
+          <RehearsalMark><text>A</text></RehearsalMark>
+          <Dynamic><subtype>mf</subtype><velocity>80</velocity></Dynamic>
+          <StaffText><text>dolce</text></StaffText>
+          <Harmony><root>20</root><name>m7</name></Harmony>
+          <Spanner type="HairPin"><HairPin><subtype>0</subtype></HairPin><next><location><fractions>3/4</fractions></location></next></Spanner>
+          <Spanner type="Slur"><Slur/><next><location><fractions>1/3</fractions></location></next></Spanner>
+          <Fermata><subtype>fermataAbove</subtype></Fermata>
+          <Chord>
+            <durationType>quarter</durationType>
+            <Lyrics><syllabic>single</syllabic><text>la</text></Lyrics>
+            <Articulation><subtype>articStaccatoAbove</subtype></Articulation>
+            <Ornament><subtype>ornamentTrill</subtype></Ornament>
+            <Note><Fingering><text>3</text></Fingering><pitch>66</pitch><tpc>20</tpc></Note>
+          </Chord>
+          <Chord><acciaccatura/><durationType>eighth</durationType><Note><pitch>69</pitch><tpc>17</tpc></Note></Chord>
+          <Tuplet><normalNotes>2</normalNotes><actualNotes>3</actualNotes><baseNote>eighth</baseNote></Tuplet>
+          <Chord><durationType>eighth</durationType><Note><pitch>67</pitch><tpc>15</tpc></Note></Chord>
+          <Chord><durationType>eighth</durationType><Note><pitch>69</pitch><tpc>17</tpc></Note></Chord>
+          <Spanner type="Slur"><prev><location><fractions>-1/3</fractions></location></prev></Spanner>
+          <Chord><durationType>eighth</durationType><Note><pitch>71</pitch><tpc>19</tpc></Note></Chord>
+          <endTuplet/>
+          <Chord>
+            <durationType>quarter</durationType>
+            <Arpeggio><subtype>1</subtype></Arpeggio>
+            <TremoloSingleChord><subtype>r16</subtype></TremoloSingleChord>
+            <Note><pitch>62</pitch><tpc>16</tpc><headGroup>cross</headGroup></Note>
+            <Note><pitch>74</pitch><tpc>16</tpc>
+              <Spanner type="Tie"><Tie/><next><location><measures>1</measures><fractions>-3/4</fractions></location></next></Spanner>
+            </Note>
+          </Chord>
+          <Breath><symbol>breathMarkComma</symbol></Breath>
+          <Spanner type="HairPin"><prev><location><fractions>-3/4</fractions></location></prev></Spanner>
+        </voice>
+        <voice>
+          <location><fractions>1/4</fractions></location>
+          <Chord><durationType>half</durationType><Note><pitch>57</pitch><tpc>17</tpc></Note></Chord>
+        </voice>
+      </Measure>
+      <Measure>
+        <startRepeat/>
+        <endRepeat>2</endRepeat>
+        <voice>
+          <Spanner type="Volta"><Volta><endings>1</endings><text>1.</text></Volta><next><location><measures>1</measures></location></next></Spanner>
+          <Spanner type="Ottava"><Ottava><subtype>8va</subtype></Ottava><next><location><fractions>1/2</fractions></location></next></Spanner>
+          <Chord><durationType>half</durationType><dots>1</dots><Note><pitch>74</pitch><tpc>16</tpc></Note></Chord>
+          <Spanner type="Ottava"><prev><location><fractions>-1/2</fractions></location></prev></Spanner>
+        </voice>
+      </Measure>
+      <Measure>
+        <Marker><style>Repeat Text Right</style><text>Fine</text><label>fine</label></Marker>
+        <Jump><text>D.C. al Fine</text><jumpTo>start</jumpTo><playUntil>fine</playUntil></Jump>
+        <voice>
+          <Rest><durationType>measure</durationType><duration>3/4</duration></Rest>
+          <BarLine><subtype>end</subtype></BarLine>
+        </voice>
+      </Measure>
+    </Staff>
+    <Staff id="2">
+      <Measure>
+        <voice>
+          <Clef><concertClefType>F</concertClefType></Clef>
+          <KeySig><concertKey>2</concertKey></KeySig>
+          <TimeSig><sigN>3</sigN><sigD>4</sigD></TimeSig>
+          <Rest><durationType>measure</durationType><duration>3/4</duration></Rest>
+        </voice>
+      </Measure>
+      <Measure><voice><MeasureRepeat><subtype>1</subtype><durationType>measure</durationType><duration>3/4</duration></MeasureRepeat></voice></Measure>
+      <Measure><voice><Rest><durationType>measure</durationType><duration>3/4</duration></Rest></voice></Measure>
+    </Staff>
+  </Score>
+</museScore>
+"#;
+
+/// MuseScore 3 style: old key signature tag, tuplets by id, tie elements.
+const MS3: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<museScore version="3.02">
+  <Score>
+    <Part><Staff id="1"/><trackName>Flute</trackName><Instrument><longName>Flute</longName><Channel><program value="73"/></Channel></Instrument></Part>
+    <Staff id="1">
+      <Measure>
+        <voice>
+          <KeySig><accidental>-3</accidental></KeySig>
+          <TimeSig><sigN>4</sigN><sigD>4</sigD><subtype>1</subtype></TimeSig>
+          <Tuplet id="1"><normalNotes>2</normalNotes><actualNotes>3</actualNotes></Tuplet>
+          <Chord><Tuplet>1</Tuplet><durationType>quarter</durationType><Note><pitch>63</pitch><tpc>11</tpc></Note></Chord>
+          <Chord><Tuplet>1</Tuplet><durationType>quarter</durationType><Note><pitch>65</pitch><tpc>13</tpc></Note></Chord>
+          <Chord><Tuplet>1</Tuplet><durationType>quarter</durationType><Note><pitch>67</pitch><tpc>15</tpc><Tie id="2"/></Note></Chord>
+          <Chord><durationType>half</durationType><Note><endSpanner id="2"/><pitch>67</pitch><tpc>15</tpc></Note></Chord>
+        </voice>
+      </Measure>
+    </Staff>
+  </Score>
+</museScore>
+"#;
+
+fn mscz(xml: &str) -> Vec<u8> {
+    use std::io::Write;
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut z = zip::ZipWriter::new(&mut buf);
+        let o = zip::write::SimpleFileOptions::default();
+        z.start_file("score.mscx", o).unwrap();
+        z.write_all(xml.as_bytes()).unwrap();
+        z.finish().unwrap();
+    }
+    buf.into_inner()
+}
+
+#[test]
+fn reads_musescore_4() {
+    let s = from_bytes(&mscz(MS4)).unwrap();
+    assert_eq!(s.meta.title, "Hand Made");
+    assert_eq!(s.meta.composer, "Somebody");
+    assert_eq!(s.parts.len(), 1);
+    assert_eq!(s.parts[0].clefs, vec![Clef::Treble, Clef::Bass]);
+    assert_eq!(s.parts[0].abbreviation, "Pno.");
+    assert_eq!(s.measures.len(), 3);
+    assert_eq!(s.key_at(0).fifths, 2);
+    assert_eq!(s.time_at(0).beats, 3);
+    let m0 = &s.measures[0];
+    assert_eq!(m0.tempo.map(|t| t.bpm), Some(120));
+    assert_eq!(m0.tempo_text.as_deref(), Some("Allegro"));
+    assert_eq!(m0.rehearsal.as_deref(), Some("A"));
+
+    let v = s.voice(0, 0, 0, 0).unwrap();
+    let first = &v.events[0];
+    let p = first.notes()[0].pitch;
+    assert_eq!(
+        (p.step, p.alter, p.octave),
+        (Step::F, 1, 4),
+        "F#4 spelled from the tpc"
+    );
+    assert_eq!(first.dynamic.map(|d| d.id()), Some("mf"));
+    assert_eq!(first.text.as_deref(), Some("dolce"));
+    assert_eq!(first.chord_symbol.as_deref(), Some("F#m7"));
+    assert_eq!(first.lyric.as_deref(), Some("la"));
+    let ids: Vec<&str> = first.articulations.iter().map(|a| a.id()).collect();
+    assert!(
+        ids.contains(&"fermata") && ids.contains(&"staccato") && ids.contains(&"trill"),
+        "{ids:?}"
+    );
+    assert_eq!(first.notes()[0].fingering.as_deref(), Some("3"));
+    // Triplet with a grace note before it.
+    let trip = &v.events[1];
+    assert_eq!(trip.duration.tuplet, Some(Tuplet { actual: 3, normal: 2 }));
+    assert_eq!(trip.grace.len(), 1);
+    assert!(trip.grace[0].slash);
+    let chord = &v.events[4];
+    assert_eq!(chord.arpeggio, Arpeggio::Up);
+    assert_eq!(chord.tremolo, Tremolo::Strokes(2));
+    assert_eq!(chord.notes()[0].head, NoteHead::X);
+    assert!(chord.notes()[1].tie);
+    assert!(chord.articulations.iter().any(|a| a.id() == "breath"));
+    assert_eq!(v.ticks(), TPQ * 3);
+    // Second voice starts after a quarter rest.
+    let v2 = s.voice(0, 0, 0, 1).unwrap();
+    assert!(v2.events[0].is_rest());
+    assert_eq!(v2.events[1].notes()[0].pitch.name(), "A3");
+    // Lines.
+    let kinds: Vec<&str> = s.spanners.iter().map(|x| x.kind.id()).collect();
+    assert!(
+        kinds.contains(&"slur") && kinds.contains(&"crescendo") && kinds.contains(&"8va"),
+        "{kinds:?}"
+    );
+    let slur = s.spanners.iter().find(|x| x.kind == SpannerKind::Slur).unwrap();
+    assert_eq!(
+        (slur.start.tick, slur.end.tick),
+        (0, TPQ + TPQ / 3),
+        "slur ends on the second triplet note"
+    );
+    // Measure marks.
+    assert!(s.measures[1].repeat_start);
+    assert_eq!(s.measures[1].barline, Barline::RepeatEnd);
+    assert_eq!(s.measures[1].volta, Some(1));
+    assert!(s.measures[2].jumps.contains(&Jump::Fine));
+    assert!(s.measures[2].jumps.contains(&Jump::DaCapoAlFine));
+    assert_eq!(s.measures[2].barline, Barline::Final);
+    assert!(s.staff_measure(0, 1, 1).unwrap().measure_repeat);
+    // And it saves as MusicXML.
+    let back = from_str(&to_string(&s)).unwrap();
+    assert_eq!(back, s);
+}
+
+#[test]
+fn reads_musescore_3_uncompressed() {
+    let s = from_bytes(MS3.as_bytes()).unwrap();
+    assert_eq!(s.parts[0].name, "Flute");
+    assert_eq!(s.parts[0].program, 73);
+    assert_eq!(s.key_at(0).fifths, -3);
+    assert_eq!(s.time_at(0).symbol, TimeSymbol::Common);
+    let v = s.voice(0, 0, 0, 0).unwrap();
+    assert_eq!(v.events.len(), 4);
+    assert_eq!(v.events[0].notes()[0].pitch.name(), "Eb4");
+    assert_eq!(v.events[0].duration.tuplet, Some(Tuplet { actual: 3, normal: 2 }));
+    assert!(v.events[2].notes()[0].tie);
+    assert!(v.events[3].duration.tuplet.is_none());
+}
+
+#[test]
+fn hostile_musescore_files_do_not_panic() {
+    for junk in [
+        "<museScore/>",
+        "<museScore version=\"2.06\"><Score/></museScore>",
+        "<museScore version=\"4\"><Score><Part/><Staff id=\"1\"><Measure><voice><Chord><durationType>measure</durationType><duration>9/0</duration><Note><pitch>999</pitch><tpc>-500</tpc></Note></Chord><location><fractions>99999999/1</fractions></location><Spanner type=\"Slur\"><next><location><measures>-99</measures><fractions>-7/3</fractions></location></next></Spanner></voice></Measure></Staff></Score></museScore>",
+    ] {
+        let _ = from_bytes(junk.as_bytes());
+        let _ = from_bytes(&mscz(junk));
+    }
+}

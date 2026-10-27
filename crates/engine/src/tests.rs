@@ -195,3 +195,21 @@ fn hostile_params_never_panic() {
         }
     }
 }
+
+#[test]
+fn opens_musescore_and_saves_musicxml() {
+    let mscx = r#"<museScore version="4.40"><Score><Part><Staff id="1"/><Instrument><longName>Oboe</longName></Instrument></Part>
+      <Staff id="1"><Measure><voice><TimeSig><sigN>2</sigN><sigD>4</sigD></TimeSig>
+        <Chord><durationType>half</durationType><Note><pitch>72</pitch><tpc>14</tpc></Note></Chord></voice></Measure></Staff></Score></museScore>"#;
+    let mut s = Session::default();
+    s.open_bytes("Oboe Solo.mscx", mscx.as_bytes()).unwrap();
+    assert_eq!(s.score.parts[0].name, "Oboe");
+    assert!(s.status.contains("MuseScore"));
+    assert!(s.save_bytes(&s.file_name).is_err(), "no MuseScore writer");
+    let xml = s.save_bytes("Oboe Solo.musicxml").unwrap();
+    assert!(
+        String::from_utf8(xml)
+            .unwrap()
+            .contains("<part-name>Oboe</part-name>")
+    );
+}

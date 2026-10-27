@@ -730,7 +730,7 @@ pub static MARKS: &[MarkDef] = &[
 ];
 
 /// A mark on a note or rest (an index into [`MARKS`], stored by id in files).
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Articulation(u16);
 
 impl Articulation {

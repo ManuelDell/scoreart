@@ -150,7 +150,10 @@ impl Host for WebHost {
         let ctx = self.ctx.clone();
         wasm_bindgen_futures::spawn_local(async move {
             let file = rfd::AsyncFileDialog::new()
-                .add_filter("MusicXML", &["musicxml", "mxl", "xml"])
+                .add_filter(
+                    "Scores (MusicXML, MuseScore)",
+                    &["musicxml", "mxl", "xml", "mscz", "mscx"],
+                )
                 .pick_file()
                 .await;
             if let Some(f) = file {

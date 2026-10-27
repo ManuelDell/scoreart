@@ -306,7 +306,12 @@ impl Session {
             style: self.style.clone(),
             ..Session::new(score)
         };
-        self.status = format!("Opened {}", self.file_name);
+        let lower = self.file_name.to_ascii_lowercase();
+        self.status = if lower.ends_with(".mscz") || lower.ends_with(".mscx") {
+            format!("Opened {} (MuseScore) — Save writes MusicXML", self.file_name)
+        } else {
+            format!("Opened {}", self.file_name)
+        };
         Ok(())
     }
 

@@ -62,7 +62,10 @@ impl Host for NativeHost {
 
     fn request_open(&mut self) {
         if let Some(p) = rfd::FileDialog::new()
-            .add_filter("MusicXML", &["musicxml", "mxl", "xml"])
+            .add_filter(
+                "Scores (MusicXML, MuseScore)",
+                &["musicxml", "mxl", "xml", "mscz", "mscx"],
+            )
             .set_title("Open score")
             .pick_file()
         {
