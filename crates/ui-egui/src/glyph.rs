@@ -16,6 +16,11 @@ pub fn install_fonts(ctx: &egui::Context) {
     fonts
         .families
         .insert(FontFamily::Name(FAMILY.into()), vec![FAMILY.into()]);
+    // Bravura also has the Unicode music symbols (♭ ♯ 𝄆 𝅘𝅥 …) used in labels and palettes:
+    // last in line, after egui's own fonts, so text never shows empty boxes for them.
+    for family in [FontFamily::Proportional, FontFamily::Monospace] {
+        fonts.families.entry(family).or_default().push(FAMILY.into());
+    }
     ctx.set_fonts(fonts);
 }
 

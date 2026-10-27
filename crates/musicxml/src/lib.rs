@@ -72,12 +72,15 @@ fn decode_text(bytes: &[u8]) -> String {
         return String::from_utf8_lossy(rest).into_owned();
     }
     let utf16 = |le: bool, b: &[u8]| -> String {
-        let units: Vec<u16> = b
-            .chunks_exact(2)
-            .map(|c| match c {
-                [a, b] if le => u16::from_le_bytes([*a, *b]),
-                [a, b] => u16::from_be_bytes([*a, *b]),
-                _ => 0,
+        let (pairs, _) = b.as_chunks::<2>();
+        let units: Vec<u16> = pairs
+            .iter()
+            .map(|c| {
+                if le {
+                    u16::from_le_bytes(*c)
+                } else {
+                    u16::from_be_bytes(*c)
+                }
             })
             .collect();
         String::from_utf16_lossy(&units)

@@ -314,15 +314,7 @@ fn glyph_button(ui: &mut egui::Ui, label: GlyphLabel, selected: bool, tip: &str)
                 fg,
             );
         }
-        GlyphLabel::Text(s) => {
-            ui.painter().text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                s,
-                egui::FontId::proportional(15.0),
-                fg,
-            );
-        }
+        GlyphLabel::Icon(i) => paint_icon(ui.painter(), rect, i, fg),
     }
     resp
 }
@@ -331,7 +323,79 @@ fn glyph_button(ui: &mut egui::Ui, label: GlyphLabel, selected: bool, tip: &str)
 enum GlyphLabel {
     /// glyph, em px, baseline (fraction of height), x offset from centre
     Glyph(char, f32, f32, f32),
-    Text(&'static str),
+    Icon(Icon),
+}
+
+/// Toolbar icons drawn in code, so they look the same whatever fonts the system has.
+#[derive(Clone, Copy)]
+enum Icon {
+    Play,
+    Stop,
+    Pen,
+    Tie,
+    Undo,
+    Redo,
+    Plus,
+    Minus,
+}
+
+fn paint_icon(p: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
+    let c = rect.center();
+    let at = |x: f32, y: f32| Pos2::new(c.x + x, c.y + y);
+    let stroke = Stroke::new(1.8, color);
+    match icon {
+        Icon::Play => {
+            p.add(egui::Shape::convex_polygon(
+                vec![at(-5.0, -7.0), at(7.0, 0.0), at(-5.0, 7.0)],
+                color,
+                Stroke::NONE,
+            ));
+        }
+        Icon::Stop => {
+            p.rect_filled(Rect::from_center_size(c, Vec2::splat(12.0)), 1.5, color);
+        }
+        Icon::Pen => {
+            // A pencil leaning right: body, then the tip.
+            p.line_segment([at(5.5, -7.5), at(-4.0, 2.0)], Stroke::new(4.0, color));
+            p.add(egui::Shape::convex_polygon(
+                vec![at(-5.6, 0.4), at(-2.4, 3.6), at(-7.5, 5.5)],
+                color,
+                Stroke::NONE,
+            ));
+        }
+        Icon::Tie => {
+            let pts: Vec<Pos2> = (0..=16)
+                .map(|i| {
+                    let a = std::f32::consts::PI * (i as f32 / 16.0);
+                    at(-9.0 * a.cos(), 3.0 - 6.0 * a.sin())
+                })
+                .collect();
+            p.add(egui::Shape::line(pts, Stroke::new(2.2, color)));
+        }
+        Icon::Undo | Icon::Redo => {
+            let flip = if matches!(icon, Icon::Undo) { 1.0 } else { -1.0 };
+            // An arc over the top, ending in an arrowhead on the left (undo) or right (redo).
+            let pts: Vec<Pos2> = (0..=16)
+                .map(|i| {
+                    let a = std::f32::consts::PI * (i as f32 / 16.0);
+                    at(flip * 7.0 * a.cos(), 4.0 - 7.0 * a.sin())
+                })
+                .collect();
+            p.add(egui::Shape::line(pts, stroke));
+            let tip = at(-7.0 * flip, 5.5);
+            p.add(egui::Shape::convex_polygon(
+                vec![tip, at(-11.0 * flip, 0.5), at(-2.5 * flip, 1.5)],
+                color,
+                Stroke::NONE,
+            ));
+        }
+        Icon::Plus | Icon::Minus => {
+            p.line_segment([at(-6.0, 0.0), at(6.0, 0.0)], stroke);
+            if matches!(icon, Icon::Plus) {
+                p.line_segment([at(0.0, -6.0), at(0.0, 6.0)], stroke);
+            }
+        }
+    }
 }
 
 fn duration_glyph(v: NoteValue) -> char {
@@ -362,9 +426,9 @@ pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 // Playback.
                 let playing = app.is_playing();
                 let label = if playing {
-                    GlyphLabel::Text("■")
+                    GlyphLabel::Icon(Icon::Stop)
                 } else {
-                    GlyphLabel::Text("▶")
+                    GlyphLabel::Icon(Icon::Play)
                 };
                 let tip = if playing {
                     t("Stop (Space)")
@@ -376,7 +440,8 @@ pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 }
                 ui.separator();
                 // Note input toggle: a pen.
-                if glyph_button(ui, GlyphLabel::Text("✏"), input.active, t("Note input (N)")).clicked() {
+                if glyph_button(ui, GlyphLabel::Icon(Icon::Pen), input.active, t("Note input (N)")).clicked()
+                {
                     app.run("input.toggle", json!({}));
                 }
                 ui.separator();
@@ -428,7 +493,7 @@ pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         app.run("note.accidental", json!({ "type": id }));
                     }
                 }
-                if glyph_button(ui, GlyphLabel::Text("⌒"), false, t("Tie (T)")).clicked() {
+                if glyph_button(ui, GlyphLabel::Icon(Icon::Tie), false, t("Tie (T)")).clicked() {
                     app.run("note.tie", json!({}));
                 }
                 ui.separator();
@@ -456,18 +521,18 @@ pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     }
                 }
                 ui.separator();
-                if glyph_button(ui, GlyphLabel::Text("↶"), false, t("Undo (Ctrl+Z)")).clicked() {
+                if glyph_button(ui, GlyphLabel::Icon(Icon::Undo), false, t("Undo (Ctrl+Z)")).clicked() {
                     app.run("edit.undo", json!({}));
                 }
-                if glyph_button(ui, GlyphLabel::Text("↷"), false, t("Redo (Ctrl+Y)")).clicked() {
+                if glyph_button(ui, GlyphLabel::Icon(Icon::Redo), false, t("Redo (Ctrl+Y)")).clicked() {
                     app.run("edit.redo", json!({}));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if glyph_button(ui, GlyphLabel::Text("+"), false, t("Zoom in")).clicked() {
+                    if glyph_button(ui, GlyphLabel::Icon(Icon::Plus), false, t("Zoom in")).clicked() {
                         app.set_zoom(app.zoom * 1.15);
                     }
                     ui.label(format!("{:.0}%", app.zoom / 7.5 * 100.0));
-                    if glyph_button(ui, GlyphLabel::Text("−"), false, t("Zoom out")).clicked() {
+                    if glyph_button(ui, GlyphLabel::Icon(Icon::Minus), false, t("Zoom out")).clicked() {
                         app.set_zoom(app.zoom / 1.15);
                     }
                     egui::ComboBox::from_id_salt("view-mode")

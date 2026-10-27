@@ -13,7 +13,7 @@ scoreart-model = { workspace = true }
 scoreart-engine = { workspace = true }
 scoreart-engrave = { workspace = true }
 scoreart-render = { workspace = true }
-egui = { workspace = true }
+egui = { workspace = true, features = ["monochrome_emoji_fonts"] }
 serde_json = { workspace = true }
 scoreart-midi = { workspace = true }
 scoreart-synth = { workspace = true }
