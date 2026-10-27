@@ -56,6 +56,33 @@ fn curve_mesh(p: [(f32, f32); 4], thick: f32, map: &dyn Fn(f32, f32) -> Pos2, co
     mesh
 }
 
+/// A note picked up with the mouse: how high it was grabbed (staff spaces) and where it
+/// would land now.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct NoteDrag {
+    ev: scoreart_model::edit::EventRef,
+    y0: f32,
+    /// Part, staff, measure, tick and pitch (diatonic) under the pointer.
+    target: Option<(usize, usize, usize, u32, i32)>,
+}
+
+/// The tick under `x` in a staff box: an existing note column or a multiple of `step`,
+/// whichever lies nearest.
+fn drop_tick(sb: &scoreart_engrave::StaffBox, x: f32, step: u32, len: u32) -> u32 {
+    let mut best = (sb.tick_near(x), f32::MAX);
+    best.1 = (sb.x_at(best.0) - x).abs();
+    let step = step.max(1);
+    let mut t = 0u32;
+    while t < len && t / step < 256 {
+        let d = (sb.x_at(t) - x).abs();
+        if d < best.1 {
+            best = (t, d);
+        }
+        t += step;
+    }
+    best.0
+}
+
 pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
     let zoom = app.zoom;
     let selected = app.session.selection;
@@ -89,7 +116,7 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
         .show(ui, |ui| {
             let avail = ui.available_width();
             let size = Vec2::new((max_w + 2.0 * PAD).max(avail), total_h.max(ui.available_height()));
-            let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+            let (rect, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
             let painter = ui.painter_at(rect);
             painter.rect_filled(rect, 0.0, tk.canvas);
             let clip = ui.clip_rect();
@@ -121,6 +148,48 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     && prect.contains(pos)
                 {
                     hover = Some((pi, (pos.x - origin.x) / zoom, (pos.y - origin.y) / zoom));
+                }
+                // Dragging a note: pick it up where the press began.
+                if resp.drag_started()
+                    && !input.active
+                    && let Some(pos) = ui.input(|i| i.pointer.press_origin())
+                    && prect.contains(pos)
+                {
+                    let (sx, sy) = ((pos.x - origin.x) / zoom, (pos.y - origin.y) / zoom);
+                    if let Some(Target::Note { ev, note }) = layout.hit(pi, sx, sy) {
+                        let _ = app.session.execute(
+                            "select.event",
+                            &json!({ "part": ev.part, "staff": ev.staff, "voice": ev.voice, "measure": ev.measure, "index": ev.index, "note": note }),
+                        );
+                        app.note_drag = Some(NoteDrag { ev, y0: sy, target: None });
+                    }
+                }
+                if let Some(d) = app.note_drag.as_mut()
+                    && resp.dragged()
+                    && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
+                    && prect.contains(pos)
+                {
+                    let (sx, sy) = ((pos.x - origin.x) / zoom, (pos.y - origin.y) / zoom);
+                    d.target = layout.staff_box_at(pi, sx, sy).map(|sb| {
+                        let step = app.session.score.event(d.ev).map_or(TPQ_GRID, |e| e.ticks().min(TPQ_GRID * 4));
+                        let len = app.session.score.measure_ticks(sb.measure);
+                        (sb.part, sb.staff, sb.measure, drop_tick(sb, sx, step, len), sb.diatonic_at(sy))
+                    });
+                }
+                // Where the dragged note would land.
+                if let Some(d) = app.note_drag
+                    && let Some((part, staff, measure, tick, dia)) = d.target
+                    && let Some(sb) = layout.staff_box(part, staff, measure).filter(|s| s.page == pi)
+                {
+                    let x = sb.x_at(tick);
+                    let yy = sb.top + (sb.clef.top_line() - dia) as f32 * 0.5;
+                    glyph::paint(
+                        &painter,
+                        scoreart_engrave::glyphs::HEAD_BLACK,
+                        map(x, yy),
+                        4.0 * zoom,
+                        tk.accent.linear_multiply(0.7),
+                    );
                 }
                 if !prect.intersects(clip) {
                     continue;
@@ -299,11 +368,55 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
             }
         });
     app.scroll_to_cursor = false;
+    if resp_drag_stopped(ui)
+        && let Some(d) = app.note_drag.take()
+    {
+        drop_note(app, &layout, d);
+    }
 
     if let Some((page, x, y, shift, _cmd)) = click {
         handle_click(app, &layout, page, x, y, shift);
     }
 }
+
+/// Whether the mouse button was let go this frame.
+fn resp_drag_stopped(ui: &egui::Ui) -> bool {
+    ui.input(|i| i.pointer.any_released())
+}
+
+/// Puts a dragged note where it was dropped: higher or lower on the same beat, or at another
+/// beat, measure or staff (with the pitch it was dropped at).
+fn drop_note(app: &mut ScoreApp, layout: &scoreart_engrave::Layout, d: NoteDrag) {
+    let Some((part, staff, measure, tick, dia)) = d.target else {
+        return;
+    };
+    let Some(from) = d.ev.pos(&app.session.score) else {
+        return;
+    };
+    // The pitch where the note was grabbed, on its own staff.
+    let Some(dia0) = layout
+        .staff_box(from.part, from.staff, from.measure)
+        .map(|sb| sb.diatonic_at(d.y0))
+    else {
+        return;
+    };
+    let steps = dia - dia0;
+    if (part, staff, measure, tick) == (from.part, from.staff, from.measure, from.tick) {
+        match steps {
+            0 => {}
+            s if s > 0 => app.run("note.step-up", json!({ "steps": s })),
+            s => app.run("note.step-down", json!({ "steps": -s })),
+        }
+    } else {
+        app.run(
+            "note.move-to",
+            json!({ "part": part, "staff": staff, "measure": measure, "tick": tick, "steps": steps }),
+        );
+    }
+}
+
+/// Snap grid for dropped notes when the note is longer: a quarter.
+const TPQ_GRID: u32 = scoreart_model::TPQ;
 
 trait TopLineDiff {
     fn top_line_diff(&self, y: f32) -> i32;

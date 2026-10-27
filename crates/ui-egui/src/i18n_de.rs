@@ -392,6 +392,7 @@ pub const DE: &[(&str, &str)] = &[
     ("Move grace note down", "Vorschlagsnote nach unten"),
     ("Move grace note up", "Vorschlagsnote nach oben"),
     ("Move instrument", "Instrument verschieben"),
+    ("Move note", "Note verschieben"),
     ("Move to voice", "In Stimme verschieben"),
     ("Move up", "Nach oben"),
     (
@@ -801,6 +802,7 @@ pub const DE: &[(&str, &str)] = &[
     ("invalid: {}", "ungültig: {}"),
     ("limit reached: {}", "Grenze erreicht: {}"),
     ("no selection", "keine Auswahl"),
+    ("no such place", "diese Stelle gibt es nicht"),
     ("no such {}", "nicht gefunden: {}"),
     ("normal", "normal"),
     ("or controller", "oder Regler"),
@@ -815,6 +817,7 @@ pub const DE: &[(&str, &str)] = &[
         "sp = staff spaces (the distance between two staff lines)",
         "sp = Zwischenräume (der Abstand zwischen zwei Notenlinien)",
     ),
+    ("the note is already there", "die Note steht schon dort"),
     ("to-coda", "To Coda"),
     ("triangle", "Dreieck"),
     ("unknown command: {}", "unbekannter Befehl: {}"),

@@ -211,6 +211,8 @@ pub struct ScoreApp {
     pub(crate) page_settings: Option<scoreart_model::PageFormat>,
     /// MIDI keyboard input and its bindings.
     pub(crate) midi: midi::MidiUi,
+    /// A note being dragged on the score.
+    pub(crate) note_drag: Option<canvas::NoteDrag>,
 }
 
 impl ScoreApp {
@@ -263,6 +265,7 @@ impl ScoreApp {
             instruments: Default::default(),
             page_settings: None,
             midi: Default::default(),
+            note_drag: None,
         }
     }
 

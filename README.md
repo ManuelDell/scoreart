@@ -16,7 +16,7 @@
   <img alt="Status: early alpha" src="https://img.shields.io/badge/status-early%20alpha-orange?style=flat-square">
 </p>
 
-![ScoreArt in the browser, showing the Ode to Joy sample](docs/images/app.png)
+![ScoreArt with the side panel on the palettes tab, showing the Ode to Joy sample](docs/images/app.png)
 
 ScoreArt is a scorewriter in the spirit of MuseScore, written from scratch. It follows the
 engineering conventions of the ArtCraft apps (Rust only, egui, one command registry for UI,
@@ -54,25 +54,45 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   pitches (octave nearest the previous note, key signature applied), `1`–`8` pick durations
   (5 = quarter), `.` dots, `0` rests, `Shift+A`–`G` add chord notes, `↑`/`↓` semitones,
   `Ctrl+↑/↓` octaves, `T` ties, `Del` deletes, notes crossing a barline are split and tied,
-  four voices, mouse input with a ghost note.
+  four voices, mouse input with a ghost note. **Drag notes with the mouse**: up or down changes
+  the pitch step by step along the staff, sideways (or into another measure or staff) moves the
+  note to that beat — a rest takes its old place, its marks and lyrics go along; a preview
+  notehead shows where it lands.
+- **Side panel** like MuseScore's: a strip of tabs on the left — **Palettes**, **Instruments**,
+  **Properties**, **Sounds** — switches what the panel shows; clicking the open tab folds it away.
 - **Editing**: selection of notes, rests, note ranges (`Shift+click`, `Shift+→`) and measure ranges; palettes for every mark above; add/insert/delete measures; add,
   rename, **change**, reorder and remove instruments (20 built-in, including Women, Men and SATB
-  choir) in the **Instruments and sounds** window (`I`, menu *Instruments*). Changing an
+  choir) in the **Instruments** tab (`I`). Changing an
   instrument that holds several lines (Women → Soprano) asks whether to **merge** them, **split**
   one off into the new instrument (the alto stays in Women) or **keep only one**; any line can
   also get an instrument of its own. **Instrument changes inside a part**
   ("To Flute", played and exported to MIDI); show or hide instruments; line and page breaks;
   **lyrics with several verses and hyphens**; transpose; score properties; unlimited undo/redo.
+
+![The Instruments tab, and the question when Women (two staves) changes to Soprano](docs/images/instruments.png)
+
 - **Views and page format**: page view, continuous view (one endless system) and continuous
   vertical view; **Format → Page settings**: paper size (A4, Letter, A3 …), portrait or
   landscape, all four margins, staff size, distances between staves, instruments and systems,
   note spacing. Saved in the file (MusicXML `<defaults>`), read from MuseScore styles.
+
+<p>
+  <img src="docs/images/page-settings.png" width="44%" alt="Page settings: paper size, orientation, margins, staff size, distances, note spacing">
+  <img src="docs/images/continuous-view.png" width="54%" alt="Continuous view: the whole piece in one endless system">
+</p>
+
 - **Languages**: the whole interface in **English and German** (*View → Language*; the
   system or browser language is used at first and the choice is remembered). Every text has
   to have a German translation: a test fails otherwise (`crates/ui-egui/src/i18n_de.rs`).
+
+![The interface in German, with the Properties tab open](docs/images/app-de.png)
+
 - **MIDI keyboard input** (desktop and browser): connect a device, play notes and chords into
   the score; **every key and controller can be given its own action** (note value, rest, tie,
   undo, play …) by clicking it on the keyboard picture or with *Learn*. Bindings are kept.
+
+![MIDI input: the device, the keyboard picture with a key bound to Rest, the sustain pedal bound to Tie](docs/images/midi-input.png)
+
 - **Files**: **MusicXML 4.0** is the native format (`.musicxml` and compressed `.mxl`, read and
   write — exchange scores with MuseScore, Dorico, Sibelius, Finale), **MuseScore files**
   (`.mscz`, `.mscx` of MuseScore 3 and 4, checked against files saved by MuseScore Studio 4.7)

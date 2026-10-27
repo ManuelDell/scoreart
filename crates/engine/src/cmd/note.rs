@@ -127,6 +127,81 @@ pub fn commands() -> Vec<CommandSpec> {
             undoable: true,
         },
         CommandSpec {
+            id: "note.move-to",
+            label: "Move note",
+            menu: &[],
+            shortcut: None,
+            params: "part, staff, measure, tick: where the selected chord moves to (same voice); steps? (diatonic steps up, negative down). A rest takes its old place. Marks, lyrics and texts go along",
+            enabled: has_note_selection,
+            run: |s, p| {
+                let Some(Selection::Event { ev, .. }) = s.selection else {
+                    return Err(Error::Disabled("no selection".into()));
+                };
+                let src = s
+                    .score
+                    .event(ev)
+                    .cloned()
+                    .ok_or_else(|| Error::Param("no such note".into()))?;
+                let from = ev
+                    .pos(&s.score)
+                    .ok_or_else(|| Error::Param("no such note".into()))?;
+                let to = Pos {
+                    part: p_usize(p, "part").unwrap_or(from.part),
+                    staff: p_usize(p, "staff").unwrap_or(from.staff),
+                    voice: from.voice,
+                    measure: p_usize(p, "measure").unwrap_or(from.measure),
+                    tick: u32::try_from(p_i64(p, "tick").unwrap_or(0).max(0)).unwrap_or(0),
+                };
+                if (to.part, to.staff, to.measure, to.tick)
+                    == (from.part, from.staff, from.measure, from.tick)
+                {
+                    return Err(Error::Param("the note is already there".into()));
+                }
+                if to.measure >= s.score.measures.len() || to.tick >= s.score.measure_ticks(to.measure) {
+                    return Err(Error::Param("no such place".into()));
+                }
+                // Leave a rest behind, then write the chord at the new place.
+                s.score.overwrite(from, EventKind::Rest, src.duration)?;
+                let steps = p_i64(p, "steps").unwrap_or(0).clamp(-60, 60) as i32;
+                let key = s.score.key_at(to.measure);
+                let mut notes = src.notes().to_vec();
+                for n in &mut notes {
+                    n.tie = false;
+                    if steps != 0 {
+                        n.pitch = n.pitch.transpose_diatonic(steps, key);
+                    }
+                }
+                s.score
+                    .overwrite(to, EventKind::Chord(notes.clone()), src.duration)?;
+                let target = to
+                    .event(&s.score)
+                    .ok_or_else(|| Error::Param("no such place".into()))?;
+                if let Some(e) = s.score.event_mut(target) {
+                    // The whole event when it fits in the measure; else its marks on the first part.
+                    let whole = e.duration == src.duration;
+                    let mut moved = src.clone();
+                    if let EventKind::Chord(n) = &mut moved.kind {
+                        *n = notes;
+                    }
+                    if whole {
+                        *e = moved;
+                    } else {
+                        let (kind, duration) = (e.kind.clone(), e.duration);
+                        *e = moved;
+                        e.kind = kind;
+                        e.duration = duration;
+                    }
+                }
+                s.score.normalize();
+                s.selection = Some(Selection::Event {
+                    ev: target,
+                    note: None,
+                });
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
             id: "note.rest",
             label: "Enter rest",
             menu: &[],
@@ -227,9 +302,12 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "Diatonic step up",
             menu: &[],
             shortcut: Some("Alt+Shift+Up"),
-            params: "",
+            params: "steps? (default 1)",
             enabled: has_note_selection,
-            run: |s, _| transpose_selection(s, |p, k| p.transpose_diatonic(1, k)),
+            run: |s, p| {
+                let n = p_i64(p, "steps").unwrap_or(1).clamp(1, 60) as i32;
+                transpose_selection(s, move |q, k| q.transpose_diatonic(n, k))
+            },
             undoable: true,
         },
         CommandSpec {
@@ -237,9 +315,12 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "Diatonic step down",
             menu: &[],
             shortcut: Some("Alt+Shift+Down"),
-            params: "",
+            params: "steps? (default 1)",
             enabled: has_note_selection,
-            run: |s, _| transpose_selection(s, |p, k| p.transpose_diatonic(-1, k)),
+            run: |s, p| {
+                let n = p_i64(p, "steps").unwrap_or(1).clamp(1, 60) as i32;
+                transpose_selection(s, move |q, k| q.transpose_diatonic(-n, k))
+            },
             undoable: true,
         },
         CommandSpec {

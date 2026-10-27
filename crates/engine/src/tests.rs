@@ -487,3 +487,46 @@ fn midi_keys_enter_notes_and_chords() {
     assert_eq!(names, [vec!["C#4".to_string(), "E4".into()], vec!["G4".into()]]);
     assert!(s.execute("note.midi", &json!({ "key": 200 })).is_err());
 }
+
+#[test]
+fn dragging_notes_moves_them_and_changes_pitch() {
+    let mut s = blank();
+    s.execute("input.toggle", &json!({})).unwrap();
+    s.execute("input.duration", &json!({ "value": 5 })).unwrap();
+    for st in ["c", "d"] {
+        s.execute("note.enter", &json!({ "step": st })).unwrap();
+    }
+    s.execute("input.toggle", &json!({})).unwrap();
+    // Select the C with a staccato, move it to beat 4 of measure 2.
+    s.execute(
+        "select.event",
+        &json!({ "part": 0, "staff": 0, "voice": 0, "measure": 0, "index": 0 }),
+    )
+    .unwrap();
+    s.execute("note.articulation", &json!({ "type": "staccato" }))
+        .unwrap();
+    s.execute(
+        "note.move-to",
+        &json!({ "part": 0, "staff": 0, "measure": 1, "tick": TPQ * 3 }),
+    )
+    .unwrap();
+    let m1 = s.score.voice(0, 0, 0, 0).unwrap();
+    assert!(m1.events[0].is_rest(), "a rest takes the old place");
+    assert_eq!(steps(&s, 0, 0, 0), [Step::D]);
+    let m2 = s.score.voice(0, 0, 1, 0).unwrap();
+    let moved = m2.events.iter().find(|e| !e.is_rest()).unwrap();
+    assert_eq!(moved.notes()[0].pitch.step, Step::C);
+    assert_eq!(moved.articulations.len(), 1, "marks go along");
+    assert_eq!(
+        m2.onsets()[m2.events.iter().position(|e| !e.is_rest()).unwrap()],
+        TPQ * 3
+    );
+    // Dragging up three staff positions: C → F.
+    s.execute("note.step-up", &json!({ "steps": 3 })).unwrap();
+    let ev = s.selected_event().unwrap();
+    assert_eq!(s.score.event(ev).unwrap().notes()[0].pitch.step, Step::F);
+    // One undo brings the move back.
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(!s.score.voice(0, 0, 0, 0).unwrap().events[0].is_rest());
+}
