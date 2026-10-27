@@ -14,3 +14,8 @@ scoreart-midi = { workspace = true }
 rustysynth = { workspace = true }
 claxon = { workspace = true }
 zip = { workspace = true }
+ureq = { version = "2", optional = true, default-features = false, features = ["tls", "native-certs", "proxy-from-env"] }
+
+[features]
+# Downloading libraries from the catalogue (desktop and command line; not in the browser).
+download = ["dep:ureq"]

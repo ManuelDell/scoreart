@@ -15,5 +15,5 @@ scoreart-ui-egui = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "glow", "wayland", "x11", "accesskit"] }
 rfd = { workspace = true }
-scoreart-synth = { workspace = true }
+scoreart-synth = { workspace = true, features = ["download"] }
 cpal = { workspace = true }

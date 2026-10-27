@@ -172,6 +172,10 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     ui.checkbox(&mut app.show_palette, "Palettes");
                     ui.checkbox(&mut app.show_properties, "Properties");
                     ui.checkbox(&mut app.show_mixer, "Mixer    F10");
+                    if ui.button("Free sound libraries…").clicked() {
+                        app.open_catalog();
+                        ui.close();
+                    }
                     ui.checkbox(&mut app.sound_on_input, "Play notes while editing");
                     ui.separator();
                     let dark = ui.ctx().global_style().visuals.dark_mode;

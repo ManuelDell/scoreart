@@ -116,6 +116,11 @@ impl SoundBank {
         })
     }
 
+    /// An SFZ library over any file source (e.g. instruments downloaded into memory).
+    pub fn from_files(name: &str, files: Box<dyn Files>) -> Result<SoundBank, String> {
+        SoundBank::sfz(name.to_string(), files, None)
+    }
+
     /// A library from file contents: a SoundFont (`.sf2`) or a zip with SFZ instruments.
     pub fn from_bytes(name: &str, bytes: Vec<u8>) -> Result<SoundBank, String> {
         let name = stem(name);

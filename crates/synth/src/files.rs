@@ -153,6 +153,44 @@ impl Files for Zip {
     }
 }
 
+/// Files held in memory, shared: the browser keeps downloaded instruments here, and adding files
+/// later is seen by every library that uses the same store. Names match case-insensitively.
+#[derive(Clone, Default)]
+pub struct Mem(Arc<std::sync::RwLock<HashMap<String, (String, Arc<Vec<u8>>)>>>);
+
+impl Mem {
+    pub fn insert(&self, path: &str, bytes: Vec<u8>) {
+        let name = clean(path);
+        if let Ok(mut m) = self.0.write() {
+            m.insert(name.to_lowercase(), (name, Arc::new(bytes)));
+        }
+    }
+
+    pub fn contains(&self, path: &str) -> bool {
+        self.0
+            .read()
+            .is_ok_and(|m| m.contains_key(&clean(path).to_lowercase()))
+    }
+}
+
+impl Files for Mem {
+    fn read(&self, path: &str) -> Option<Vec<u8>> {
+        let m = self.0.read().ok()?;
+        m.get(&clean(path).to_lowercase())
+            .map(|(_, b)| b.as_ref().clone())
+    }
+
+    fn list(&self) -> Vec<String> {
+        let mut v: Vec<String> = self
+            .0
+            .read()
+            .map(|m| m.values().map(|(n, _)| n.clone()).collect())
+            .unwrap_or_default();
+        v.sort();
+        v
+    }
+}
+
 /// Files of one directory on disk when only a single `.sfz` file was chosen.
 pub fn dir_of(file: &Path) -> (Dir, String) {
     let root = file.parent().map(Path::to_path_buf).unwrap_or_default();

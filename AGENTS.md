@@ -50,6 +50,11 @@ People trust ScoreArt with their music; a crash loses their work. This outranks 
   default. Sampler tests use tiny samples and SFZ text written in the test. The SFZ reader is
   written from the public format description (sfzformat.com) only, never from other samplers'
   source code.
+- **Catalogue downloads** (`crates/synth/src/catalog.rs`): only libraries whose licence allows
+  free use, fetched from the publisher's own public source; the licence summary (allows /
+  requires / notes, "not legal advice") is shown in full and must be explicitly accepted before
+  anything is fetched; the licence file and an acceptance record are saved with the files.
+  Respect publishers who ask not to be hot-linked (open their website instead).
 - Never use the ArtCraft or MuseScore names, logos or icons for ScoreArt (names may appear only
   descriptively, e.g. "opens MusicXML exported from MuseScore").
 

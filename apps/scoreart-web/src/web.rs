@@ -16,6 +16,69 @@ type Inbox = Rc<RefCell<Vec<(String, Vec<u8>)>>>;
 /// Sound libraries the user picked, read and parsed.
 type SoundInbox = Rc<RefCell<Vec<Result<scoreart_synth::SoundBank, String>>>>;
 
+/// Fetches a file (the catalogue's sources allow cross-origin reads).
+async fn fetch_bytes(url: &str) -> Result<Vec<u8>, String> {
+    let err = |e: JsValue| format!("{url}: {e:?}");
+    let window = web_sys::window().ok_or("no window")?;
+    let resp: web_sys::Response = wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(url))
+        .await
+        .map_err(err)?
+        .dyn_into()
+        .map_err(err)?;
+    if !resp.ok() {
+        return Err(format!("{url}: HTTP {}", resp.status()));
+    }
+    let buf = wasm_bindgen_futures::JsFuture::from(resp.array_buffer().map_err(err)?)
+        .await
+        .map_err(err)?;
+    Ok(js_sys::Uint8Array::new(&buf).to_vec())
+}
+
+/// Downloads one catalogue instrument into the library's in-memory store.
+async fn download_instrument(
+    lib: &'static scoreart_synth::catalog::Library,
+    instrument: String,
+    mem: scoreart_synth::files::Mem,
+    status: Rc<RefCell<Option<scoreart_ui_egui::DownloadStatus>>>,
+    cancel: Rc<Cell<bool>>,
+) -> Result<scoreart_synth::SoundBank, String> {
+    use scoreart_synth::catalog::{self, NOTICE_FILE, Source};
+    use scoreart_synth::files::Files as _;
+    let Source::Repository { base, .. } = lib.source else {
+        return Err(format!("{} is downloaded from its website", lib.name));
+    };
+    let accepted = scoreart_ui_egui::acceptance_text(lib, (js_sys::Date::now() / 1000.0) as u64);
+    let previous = mem
+        .read(NOTICE_FILE)
+        .map(|b| String::from_utf8_lossy(&b).to_string());
+    mem.insert(
+        NOTICE_FILE,
+        catalog::notice(lib, &instrument, &accepted, previous.as_deref()).into_bytes(),
+    );
+    let mut p = catalog::Progress::default();
+    for _round in 0..32 {
+        let todo = catalog::next_files(lib, &mem, &instrument)?;
+        if todo.is_empty() {
+            return scoreart_synth::SoundBank::from_files(lib.name, Box::new(mem));
+        }
+        p.files_total = p.files_done + todo.len();
+        for f in todo {
+            if cancel.get() {
+                return Err("download cancelled".into());
+            }
+            p.file = f.clone();
+            if let Some(s) = status.borrow_mut().as_mut() {
+                s.progress = p.clone();
+            }
+            let bytes = fetch_bytes(&catalog::file_url(base, &f)).await?;
+            p.bytes += bytes.len() as u64;
+            mem.insert(&f, bytes);
+            p.files_done += 1;
+        }
+    }
+    Err("the instrument refers to too many nested files".into())
+}
+
 fn query_param(name: &str) -> Option<String> {
     let search = web_sys::window()?.location().search().ok()?;
     let params = web_sys::UrlSearchParams::new_with_str(&search).ok()?;
@@ -129,6 +192,10 @@ struct WebHost {
     audio: crate::audio::WebAudio,
     rate: u32,
     sounds: SoundInbox,
+    /// Downloaded catalogue files per library (kept for this browser session only).
+    stores: Rc<RefCell<std::collections::HashMap<&'static str, scoreart_synth::files::Mem>>>,
+    download: Rc<RefCell<Option<scoreart_ui_egui::DownloadStatus>>>,
+    cancel: Rc<Cell<bool>>,
 }
 
 fn download(name: &str, bytes: &[u8]) -> Result<(), JsValue> {
@@ -194,6 +261,46 @@ impl Host for WebHost {
 
     fn take_sounds(&mut self) -> Option<Result<scoreart_synth::SoundBank, String>> {
         self.sounds.borrow_mut().pop()
+    }
+
+    fn can_download(&self) -> bool {
+        true
+    }
+
+    fn download_sounds(&mut self, library: &'static scoreart_synth::catalog::Library, instrument: &str) {
+        if self.download.borrow().is_some() {
+            return;
+        }
+        let mem = self.stores.borrow_mut().entry(library.id).or_default().clone();
+        *self.download.borrow_mut() = Some(scoreart_ui_egui::DownloadStatus {
+            library: library.name.to_string(),
+            instrument: instrument.to_string(),
+            progress: Default::default(),
+        });
+        self.cancel.set(false);
+        let (status, cancel, inbox, ctx) = (
+            self.download.clone(),
+            self.cancel.clone(),
+            self.sounds.clone(),
+            self.ctx.clone(),
+        );
+        let instrument = instrument.to_string();
+        wasm_bindgen_futures::spawn_local(async move {
+            let r = download_instrument(library, instrument, mem, status.clone(), cancel)
+                .await
+                .map_err(|e| format!("{}: {e}", library.name));
+            *status.borrow_mut() = None;
+            inbox.borrow_mut().push(r);
+            ctx.request_repaint();
+        });
+    }
+
+    fn download_status(&self) -> Option<scoreart_ui_egui::DownloadStatus> {
+        self.download.borrow().clone()
+    }
+
+    fn cancel_download(&mut self) {
+        self.cancel.set(true);
     }
 
     fn save(&mut self, name: &str, bytes: Vec<u8>, _save_as: bool) -> Option<String> {
@@ -312,6 +419,9 @@ pub fn start() {
                         audio: crate::audio::WebAudio::default(),
                         rate: 44_100,
                         sounds: SoundInbox::default(),
+                        stores: Rc::default(),
+                        download: Rc::default(),
+                        cancel: Rc::default(),
                     };
                     let mut host = host;
                     host.rate = host.audio.rate();

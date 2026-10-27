@@ -22,7 +22,8 @@ use std::sync::{Arc, Mutex};
 
 use scoreart_engine::Session;
 use scoreart_synth::SoundBank;
-use scoreart_ui_egui::{Host, ScoreApp};
+use scoreart_synth::catalog::{self, Library};
+use scoreart_ui_egui::{DownloadStatus, Host, ScoreApp};
 
 type Loaded = Result<(PathBuf, SoundBank), String>;
 
@@ -39,6 +40,14 @@ struct NativeHost {
     sound_paths: Vec<(String, PathBuf)>,
     /// Sound files dropped on the window, picked up on the next tick.
     dropped_sounds: Arc<Mutex<Vec<PathBuf>>>,
+    /// The catalogue download in progress.
+    download: Option<Download>,
+}
+
+struct Download {
+    status: Arc<Mutex<DownloadStatus>>,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+    done: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// The file that lists the sound libraries to load at start.
@@ -202,6 +211,58 @@ impl Host for NativeHost {
                 Some(Ok(bank))
             }
             Err(e) => Some(Err(e)),
+        }
+    }
+
+    fn can_download(&self) -> bool {
+        catalog::default_dir().is_some()
+    }
+
+    fn download_sounds(&mut self, library: &'static Library, instrument: &str) {
+        let Some(root) = catalog::default_dir() else {
+            return;
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let accepted = scoreart_ui_egui::acceptance_text(library, now);
+        let status = Arc::new(Mutex::new(DownloadStatus {
+            library: library.name.to_string(),
+            instrument: instrument.to_string(),
+            progress: Default::default(),
+        }));
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (tx, rx) = channel();
+        self.loading.push(rx);
+        let instrument = instrument.to_string();
+        let (st, c, d) = (status.clone(), cancel.clone(), done.clone());
+        std::thread::spawn(move || {
+            let result = catalog::install(library, &instrument, &root, &accepted, &c, &mut |p| {
+                if let Ok(mut s) = st.lock() {
+                    s.progress = p.clone();
+                }
+            })
+            .and_then(|dir| SoundBank::from_path(&dir).map(|b| (dir, b)))
+            .map_err(|e| format!("{}: {e}", library.name));
+            d.store(true, std::sync::atomic::Ordering::Relaxed);
+            let _ = tx.send(result);
+        });
+        self.download = Some(Download { status, cancel, done });
+    }
+
+    fn download_status(&self) -> Option<DownloadStatus> {
+        let d = self.download.as_ref()?;
+        if d.done.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        d.status.lock().ok().map(|s| s.clone())
+    }
+
+    fn cancel_download(&mut self) {
+        if let Some(d) = &self.download {
+            d.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
 

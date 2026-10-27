@@ -167,6 +167,8 @@ struct Parser<'a> {
     out: Vec<(Vec<(String, String)>, String)>,
     cc: Vec<(usize, f32)>,
     warnings: Vec<String>,
+    /// Include files that could not be read (full paths).
+    missing: Vec<String>,
     chars: usize,
 }
 
@@ -276,6 +278,9 @@ impl Parser<'_> {
         let full = clean(&format!("{}/{}", self.root_dir, path));
         let Some(bytes) = self.files.and_then(|f| f.read(&full)) else {
             self.warnings.push(format!("missing include {path}"));
+            if !self.missing.contains(&full) {
+                self.missing.push(full);
+            }
             return;
         };
         let text = String::from_utf8_lossy(&bytes).to_string();
@@ -599,6 +604,48 @@ fn xf_set(xs: &mut Vec<Xfade>, source: XfSource, fade_in: bool, lo: bool, v: Opt
     } else {
         x.hi = v;
     }
+}
+
+/// The files an instrument refers to, found without loading samples: include files that are
+/// not there yet, and every sample path (relative to the library root). Used to download an
+/// instrument file by file: fetch the missing includes, ask again, then fetch the samples.
+#[derive(Debug, Default, PartialEq)]
+pub struct References {
+    pub missing_includes: Vec<String>,
+    pub samples: Vec<String>,
+}
+
+pub fn references(files: &dyn Files, path: &str) -> Result<References, String> {
+    let path = clean(path);
+    let bytes = files.read(&path).ok_or_else(|| format!("cannot read {path}"))?;
+    if bytes.len() > MAX_TEXT {
+        return Err("SFZ file too large".into());
+    }
+    let text = String::from_utf8_lossy(&bytes).to_string();
+    let mut p = Parser {
+        files: Some(files),
+        root_dir: parent(&path).to_string(),
+        ..Parser::default()
+    };
+    p.text(&text, 0);
+    p.finish_region();
+    let mut samples: Vec<String> = Vec::new();
+    for (ops, default_path) in &p.out {
+        let Some(sample) = ops.iter().rev().find(|(k, _)| k == "sample").map(|(_, v)| v) else {
+            continue;
+        };
+        if sample.starts_with('*') {
+            continue;
+        }
+        let full = clean(&format!("{}/{}/{}", parent(&path), default_path, sample));
+        if !samples.contains(&full) {
+            samples.push(full);
+        }
+    }
+    Ok(References {
+        missing_includes: p.missing,
+        samples,
+    })
 }
 
 impl SfzInstrument {
@@ -1067,8 +1114,8 @@ mod tests {
     use super::*;
     use crate::wav::tests::wav16;
 
-    struct Mem(HashMap<String, Vec<u8>>);
-    impl Files for Mem {
+    struct TestFiles(HashMap<String, Vec<u8>>);
+    impl Files for TestFiles {
         fn read(&self, path: &str) -> Option<Vec<u8>> {
             self.0.get(&clean(path)).cloned()
         }
@@ -1118,7 +1165,7 @@ comment */ volume=-20
         for name in ["Piano C4 soft", "Piano C4 loud", "other", "rel"] {
             m.insert(format!("lib/Samples/{name}.wav"), tone(4000));
         }
-        let files = Mem(m);
+        let files = TestFiles(m);
         let inst = SfzInstrument::load(&files, "lib/piano.sfz").unwrap();
         assert_eq!(inst.regions.len(), 4, "{:?}", inst.warnings);
         assert_eq!(inst.sw_range, Some((12, 14)));
@@ -1160,6 +1207,25 @@ comment */ volume=-20
     }
 
     #[test]
+    fn lists_references_for_downloading() {
+        let mut m = HashMap::new();
+        m.insert(
+            "lib/a.sfz".to_string(),
+            b"<control> default_path=S/\n#include \"inc/x.txt\"\n<region> sample=one.wav\n<region> sample=one.wav key=61\n<region> sample=*sine".to_vec(),
+        );
+        let first = references(&TestFiles(m.clone()), "lib/a.sfz").unwrap();
+        assert_eq!(first.missing_includes, ["lib/inc/x.txt"]);
+        assert_eq!(first.samples, ["lib/S/one.wav"]);
+        m.insert(
+            "lib/inc/x.txt".to_string(),
+            b"<region> sample=..\\two.wav".to_vec(),
+        );
+        let second = references(&TestFiles(m), "lib/a.sfz").unwrap();
+        assert!(second.missing_includes.is_empty());
+        assert_eq!(second.samples, ["lib/two.wav", "lib/S/one.wav"]);
+    }
+
+    #[test]
     fn hostile_sfz_does_not_panic() {
         let cases: [&str; 7] = [
             "",
@@ -1174,7 +1240,7 @@ comment */ volume=-20
             let mut m = HashMap::new();
             m.insert("self.sfz".to_string(), c.as_bytes().to_vec());
             m.insert("t.wav".to_string(), tone(300));
-            let files = Mem(m);
+            let files = TestFiles(m);
             if let Ok(inst) = SfzInstrument::load(&files, "self.sfz") {
                 let mut p = SfzPlayer::new(Arc::new(inst), 44_100);
                 for k in [0u8, 60, 127] {

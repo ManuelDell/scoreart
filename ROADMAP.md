@@ -18,6 +18,9 @@
   robins, release samples, crossfades, loops); mixer with one track per instrument (sound,
   volume, pan, mute, solo, meters), saved in MusicXML; stems export (one WAV per instrument);
   libraries remembered on desktop, zip/sf2 in the browser, `--sounds` on the CLI.
+- Catalogue of free libraries (VSCO 2 CE, VCSL, Salamander, GeneralUser GS): per-instrument
+  download from the publishers' sources after explicit licence acceptance, with the licence and
+  an acceptance record stored next to the files; desktop, browser and `scoreart-cli sounds`.
   Next for playback: articulation keyswitches driven by the notation, swing, metronome, loop,
   ritardando, reverb send, SFZ filters/LFOs, loading libraries by URL in the browser.
 - The full catalogue of notation marks (articulations, fermatas, breaths, ornaments, techniques,

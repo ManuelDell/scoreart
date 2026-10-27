@@ -9,8 +9,12 @@ ScoreArt plays every instrument on its own mixer track. A track sounds with one 
 - an **SFZ** sample instrument (`.sfz` with WAV or FLAC samples), played by ScoreArt's own SFZ
   sampler. It is written from the public format description at [sfzformat.com](https://sfzformat.com).
 
-ScoreArt ships **no sample library**. You load the libraries you want with *Mixer → Load
-sounds…*; the mixer is under *View → Mixer* or <kbd>F10</kbd>.
+ScoreArt ships **no sample library**. Get one in either of these ways; the mixer is under
+*View → Mixer* or <kbd>F10</kbd>:
+
+- **From the catalogue:** *Mixer → Get free sounds…* (or *View → Free sound libraries…*) — see
+  [below](#the-catalogue-downloads-with-explicit-licence-acceptance);
+- **Your own files:** *Mixer → Load sounds…*.
 
 - **Desktop**: load a `.sf2`, an `.sfz`, a zip, or a whole folder of SFZ instruments. You can
   also drop these files on the window. The desktop app remembers them for the next start.
@@ -18,6 +22,41 @@ sounds…*; the mixer is under *View → Mixer* or <kbd>F10</kbd>.
   cannot open folders.
 - **Command line**: add `--sounds PATH` (repeatable), e.g.
   `scoreart-cli convert score.musicxml out.wav --sounds GeneralUser-GS.sf2`.
+
+## The catalogue: downloads with explicit licence acceptance
+
+The *Free sound libraries* window lists VSCO 2 CE, VCSL, the Salamander Grand Piano and
+GeneralUser GS. For every library it shows:
+
+- the publisher, the size and the source;
+- the licence with a link to the full licence text;
+- in plain words what the licence **allows**, what it **requires** (e.g. credit for CC BY), and
+  what to note (no warranty, trademarks);
+- that the summary is not legal advice;
+- that ScoreArt does not host the files.
+
+Downloading works like this:
+
+1. You pick **one instrument** (e.g. "SViolinVib"); only its `.sfz`, includes and samples are
+   fetched, not the whole multi-GB library.
+2. **Download…** opens the licence once more in full. **Accept and download** stays disabled until
+   you tick "I have read the licence … and accept its terms".
+3. Files come directly from the publisher's public repository (raw.githubusercontent.com),
+   never from a ScoreArt server.
+4. Next to the files ScoreArt saves the library's own licence file and
+   `SCOREART-LICENCE-NOTICE.txt`. The notice holds the licence summary and one line per
+   acceptance (instrument, licence, date and time in UTC).
+5. Where files go:
+   - Desktop and CLI: `~/.local/share/ScoreArt/Sounds/<library>` on Linux, `%APPDATA%\ScoreArt\Sounds` on Windows, `~/Library/Application Support/ScoreArt/Sounds` on macOS. The library is loaded and remembered.
+   - Browser: memory, for the current session only.
+6. **GeneralUser GS**: its author asks that nobody links directly to his download files, so
+   ScoreArt only opens his website. Download the `.sf2` there and load it yourself.
+
+Command line: `scoreart-cli sounds list [LIBRARY]`, `scoreart-cli sounds licence LIBRARY`,
+`scoreart-cli sounds install LIBRARY INSTRUMENT --accept-licence [--dir DIR]`. The licence is
+always printed first, and nothing is downloaded without `--accept-licence`.
+
+![The licence confirmation before a download](images/licence-dialog.png)
 
 ## The mixer
 
@@ -92,6 +131,11 @@ Not supported yet:
 ## Legal
 
 - **No sample library is part of ScoreArt.** Users load their own, under each library's licence.
+- **The catalogue** only points to the publishers' own public sources. It downloads nothing
+  before the user has seen the licence and ticked the acceptance. It keeps the licence and a
+  record of the acceptance with the files, and it respects a publisher's wish not to be
+  hot-linked (GeneralUser GS). The instrument lists in `crates/synth/src/catalog_index.rs` are
+  only file names.
 - **Muse Sounds** are proprietary and are never used, imitated or referenced by ScoreArt.
 - **Code dependencies**: `rustysynth` (MIT) for SoundFonts, `claxon` (Apache-2.0) for FLAC.
 - **The SFZ reader** is written from the public format description only.

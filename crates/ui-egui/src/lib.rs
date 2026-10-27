@@ -10,6 +10,7 @@
 )]
 
 mod canvas;
+mod catalog;
 pub mod glyph;
 mod mixer;
 mod panels;
@@ -62,6 +63,29 @@ pub trait Host {
     }
     /// The user removed a library: do not load it again next time.
     fn forget_sounds(&mut self, _name: &str) {}
+    /// Whether [`Host::download_sounds`] works here.
+    fn can_download(&self) -> bool {
+        false
+    }
+    /// Fetches one instrument of a catalogue library. Called only after the user ticked the
+    /// licence acceptance; the library arrives through [`Host::take_sounds`].
+    fn download_sounds(&mut self, _library: &'static scoreart_synth::catalog::Library, _instrument: &str) {}
+    /// The download in progress, if any.
+    fn download_status(&self) -> Option<DownloadStatus> {
+        None
+    }
+    fn cancel_download(&mut self) {}
+}
+
+pub use catalog::DownloadStatus;
+
+/// The acceptance record saved with downloaded files.
+pub fn acceptance_text(library: &scoreart_synth::catalog::Library, unix_secs: u64) -> String {
+    format!(
+        "{}, accepted in the ScoreArt app (licence shown in full, box ticked) on {}",
+        library.licence.name,
+        scoreart_synth::catalog::utc_text(unix_secs)
+    )
 }
 
 /// Commands after which the selected notes are auditioned.
@@ -120,9 +144,18 @@ pub struct ScoreApp {
     pub sound_on_input: bool,
     pub show_mixer: bool,
     pub(crate) mixer: mixer::Mixer,
+    /// The "Free sound libraries" window, when open.
+    pub(crate) catalog: Option<catalog::CatalogState>,
 }
 
 impl ScoreApp {
+    /// Opens the "Free sound libraries" window.
+    pub fn open_catalog(&mut self) {
+        if self.catalog.is_none() {
+            self.catalog = Some(catalog::CatalogState::default());
+        }
+    }
+
     pub fn new(ctx: &egui::Context, session: Session, host: Box<dyn Host>) -> ScoreApp {
         glyph::install_fonts(ctx);
         ScoreApp {
@@ -139,6 +172,7 @@ impl ScoreApp {
             sound_on_input: true,
             show_mixer: false,
             mixer: mixer::Mixer::default(),
+            catalog: None,
         }
     }
 
@@ -243,6 +277,7 @@ impl ScoreApp {
                 canvas::show(self, ui);
             });
         panels::dialogs(self, &ctx);
+        catalog::window(self, &ctx);
         // Ctrl + mouse wheel zooms.
         let (zoom_delta, cmd) = ctx.input(|i| (i.zoom_delta(), i.modifiers.command));
         if (zoom_delta - 1.0).abs() > 1e-3 {

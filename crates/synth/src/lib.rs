@@ -16,6 +16,8 @@
 
 pub mod bank;
 mod builtin;
+pub mod catalog;
+mod catalog_index;
 pub mod files;
 pub mod sfz;
 pub mod wav;

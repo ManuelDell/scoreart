@@ -5,6 +5,9 @@
 //! scoreart-cli commands [--json]
 //! scoreart-cli run [--in FILE | --sample | --new] [--cmd 'id' | --cmd 'id={json}']… [--save OUT]
 //! scoreart-cli info <file>
+//! scoreart-cli sounds list [LIBRARY]
+//! scoreart-cli sounds licence LIBRARY
+//! scoreart-cli sounds install LIBRARY INSTRUMENT --accept-licence [--dir DIR]
 //! ```
 //!
 //! Every form takes `--sounds PATH` (repeatable): a SoundFont (`.sf2`), an SFZ instrument, a
@@ -103,9 +106,83 @@ fn parse_cmd(spec: &str) -> Result<(String, Value), String> {
     }
 }
 
+/// The free-library catalogue: list, show licences, install (only with explicit acceptance).
+fn sounds(args: &[String]) -> Result<(), String> {
+    use scoreart_synth::catalog;
+    match args.first().map(String::as_str) {
+        Some("list") => {
+            match args.get(1) {
+                None => {
+                    for l in catalog::libraries() {
+                        out!("{:<12} {:<24} {} · {}", l.id, l.name, l.licence.name, l.size);
+                    }
+                    out!("\nInstruments: sounds list LIBRARY · licence: sounds licence LIBRARY");
+                }
+                Some(id) => {
+                    let l = catalog::find(id).ok_or_else(|| format!("unknown library {id}"))?;
+                    for i in l.instruments {
+                        out!("{i}");
+                    }
+                }
+            }
+            Ok(())
+        }
+        Some("licence" | "license") => {
+            let id = args.get(1).ok_or("sounds licence LIBRARY")?;
+            let l = catalog::find(id).ok_or_else(|| format!("unknown library {id}"))?;
+            out!("{}", catalog::licence_text(l));
+            Ok(())
+        }
+        Some("install") => {
+            let (Some(id), Some(inst)) = (args.get(1), args.get(2)) else {
+                return Err("sounds install LIBRARY INSTRUMENT --accept-licence [--dir DIR]".into());
+            };
+            let l = catalog::find(id).ok_or_else(|| format!("unknown library {id}"))?;
+            let inst = l
+                .instruments
+                .iter()
+                .find(|i| *i == inst || catalog::instrument_name(i) == inst)
+                .ok_or_else(|| format!("{inst} is not an instrument of {}", l.name))?;
+            // The licence is always shown; installing needs the explicit flag.
+            eprintln!("{}", catalog::licence_text(l));
+            if !args.iter().any(|a| a == "--accept-licence" || a == "--accept-license") {
+                return Err("read the licence above; add --accept-licence to accept it and download".into());
+            }
+            let dir = match args.iter().position(|a| a == "--dir").and_then(|i| args.get(i + 1)) {
+                Some(d) => std::path::PathBuf::from(d),
+                None => catalog::default_dir().ok_or("no data folder; use --dir")?,
+            };
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let accepted = format!(
+                "{}, accepted on the command line (--accept-licence) on {}",
+                l.licence.name,
+                catalog::utc_text(now)
+            );
+            let cancel = std::sync::atomic::AtomicBool::new(false);
+            let folder = catalog::install(l, inst, &dir, &accepted, &cancel, &mut |p| {
+                eprint!(
+                    "\r{}/{} files, {:.1} MB  {:<60.60}",
+                    p.files_done,
+                    p.files_total,
+                    p.bytes as f64 / 1e6,
+                    p.file
+                );
+            })?;
+            eprintln!();
+            out!("installed {} into {}", catalog::instrument_name(inst), folder.display());
+            out!("use it with: --sounds \"{}\"", folder.display());
+            Ok(())
+        }
+        _ => Err("sounds list [LIBRARY] | sounds licence LIBRARY | sounds install LIBRARY INSTRUMENT --accept-licence".into()),
+    }
+}
+
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  scoreart-cli convert <in> <out>\n  scoreart-cli commands [--json]\n  scoreart-cli run [--in FILE | --sample | --new] [--cmd ID[=JSON]]… [--save OUT]\n  scoreart-cli info <file>\n  (all forms: --sounds <file.sf2|file.sfz|folder|file.zip>, repeatable)"
+        "usage:\n  scoreart-cli convert <in> <out>\n  scoreart-cli commands [--json]\n  scoreart-cli run [--in FILE | --sample | --new] [--cmd ID[=JSON]]… [--save OUT]\n  scoreart-cli info <file>\n  scoreart-cli sounds list [LIBRARY] | licence LIBRARY | install LIBRARY INSTRUMENT --accept-licence [--dir DIR]\n  (all forms: --sounds <file.sf2|file.sfz|folder|file.zip>, repeatable)"
     );
     ExitCode::from(2)
 }
@@ -125,6 +202,7 @@ fn main() -> ExitCode {
             }),
             _ => return usage(),
         },
+        Some("sounds") => sounds(args.get(1..).unwrap_or(&[])),
         Some("commands") => {
             let s = Session::default();
             let infos: Vec<_> = scoreart_engine::registry().iter().map(|c| c.info(&s)).collect();

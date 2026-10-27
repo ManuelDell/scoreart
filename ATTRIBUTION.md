@@ -24,6 +24,7 @@ Schiller, 1785).
 | `assets/fonts/OFL-Bravura.txt` | (licence text) | https://github.com/steinbergmedia/bravura (`redist/OFL.txt`) | — | |
 | `assets/app-icon/scoreart.svg` | ScoreArt contributors | original artwork drawn in SVG for this repository | MIT OR Apache-2.0 | App icon: a staff with two beamed notes on a violet tile |
 | `docs/images/app.png` | ScoreArt contributors | screenshot of ScoreArt itself showing its own sample score | MIT OR Apache-2.0 | Original; no third-party UI or assets |
+| `docs/images/licence-dialog.png` | ScoreArt contributors | screenshot of ScoreArt itself (its licence confirmation for a catalogue download) | MIT OR Apache-2.0 | Original; shows only ScoreArt's own summary of the CC0 licence |
 | `docs/images/mixer.png` | ScoreArt contributors | screenshot of ScoreArt itself (its showcase score and mixer) | MIT OR Apache-2.0 | Original; the preset name "Violin" shown comes from a user-loaded GeneralUser GS file, which is not part of the repository |
 | `docs/images/ode-to-joy.svg` | ScoreArt contributors | rendered by `scoreart-cli convert sample` | MIT OR Apache-2.0 | Engraved with Bravura (OFL) outlines |
 | `docs/images/notation-showcase.svg` | ScoreArt contributors | rendered by `scoreart-cli convert` from a score written for this repository | MIT OR Apache-2.0 | Shows the notation marks; engraved with Bravura (OFL) outlines |

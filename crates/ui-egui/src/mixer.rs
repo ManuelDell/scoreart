@@ -112,6 +112,13 @@ pub fn panel(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 {
                     app.host.request_sounds(false);
                 }
+                if ui
+                    .button("Get free sounds…")
+                    .on_hover_text("Free libraries (orchestra, piano …) with their licences")
+                    .clicked()
+                {
+                    app.open_catalog();
+                }
                 if app.host.can_load_folders()
                     && ui
                         .button("Load SFZ folder…")
