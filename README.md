@@ -59,7 +59,9 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   rename and remove instruments (17 built-in); transpose; score properties; unlimited undo/redo.
 - **Files**: **MusicXML 4.0** is the native format (`.musicxml` and compressed `.mxl`, read and
   write — exchange scores with MuseScore, Dorico, Sibelius, Finale), **MuseScore files**
-  (`.mscz`, `.mscx` of MuseScore 3 and 4) open directly (saving writes MusicXML), **MIDI** export,
+  (`.mscz`, `.mscx` of MuseScore 3 and 4, checked against files saved by MuseScore Studio 4.7)
+  open directly with notes, marks, lines, chord symbols, repeats and jumps (saving writes
+  MusicXML), **MIDI** export,
   **SVG** export with real glyph outlines, **WAV** export.
 - **Web build** with a `?host=parent` `postMessage` bridge (`scoreart:ready/open/save/dirty`) so
   a same-origin page — for example a Nextcloud app — can open and save scores in it.
