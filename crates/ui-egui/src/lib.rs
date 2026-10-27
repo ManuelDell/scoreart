@@ -22,6 +22,7 @@ mod mixer;
 mod page;
 mod panels;
 mod playback;
+pub mod side;
 pub mod theme;
 
 use crate::i18n::{t, tf, tr};
@@ -195,8 +196,8 @@ pub struct ScoreApp {
     pub(crate) scroll_to_cursor: bool,
     pub(crate) fields: panels::Fields,
     fonts_ready: bool,
-    pub show_palette: bool,
-    pub show_properties: bool,
+    /// The open side-panel tab; `None` folds the panel away.
+    pub side: Option<side::SideTab>,
     pub(crate) playback: Option<playback::Playback>,
     /// Play notes as they are entered or changed.
     pub sound_on_input: bool,
@@ -227,7 +228,7 @@ impl ScoreApp {
 
     /// Opens the "Instruments and sounds" window.
     pub fn open_instruments(&mut self) {
-        self.instruments.open = true;
+        self.side = Some(side::SideTab::Instruments);
     }
 
     /// Opens the "Free sound libraries" window.
@@ -253,8 +254,7 @@ impl ScoreApp {
             scroll_to_cursor: false,
             fields: panels::Fields::default(),
             fonts_ready: true,
-            show_palette: true,
-            show_properties: true,
+            side: Some(side::SideTab::Palettes),
             playback: None,
             sound_on_input: true,
             show_mixer: false,
@@ -355,12 +355,8 @@ impl ScoreApp {
         if self.show_mixer {
             mixer::panel(self, ui);
         }
-        if self.show_palette {
-            panels::palette(self, ui);
-        }
-        if self.show_properties {
-            panels::properties(self, ui);
-        }
+        side::strip(self, ui);
+        side::panel(self, ui);
         let tk = theme::Tokens::get(&ctx);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(tk.canvas))
@@ -369,7 +365,7 @@ impl ScoreApp {
             });
         panels::dialogs(self, &ctx);
         catalog::window(self, &ctx);
-        instruments::window(self, &ctx);
+        instruments::dialogs(self, &ctx);
         page::dialog(self, &ctx);
         midi::window(self, &ctx);
         // Ctrl + mouse wheel zooms.
@@ -451,7 +447,7 @@ impl ScoreApp {
             (Key::T, _, _) if plain => self.run("note.tie", json!({})),
             (Key::Space, _, _) if plain => self.toggle_playback(),
             (Key::F10, _, _) if plain => self.show_mixer = !self.show_mixer,
-            (Key::I, _, _) if plain => self.instruments.open = !self.instruments.open,
+            (Key::I, _, _) if plain => side::toggle(self, side::SideTab::Instruments),
             (Key::Escape, _, _) if self.is_playing() => self.stop_playback(),
             (Key::Escape, _, _) => self.run("edit.escape", json!({})),
             (Key::ArrowUp, _, _) if plain => self.run("note.pitch-up", json!({})),

@@ -61,7 +61,7 @@ impl ScoreApp {
         self.session.status = tf("Loaded sounds \"{}\" ({} presets)", &[&name, &n]);
     }
 
-    fn remove_sounds(&mut self, name: &str) {
+    pub(crate) fn remove_sounds(&mut self, name: &str) {
         self.session.sounds.retain(|b| b.name != name);
         self.host.forget_sounds(name);
         self.session.status = tf("Removed sounds \"{}\"", &[&name]);

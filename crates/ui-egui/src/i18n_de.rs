@@ -350,6 +350,7 @@ pub const DE: &[(&str, &str)] = &[
     ("Load \"{}\"", "„{}“ laden"),
     ("Load SFZ folder…", "SFZ-Ordner laden…"),
     ("Load sounds…", "Klänge laden…"),
+    ("Loaded sound libraries", "Geladene Klangbibliotheken"),
     (
         "Loaded sounds \"{}\" ({} presets)",
         "Klänge „{}“ geladen ({} Presets)",
@@ -492,6 +493,7 @@ pub const DE: &[(&str, &str)] = &[
         "Ab der Auswahl abspielen (Leertaste)",
     ),
     ("Play notes while editing", "Noten beim Bearbeiten anspielen"),
+    ("Playback", "Wiedergabe"),
     ("Playback: {}", "Wiedergabe: {}"),
     (
         "Played keys enter notes in note input (N); keys pressed together make a chord. Outside note input they only sound.",
@@ -609,6 +611,7 @@ pub const DE: &[(&str, &str)] = &[
     ),
     ("Soprano", "Sopran"),
     ("Sound", "Klang"),
+    ("Sounds", "Klänge"),
     ("Sounds:", "Klänge:"),
     ("Sounds: {}", "Klänge: {}"),
     ("Source:", "Quelle:"),

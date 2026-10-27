@@ -32,7 +32,6 @@ pub(crate) struct PendingChange {
 
 #[derive(Default)]
 pub(crate) struct InstrumentsState {
-    pub open: bool,
     pending: Option<PendingChange>,
 }
 
@@ -82,82 +81,46 @@ fn instrument_name(id: &str) -> &'static str {
     INSTRUMENTS.iter().find(|i| i.id == id).map_or("", |i| t(i.name))
 }
 
-pub(crate) fn window(app: &mut ScoreApp, ctx: &egui::Context) {
+/// The question asked when an instrument change needs a decision (shown over everything).
+pub(crate) fn dialogs(app: &mut ScoreApp, ctx: &egui::Context) {
     confirm(app, ctx);
-    if !app.instruments.open {
-        return;
-    }
-    let tk = Tokens::get(ctx);
-    let mut open = true;
+}
+
+/// The "Instruments" tab of the side panel.
+pub(crate) fn content(app: &mut ScoreApp, ui: &mut egui::Ui) {
+    let tk = Tokens::get(ui.ctx());
     let playing = app.is_playing();
-    egui::Window::new(t("Instruments and sounds"))
-        .open(&mut open)
-        .default_width(640.0)
-        .pivot(egui::Align2::CENTER_TOP)
-        .default_pos(egui::pos2(ctx.content_rect().center().x, 60.0))
-        .show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(t("Sounds:")).color(tk.text_dim));
-                if ui
-                    .button(t("Load sounds…"))
-                    .on_hover_text(t(
-                        "A SoundFont (.sf2), an SFZ instrument (.sfz) or a zip of SFZ instruments",
-                    ))
-                    .clicked()
-                {
-                    app.host.request_sounds(false);
-                }
-                if app.host.can_load_folders() && ui.button(t("Load SFZ folder…")).clicked() {
-                    app.host.request_sounds(true);
-                }
-                if ui
-                    .button(t("Get free sounds…"))
-                    .on_hover_text(t("Free libraries (orchestra, piano …) with their licences"))
-                    .clicked()
-                {
-                    app.open_catalog();
-                }
-                ui.toggle_value(&mut app.show_mixer, t("Mixer  F10"));
-                if ui
-                    .button(t("MIDI input…"))
-                    .on_hover_text(t("Connect a MIDI keyboard and set what each key does"))
-                    .clicked()
-                {
-                    app.open_midi();
-                }
+    let count = app.session.score.parts.len();
+    for pi in 0..count {
+        egui::Frame::NONE
+            .fill(tk.canvas.linear_multiply(0.35))
+            .corner_radius(6)
+            .inner_margin(6)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                part_row(app, ui, pi, count, playing, &tk);
             });
-            ui.separator();
-            let count = app.session.score.parts.len();
-            egui::ScrollArea::vertical().max_height(460.0).show(ui, |ui| {
-                for pi in 0..count {
-                    part_row(app, ui, pi, count, playing, &tk);
-                    ui.separator();
+        ui.add_space(4.0);
+    }
+    ui.add_space(4.0);
+    ui.label(RichText::new(t("Add instrument")).strong());
+    let mut add: Option<&'static str> = None;
+    egui::ComboBox::from_id_salt("instruments-add")
+        .selected_text(t("Choose …"))
+        .width(ui.available_width().min(220.0))
+        .height(420.0)
+        .show_ui(ui, |ui| {
+            for i in INSTRUMENTS {
+                if ui.selectable_label(false, t(i.name)).clicked() {
+                    add = Some(i.id);
                 }
-            });
-            ui.horizontal(|ui| {
-                ui.label(t("Add instrument"));
-                let mut add: Option<&'static str> = None;
-                egui::ComboBox::from_id_salt("instruments-add")
-                    .selected_text(t("Choose …"))
-                    .width(180.0)
-                    .height(420.0)
-                    .show_ui(ui, |ui| {
-                        for i in INSTRUMENTS {
-                            if ui.selectable_label(false, t(i.name)).clicked() {
-                                add = Some(i.id);
-                            }
-                        }
-                    });
-                if let Some(id) = add {
-                    app.run(
-                        "part.add",
-                        json!({ "instrument": id, "name": instrument_name(id) }),
-                    );
-                }
-            });
+            }
         });
-    if !open {
-        app.instruments.open = false;
+    if let Some(id) = add {
+        app.run(
+            "part.add",
+            json!({ "instrument": id, "name": instrument_name(id) }),
+        );
     }
 }
 
@@ -165,21 +128,8 @@ fn part_row(app: &mut ScoreApp, ui: &mut egui::Ui, pi: usize, count: usize, play
     let Some(part) = app.session.score.parts.get(pi).cloned() else {
         return;
     };
+    let wide = ui.available_width().min(220.0);
     ui.horizontal(|ui| {
-        if ui
-            .add_enabled(pi > 0, egui::Button::new("▲").small())
-            .on_hover_text(t("Move up"))
-            .clicked()
-        {
-            app.run("part.move", json!({ "part": pi, "to": pi - 1 }));
-        }
-        if ui
-            .add_enabled(pi + 1 < count, egui::Button::new("▼").small())
-            .on_hover_text(t("Move down"))
-            .clicked()
-        {
-            app.run("part.move", json!({ "part": pi, "to": pi + 1 }));
-        }
         let mut shown = part.visible();
         if ui
             .checkbox(&mut shown, "")
@@ -194,37 +144,48 @@ fn part_row(app: &mut ScoreApp, ui: &mut egui::Ui, pi: usize, count: usize, play
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
-                .add_enabled(count > 1, egui::Button::new(t("Remove")))
+                .add_enabled(count > 1, egui::Button::new("✕").small())
                 .on_hover_text(t("Remove this instrument and its music"))
                 .clicked()
             {
                 app.run("part.remove", json!({ "part": pi }));
             }
+            if ui
+                .add_enabled(pi + 1 < count, egui::Button::new("▼").small())
+                .on_hover_text(t("Move down"))
+                .clicked()
+            {
+                app.run("part.move", json!({ "part": pi, "to": pi + 1 }));
+            }
+            if ui
+                .add_enabled(pi > 0, egui::Button::new("▲").small())
+                .on_hover_text(t("Move up"))
+                .clicked()
+            {
+                app.run("part.move", json!({ "part": pi, "to": pi - 1 }));
+            }
         });
     });
-    ui.horizontal(|ui| {
-        ui.add_space(52.0);
-        let mut pick: Option<&'static str> = None;
-        egui::ComboBox::from_id_salt(("instruments-change", pi))
-            .selected_text(t("Change instrument …"))
-            .width(170.0)
-            .height(420.0)
-            .show_ui(ui, |ui| {
-                for i in INSTRUMENTS {
-                    if ui
-                        .selectable_label(i.name == part.name || t(i.name) == part.name, t(i.name))
-                        .clicked()
-                    {
-                        pick = Some(i.id);
-                    }
+    let mut pick: Option<&'static str> = None;
+    egui::ComboBox::from_id_salt(("instruments-change", pi))
+        .selected_text(t("Change instrument …"))
+        .width(wide)
+        .height(420.0)
+        .show_ui(ui, |ui| {
+            for i in INSTRUMENTS {
+                if ui
+                    .selectable_label(i.name == part.name || t(i.name) == part.name, t(i.name))
+                    .clicked()
+                {
+                    pick = Some(i.id);
                 }
-            });
-        if let Some(id) = pick {
-            request_change(app, pi, id);
-        }
-        ui.label(RichText::new(t("Sound")).color(tk.text_dim));
-        crate::mixer::sound_picker(app, ui, pi, &part.sound, playing, 150.0);
-    });
+            }
+        });
+    if let Some(id) = pick {
+        request_change(app, pi, id);
+    }
+    ui.label(RichText::new(t("Sound")).color(tk.text_dim));
+    crate::mixer::sound_picker(app, ui, pi, &part.sound, playing, wide);
     // Lines that could become instruments of their own.
     let lines: Vec<Line> = part
         .lines()
@@ -233,28 +194,23 @@ fn part_row(app: &mut ScoreApp, ui: &mut egui::Ui, pi: usize, count: usize, play
         .collect();
     if lines.len() > 1 {
         for line in lines {
-            ui.horizontal(|ui| {
-                ui.add_space(52.0);
-                ui.label(RichText::new(crate::i18n::line_label(&part, line)).color(tk.text_dim));
-                let mut pick: Option<&'static str> = None;
-                egui::ComboBox::from_id_salt(("instruments-line", pi, line.staff, line.voice))
-                    .selected_text(t("Own instrument …"))
-                    .width(170.0)
-                    .height(420.0)
-                    .show_ui(ui, |ui| {
-                        ui.label(
-                            RichText::new(t("Moves this line into a new instrument")).color(tk.text_dim),
-                        );
-                        for i in INSTRUMENTS {
-                            if ui.selectable_label(false, t(i.name)).clicked() {
-                                pick = Some(i.id);
-                            }
+            ui.label(RichText::new(crate::i18n::line_label(&part, line)).color(tk.text_dim));
+            let mut pick: Option<&'static str> = None;
+            egui::ComboBox::from_id_salt(("instruments-line", pi, line.staff, line.voice))
+                .selected_text(t("Own instrument …"))
+                .width(wide)
+                .height(420.0)
+                .show_ui(ui, |ui| {
+                    ui.label(RichText::new(t("Moves this line into a new instrument")).color(tk.text_dim));
+                    for i in INSTRUMENTS {
+                        if ui.selectable_label(false, t(i.name)).clicked() {
+                            pick = Some(i.id);
                         }
-                    });
-                if let Some(id) = pick {
-                    split_line(app, pi, line, id);
-                }
-            });
+                    }
+                });
+            if let Some(id) = pick {
+                split_line(app, pi, line, id);
+            }
         }
     }
 }

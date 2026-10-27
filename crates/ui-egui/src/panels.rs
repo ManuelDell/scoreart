@@ -246,8 +246,12 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         app.set_zoom(7.5);
                     }
                     ui.separator();
-                    ui.checkbox(&mut app.show_palette, t("Palettes"));
-                    ui.checkbox(&mut app.show_properties, t("Properties"));
+                    for tab in crate::side::SideTab::ALL {
+                        if ui.selectable_label(app.side == Some(tab), tab.label()).clicked() {
+                            crate::side::toggle(app, tab);
+                            ui.close();
+                        }
+                    }
                     ui.checkbox(&mut app.show_mixer, t("Mixer    F10"));
                     if ui.button(t("Free sound libraries…")).clicked() {
                         app.open_catalog();
@@ -660,354 +664,333 @@ fn dynamic_button(ui: &mut egui::Ui, id: &str) -> egui::Response {
     resp
 }
 
-pub fn palette(app: &mut ScoreApp, ui: &mut egui::Ui) {
+pub fn palette_content(app: &mut ScoreApp, ui: &mut egui::Ui) {
     use scoreart_model::marks::{self, MARKS};
     let tk = Tokens::get(ui.ctx());
-    egui::Panel::left("palette")
-        .default_size(232.0)
-        .resizable(true)
-        .frame(egui::Frame::NONE.fill(tk.panel).inner_margin(8))
-        .show(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.label(RichText::new(t("Palettes")).size(15.0).strong());
-                ui.label(
-                    RichText::new(t(
-                        "Select notes or measures, then click. Shift+click or Shift+→ selects a range.",
-                    ))
-                    .small()
-                    .color(tk.text_dim),
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        ui.label(
+            RichText::new(t(
+                "Select notes or measures, then click. Shift+click or Shift+→ selects a range.",
+            ))
+            .small()
+            .color(tk.text_dim),
+        );
+        ui.add_space(4.0);
+        section(ui, t("Clefs"), false, |ui| {
+            for c in Clef::ALL {
+                let name = match c {
+                    Clef::Treble => "gClef",
+                    Clef::Treble8vb => "gClef8vb",
+                    Clef::Bass => "fClef",
+                    Clef::Alto | Clef::Tenor => "cClef",
+                    Clef::Percussion => "unpitchedPercussionClef1",
+                };
+                let (gc, _, _) = g::clef(c);
+                let resp = if scoreart_engrave::smufl::get(name).is_some() {
+                    smufl_button(ui, name, t(c.label()))
+                } else {
+                    let base = match c {
+                        Clef::Bass => 0.45,
+                        Clef::Alto | Clef::Tenor | Clef::Percussion => 0.5,
+                        _ => 0.62,
+                    };
+                    glyph_button(ui, GlyphLabel::Glyph(gc, 15.0, base, -5.0), false, t(c.label()))
+                };
+                if resp.clicked() {
+                    app.run("measure.clef", json!({ "clef": c.id() }));
+                }
+            }
+        });
+        section(ui, t("Key signatures"), false, |ui| {
+            for f in -7..=7i32 {
+                let k = KeySig::new(f);
+                let tip = tf(
+                    "{} major / {} accidentals",
+                    &[&crate::i18n::note_name(k.name()), &f.abs()],
                 );
-                ui.add_space(4.0);
-                section(ui, t("Clefs"), false, |ui| {
-                    for c in Clef::ALL {
-                        let name = match c {
-                            Clef::Treble => "gClef",
-                            Clef::Treble8vb => "gClef8vb",
-                            Clef::Bass => "fClef",
-                            Clef::Alto | Clef::Tenor => "cClef",
-                            Clef::Percussion => "unpitchedPercussionClef1",
-                        };
-                        let (gc, _, _) = g::clef(c);
-                        let resp = if scoreart_engrave::smufl::get(name).is_some() {
-                            smufl_button(ui, name, t(c.label()))
-                        } else {
-                            let base = match c {
-                                Clef::Bass => 0.45,
-                                Clef::Alto | Clef::Tenor | Clef::Percussion => 0.5,
-                                _ => 0.62,
-                            };
-                            glyph_button(ui, GlyphLabel::Glyph(gc, 15.0, base, -5.0), false, t(c.label()))
-                        };
-                        if resp.clicked() {
-                            app.run("measure.clef", json!({ "clef": c.id() }));
-                        }
+                if text_button(ui, RichText::new(key_label(f)).size(12.0), &tip).clicked() {
+                    app.run("measure.key", json!({ "fifths": f }));
+                }
+            }
+        });
+        section(ui, t("Time signatures"), false, |ui| {
+            for ts in [
+                "2/4", "3/4", "4/4", "5/4", "6/8", "3/8", "9/8", "12/8", "2/2", "7/8", "common", "cut",
+            ] {
+                let label = match ts {
+                    "common" => "C".to_string(),
+                    "cut" => "¢".to_string(),
+                    x => x.to_string(),
+                };
+                if text_button(ui, label, ts).clicked() {
+                    app.run("measure.time", json!({ "time": ts }));
+                }
+            }
+        });
+        for (group, open) in [
+            (marks::ARTICULATIONS, true),
+            (marks::FERMATAS, true),
+            (marks::BREATHS, false),
+            (marks::ORNAMENTS, true),
+            (marks::TECHNIQUES, false),
+            (marks::SLIDES, false),
+        ] {
+            section(ui, t(group), open, |ui| {
+                for d in MARKS.iter().filter(|d| d.group == group) {
+                    if smufl_button(ui, d.glyph_above, t(d.label)).clicked() {
+                        app.run("note.articulation", json!({ "type": d.id }));
                     }
-                });
-                section(ui, t("Key signatures"), false, |ui| {
-                    for f in -7..=7i32 {
-                        let k = KeySig::new(f);
-                        let tip = tf(
-                            "{} major / {} accidentals",
-                            &[&crate::i18n::note_name(k.name()), &f.abs()],
-                        );
-                        if text_button(ui, RichText::new(key_label(f)).size(12.0), &tip).clicked() {
-                            app.run("measure.key", json!({ "fifths": f }));
-                        }
+                }
+            });
+        }
+        section(ui, t("Dynamics"), true, |ui| {
+            for d in scoreart_model::Dynamic::all() {
+                if dynamic_button(ui, d.id()).clicked() {
+                    app.run("note.dynamic", json!({ "type": d.id() }));
+                }
+            }
+            if text_button(ui, "✕", t("Remove dynamic")).clicked() {
+                app.run("note.dynamic", json!({ "type": "none" }));
+            }
+        });
+        section(ui, t("Lines"), true, |ui| {
+            for k in scoreart_model::SpannerKind::ALL {
+                let (resp, _) = match k {
+                    scoreart_model::SpannerKind::Slur => (text_button(ui, "⌒", t(k.label())), ()),
+                    scoreart_model::SpannerKind::Crescendo => (text_button(ui, "<", t(k.label())), ()),
+                    scoreart_model::SpannerKind::Diminuendo => (text_button(ui, ">", t(k.label())), ()),
+                    scoreart_model::SpannerKind::CrescendoLine => (
+                        text_button(ui, RichText::new("cresc.").italics(), t(k.label())),
+                        (),
+                    ),
+                    scoreart_model::SpannerKind::DiminuendoLine => {
+                        (text_button(ui, RichText::new("dim.").italics(), t(k.label())), ())
                     }
-                });
-                section(ui, t("Time signatures"), false, |ui| {
-                    for ts in [
-                        "2/4", "3/4", "4/4", "5/4", "6/8", "3/8", "9/8", "12/8", "2/2", "7/8", "common",
-                        "cut",
-                    ] {
-                        let label = match ts {
-                            "common" => "C".to_string(),
-                            "cut" => "¢".to_string(),
-                            x => x.to_string(),
+                    scoreart_model::SpannerKind::Ottava(o) => {
+                        let name = match o {
+                            1 => "ottavaAlta",
+                            -1 => "ottavaBassaVb",
+                            2 => "quindicesimaAlta",
+                            -2 => "quindicesimaBassa",
+                            3 => "ventiduesimaAlta",
+                            _ => "ventiduesimaBassa",
                         };
-                        if text_button(ui, label, ts).clicked() {
-                            app.run("measure.time", json!({ "time": ts }));
-                        }
+                        (smufl_button(ui, name, t(k.label())), ())
                     }
-                });
-                for (group, open) in [
-                    (marks::ARTICULATIONS, true),
-                    (marks::FERMATAS, true),
-                    (marks::BREATHS, false),
-                    (marks::ORNAMENTS, true),
-                    (marks::TECHNIQUES, false),
-                    (marks::SLIDES, false),
-                ] {
-                    section(ui, t(group), open, |ui| {
-                        for d in MARKS.iter().filter(|d| d.group == group) {
-                            if smufl_button(ui, d.glyph_above, t(d.label)).clicked() {
-                                app.run("note.articulation", json!({ "type": d.id }));
-                            }
-                        }
+                    scoreart_model::SpannerKind::Pedal => {
+                        (smufl_button(ui, "keyboardPedalPed", t(k.label())), ())
+                    }
+                    scoreart_model::SpannerKind::TrillLine => (
+                        text_button(ui, RichText::new("tr~~").italics().strong(), t(k.label())),
+                        (),
+                    ),
+                    scoreart_model::SpannerKind::Vibrato => {
+                        (smufl_button(ui, "wiggleVibrato", t(k.label())), ())
+                    }
+                    scoreart_model::SpannerKind::LetRing => {
+                        (text_button(ui, RichText::new("l.r.").italics(), t(k.label())), ())
+                    }
+                    scoreart_model::SpannerKind::PalmMute => {
+                        (text_button(ui, RichText::new("P.M.").italics(), t(k.label())), ())
+                    }
+                    scoreart_model::SpannerKind::Glissando => (text_button(ui, "╲", t(k.label())), ()),
+                    scoreart_model::SpannerKind::WavyGlissando => (text_button(ui, "≀", t(k.label())), ()),
+                };
+                if resp.clicked() {
+                    app.run("line.add", json!({ "type": k.id() }));
+                }
+            }
+            if text_button(ui, "✕", t("Remove lines starting or ending at the selection")).clicked() {
+                app.run("line.remove", json!({}));
+            }
+        });
+        section(ui, t("Arpeggios & tremolos"), false, |ui| {
+            for (label, id, tip) in [
+                ("≀", "arpeggio", t("Arpeggio")),
+                ("≀↑", "arpeggio-up", t("Arpeggio up")),
+                ("≀↓", "arpeggio-down", t("Arpeggio down")),
+                ("[", "non-arpeggio", t("Non-arpeggio bracket")),
+            ] {
+                if text_button(ui, label, tip).clicked() {
+                    app.run("note.arpeggio", json!({ "type": id }));
+                }
+            }
+            for n in 1..=4 {
+                if smufl_button(ui, &format!("tremolo{n}"), &tf("Tremolo, {} stroke(s)", &[&n])).clicked() {
+                    app.run("note.tremolo", json!({ "strokes": n }));
+                }
+            }
+            if smufl_button(ui, "buzzRoll", t("Buzz roll")).clicked() {
+                app.run("note.tremolo", json!({ "strokes": "buzz" }));
+            }
+        });
+        section(ui, t("Grace notes"), false, |ui| {
+            for (label, id) in [
+                ("♪̸", "acciaccatura"),
+                ("♪", "appoggiatura"),
+                ("𝅘𝅥𝅯", "grace-16th"),
+                ("𝅘𝅥𝅰", "grace-32nd"),
+            ] {
+                if text_button(ui, label, id).clicked() {
+                    app.run("note.grace", json!({ "type": id }));
+                }
+            }
+            if text_button(ui, "↑", t("Move grace note up")).clicked() {
+                app.run("note.grace-pitch", json!({ "delta": 1 }));
+            }
+            if text_button(ui, "↓", t("Move grace note down")).clicked() {
+                app.run("note.grace-pitch", json!({ "delta": -1 }));
+            }
+            if text_button(ui, "✕", t("Remove grace notes")).clicked() {
+                app.run("note.grace-remove", json!({}));
+            }
+        });
+        section(ui, t("Noteheads"), false, |ui| {
+            for h in scoreart_model::NoteHead::ALL {
+                let (c, _) = g::head_for(h, NoteValue::Quarter);
+                let name = scoreart_engrave::smufl::TABLE
+                    .iter()
+                    .find(|x| x.1 == c)
+                    .map(|x| x.0)
+                    .unwrap_or("noteheadBlack");
+                let resp = if name == "noteheadBlack" {
+                    glyph_button(ui, GlyphLabel::Glyph(c, 30.0, 0.55, -4.0), false, t(h.id()))
+                } else {
+                    smufl_button(ui, name, t(h.id()))
+                };
+                if resp.clicked() {
+                    app.run("note.head", json!({ "type": h.id() }));
+                }
+            }
+            if text_button(ui, "( )", t("Parentheses (ghost note)")).clicked() {
+                app.run("note.paren", json!({}));
+            }
+        });
+        section(ui, t("Repeats & jumps"), false, |ui| {
+            if text_button(ui, "𝄆", t("Start repeat")).clicked() {
+                app.run("measure.repeat-start", json!({}));
+            }
+            if text_button(ui, "𝄇", t("End repeat")).clicked() {
+                app.run("measure.barline", json!({ "type": "repeat-end" }));
+            }
+            for n in 1..=3 {
+                if text_button(ui, format!("⌐{n}."), &tf("Volta {}", &[&n])).clicked() {
+                    app.run("measure.volta", json!({ "number": n }));
+                }
+            }
+            if text_button(ui, "⌐✕", t("Remove volta")).clicked() {
+                app.run("measure.volta", json!({ "number": 0 }));
+            }
+            if smufl_button(ui, "repeat1Bar", t("One-measure repeat")).clicked() {
+                app.run("measure.repeat-sign", json!({}));
+            }
+            for j in scoreart_model::Jump::ALL {
+                let resp = match j {
+                    scoreart_model::Jump::Segno => smufl_button(ui, "segno", t("Segno")),
+                    scoreart_model::Jump::Coda => smufl_button(ui, "coda", t("Coda")),
+                    scoreart_model::Jump::VariedCoda => smufl_button(ui, "codaSquare", t("Varied coda")),
+                    _ => ui
+                        .add_sized(
+                            Vec2::new(84.0, 26.0),
+                            egui::Button::new(RichText::new(j.text().unwrap_or("")).italics()),
+                        )
+                        .on_hover_text(t(j.id())),
+                };
+                if resp.clicked() {
+                    app.run("measure.jump", json!({ "type": j.id() }));
+                }
+            }
+        });
+        section(ui, t("Barlines"), false, |ui| {
+            for (label, id) in [("‖", "double"), ("𝄂", "final"), ("|", "regular")] {
+                if text_button(ui, label, id).clicked() {
+                    app.run("measure.barline", json!({ "type": id }));
+                }
+            }
+        });
+        section(ui, t("Text"), false, |ui| {
+            let mut dlg = |ui: &mut egui::Ui,
+                           label: &str,
+                           title: &'static str,
+                           command: &'static str,
+                           key: &'static str,
+                           value: String| {
+                if ui
+                    .add_sized(Vec2::new(98.0, 26.0), egui::Button::new(label))
+                    .clicked()
+                {
+                    app.dialog = Some(Dialog::Text {
+                        title,
+                        command,
+                        key,
+                        value,
                     });
                 }
-                section(ui, t("Dynamics"), true, |ui| {
-                    for d in scoreart_model::Dynamic::all() {
-                        if dynamic_button(ui, d.id()).clicked() {
-                            app.run("note.dynamic", json!({ "type": d.id() }));
-                        }
-                    }
-                    if text_button(ui, "✕", t("Remove dynamic")).clicked() {
-                        app.run("note.dynamic", json!({ "type": "none" }));
-                    }
-                });
-                section(ui, t("Lines"), true, |ui| {
-                    for k in scoreart_model::SpannerKind::ALL {
-                        let (resp, _) = match k {
-                            scoreart_model::SpannerKind::Slur => (text_button(ui, "⌒", t(k.label())), ()),
-                            scoreart_model::SpannerKind::Crescendo => {
-                                (text_button(ui, "<", t(k.label())), ())
-                            }
-                            scoreart_model::SpannerKind::Diminuendo => {
-                                (text_button(ui, ">", t(k.label())), ())
-                            }
-                            scoreart_model::SpannerKind::CrescendoLine => (
-                                text_button(ui, RichText::new("cresc.").italics(), t(k.label())),
-                                (),
-                            ),
-                            scoreart_model::SpannerKind::DiminuendoLine => {
-                                (text_button(ui, RichText::new("dim.").italics(), t(k.label())), ())
-                            }
-                            scoreart_model::SpannerKind::Ottava(o) => {
-                                let name = match o {
-                                    1 => "ottavaAlta",
-                                    -1 => "ottavaBassaVb",
-                                    2 => "quindicesimaAlta",
-                                    -2 => "quindicesimaBassa",
-                                    3 => "ventiduesimaAlta",
-                                    _ => "ventiduesimaBassa",
-                                };
-                                (smufl_button(ui, name, t(k.label())), ())
-                            }
-                            scoreart_model::SpannerKind::Pedal => {
-                                (smufl_button(ui, "keyboardPedalPed", t(k.label())), ())
-                            }
-                            scoreart_model::SpannerKind::TrillLine => (
-                                text_button(ui, RichText::new("tr~~").italics().strong(), t(k.label())),
-                                (),
-                            ),
-                            scoreart_model::SpannerKind::Vibrato => {
-                                (smufl_button(ui, "wiggleVibrato", t(k.label())), ())
-                            }
-                            scoreart_model::SpannerKind::LetRing => {
-                                (text_button(ui, RichText::new("l.r.").italics(), t(k.label())), ())
-                            }
-                            scoreart_model::SpannerKind::PalmMute => {
-                                (text_button(ui, RichText::new("P.M.").italics(), t(k.label())), ())
-                            }
-                            scoreart_model::SpannerKind::Glissando => {
-                                (text_button(ui, "╲", t(k.label())), ())
-                            }
-                            scoreart_model::SpannerKind::WavyGlissando => {
-                                (text_button(ui, "≀", t(k.label())), ())
-                            }
-                        };
-                        if resp.clicked() {
-                            app.run("line.add", json!({ "type": k.id() }));
-                        }
-                    }
-                    if text_button(ui, "✕", t("Remove lines starting or ending at the selection")).clicked()
-                    {
-                        app.run("line.remove", json!({}));
-                    }
-                });
-                section(ui, t("Arpeggios & tremolos"), false, |ui| {
-                    for (label, id, tip) in [
-                        ("≀", "arpeggio", t("Arpeggio")),
-                        ("≀↑", "arpeggio-up", t("Arpeggio up")),
-                        ("≀↓", "arpeggio-down", t("Arpeggio down")),
-                        ("[", "non-arpeggio", t("Non-arpeggio bracket")),
-                    ] {
-                        if text_button(ui, label, tip).clicked() {
-                            app.run("note.arpeggio", json!({ "type": id }));
-                        }
-                    }
-                    for n in 1..=4 {
-                        if smufl_button(ui, &format!("tremolo{n}"), &tf("Tremolo, {} stroke(s)", &[&n]))
-                            .clicked()
-                        {
-                            app.run("note.tremolo", json!({ "strokes": n }));
-                        }
-                    }
-                    if smufl_button(ui, "buzzRoll", t("Buzz roll")).clicked() {
-                        app.run("note.tremolo", json!({ "strokes": "buzz" }));
-                    }
-                });
-                section(ui, t("Grace notes"), false, |ui| {
-                    for (label, id) in [
-                        ("♪̸", "acciaccatura"),
-                        ("♪", "appoggiatura"),
-                        ("𝅘𝅥𝅯", "grace-16th"),
-                        ("𝅘𝅥𝅰", "grace-32nd"),
-                    ] {
-                        if text_button(ui, label, id).clicked() {
-                            app.run("note.grace", json!({ "type": id }));
-                        }
-                    }
-                    if text_button(ui, "↑", t("Move grace note up")).clicked() {
-                        app.run("note.grace-pitch", json!({ "delta": 1 }));
-                    }
-                    if text_button(ui, "↓", t("Move grace note down")).clicked() {
-                        app.run("note.grace-pitch", json!({ "delta": -1 }));
-                    }
-                    if text_button(ui, "✕", t("Remove grace notes")).clicked() {
-                        app.run("note.grace-remove", json!({}));
-                    }
-                });
-                section(ui, t("Noteheads"), false, |ui| {
-                    for h in scoreart_model::NoteHead::ALL {
-                        let (c, _) = g::head_for(h, NoteValue::Quarter);
-                        let name = scoreart_engrave::smufl::TABLE
-                            .iter()
-                            .find(|x| x.1 == c)
-                            .map(|x| x.0)
-                            .unwrap_or("noteheadBlack");
-                        let resp = if name == "noteheadBlack" {
-                            glyph_button(ui, GlyphLabel::Glyph(c, 30.0, 0.55, -4.0), false, t(h.id()))
-                        } else {
-                            smufl_button(ui, name, t(h.id()))
-                        };
-                        if resp.clicked() {
-                            app.run("note.head", json!({ "type": h.id() }));
-                        }
-                    }
-                    if text_button(ui, "( )", t("Parentheses (ghost note)")).clicked() {
-                        app.run("note.paren", json!({}));
-                    }
-                });
-                section(ui, t("Repeats & jumps"), false, |ui| {
-                    if text_button(ui, "𝄆", t("Start repeat")).clicked() {
-                        app.run("measure.repeat-start", json!({}));
-                    }
-                    if text_button(ui, "𝄇", t("End repeat")).clicked() {
-                        app.run("measure.barline", json!({ "type": "repeat-end" }));
-                    }
-                    for n in 1..=3 {
-                        if text_button(ui, format!("⌐{n}."), &tf("Volta {}", &[&n])).clicked() {
-                            app.run("measure.volta", json!({ "number": n }));
-                        }
-                    }
-                    if text_button(ui, "⌐✕", t("Remove volta")).clicked() {
-                        app.run("measure.volta", json!({ "number": 0 }));
-                    }
-                    if smufl_button(ui, "repeat1Bar", t("One-measure repeat")).clicked() {
-                        app.run("measure.repeat-sign", json!({}));
-                    }
-                    for j in scoreart_model::Jump::ALL {
-                        let resp = match j {
-                            scoreart_model::Jump::Segno => smufl_button(ui, "segno", t("Segno")),
-                            scoreart_model::Jump::Coda => smufl_button(ui, "coda", t("Coda")),
-                            scoreart_model::Jump::VariedCoda => {
-                                smufl_button(ui, "codaSquare", t("Varied coda"))
-                            }
-                            _ => ui
-                                .add_sized(
-                                    Vec2::new(84.0, 26.0),
-                                    egui::Button::new(RichText::new(j.text().unwrap_or("")).italics()),
-                                )
-                                .on_hover_text(t(j.id())),
-                        };
-                        if resp.clicked() {
-                            app.run("measure.jump", json!({ "type": j.id() }));
-                        }
-                    }
-                });
-                section(ui, t("Barlines"), false, |ui| {
-                    for (label, id) in [("‖", "double"), ("𝄂", "final"), ("|", "regular")] {
-                        if text_button(ui, label, id).clicked() {
-                            app.run("measure.barline", json!({ "type": id }));
-                        }
-                    }
-                });
-                section(ui, t("Text"), false, |ui| {
-                    let mut dlg = |ui: &mut egui::Ui,
-                                   label: &str,
-                                   title: &'static str,
-                                   command: &'static str,
-                                   key: &'static str,
-                                   value: String| {
-                        if ui
-                            .add_sized(Vec2::new(98.0, 26.0), egui::Button::new(label))
-                            .clicked()
-                        {
-                            app.dialog = Some(Dialog::Text {
-                                title,
-                                command,
-                                key,
-                                value,
-                            });
-                        }
-                    };
-                    dlg(
-                        ui,
-                        t("Staff text…"),
-                        t("Staff text"),
-                        "note.text",
-                        "text",
-                        String::new(),
-                    );
-                    dlg(
-                        ui,
-                        t("Chord symbol…"),
-                        t("Chord symbol (e.g. Cmaj7, F#m7/C#)"),
-                        "note.chord-symbol",
-                        "text",
-                        String::new(),
-                    );
-                    dlg(
-                        ui,
-                        t("Tempo marking…"),
-                        t("Tempo marking (e.g. Allegro)"),
-                        "measure.tempo-text",
-                        "text",
-                        "Allegro".into(),
-                    );
-                    dlg(
-                        ui,
-                        t("System text…"),
-                        t("System text"),
-                        "measure.text",
-                        "text",
-                        String::new(),
-                    );
-                    dlg(
-                        ui,
-                        t("Fingering…"),
-                        t("Fingering"),
-                        "note.fingering",
-                        "text",
-                        String::new(),
-                    );
-                    if ui
-                        .add_sized(Vec2::new(98.0, 26.0), egui::Button::new(t("Rehearsal mark")))
-                        .clicked()
-                    {
-                        app.run("measure.rehearsal", json!({}));
-                    }
-                    for f in ["1", "2", "3", "4", "5"] {
-                        if ui
-                            .add_sized(Vec2::new(26.0, 26.0), egui::Button::new(f))
-                            .on_hover_text(t("Fingering"))
-                            .clicked()
-                        {
-                            app.run("note.fingering", json!({ "text": f }));
-                        }
-                    }
-                });
-                section(ui, t("Tempo"), false, |ui| {
-                    for bpm in [60, 72, 80, 92, 100, 108, 120, 132, 144] {
-                        if text_button(ui, bpm.to_string(), &format!("♩ = {bpm}")).clicked() {
-                            app.run("measure.tempo", json!({ "bpm": bpm }));
-                        }
-                    }
-                });
-            });
+            };
+            dlg(
+                ui,
+                t("Staff text…"),
+                t("Staff text"),
+                "note.text",
+                "text",
+                String::new(),
+            );
+            dlg(
+                ui,
+                t("Chord symbol…"),
+                t("Chord symbol (e.g. Cmaj7, F#m7/C#)"),
+                "note.chord-symbol",
+                "text",
+                String::new(),
+            );
+            dlg(
+                ui,
+                t("Tempo marking…"),
+                t("Tempo marking (e.g. Allegro)"),
+                "measure.tempo-text",
+                "text",
+                "Allegro".into(),
+            );
+            dlg(
+                ui,
+                t("System text…"),
+                t("System text"),
+                "measure.text",
+                "text",
+                String::new(),
+            );
+            dlg(
+                ui,
+                t("Fingering…"),
+                t("Fingering"),
+                "note.fingering",
+                "text",
+                String::new(),
+            );
+            if ui
+                .add_sized(Vec2::new(98.0, 26.0), egui::Button::new(t("Rehearsal mark")))
+                .clicked()
+            {
+                app.run("measure.rehearsal", json!({}));
+            }
+            for f in ["1", "2", "3", "4", "5"] {
+                if ui
+                    .add_sized(Vec2::new(26.0, 26.0), egui::Button::new(f))
+                    .on_hover_text(t("Fingering"))
+                    .clicked()
+                {
+                    app.run("note.fingering", json!({ "text": f }));
+                }
+            }
         });
+        section(ui, t("Tempo"), false, |ui| {
+            for bpm in [60, 72, 80, 92, 100, 108, 120, 132, 144] {
+                if text_button(ui, bpm.to_string(), &format!("♩ = {bpm}")).clicked() {
+                    app.run("measure.tempo", json!({ "bpm": bpm }));
+                }
+            }
+        });
+    });
 }
 
 fn key_label(f: i32) -> String {
@@ -1035,7 +1018,7 @@ pub struct Fields {
     part_name: String,
 }
 
-pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
+pub fn properties_content(app: &mut ScoreApp, ui: &mut egui::Ui) {
     let tk = Tokens::get(ui.ctx());
     // Refresh buffers when the score or selection changed.
     if app.fields.revision != app.session.revision || app.fields.sel != app.session.selection {
@@ -1066,9 +1049,7 @@ pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 .unwrap_or_default(),
         };
     }
-    egui::Panel::right("properties").default_size(240.0).resizable(true).frame(egui::Frame::NONE.fill(tk.panel).inner_margin(10)).show(ui, |ui| {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.label(RichText::new(t("Properties")).size(15.0).strong());
+    egui::ScrollArea::vertical().show(ui, |ui| {
             ui.add_space(6.0);
             egui::CollapsingHeader::new(RichText::new(t("Score")).strong()).default_open(true).show(ui, |ui| {
                 let mut changed = false;
@@ -1201,7 +1182,6 @@ pub fn properties(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 }
             });
         });
-    });
 }
 
 pub fn open_lyric_dialog(app: &mut ScoreApp) {
