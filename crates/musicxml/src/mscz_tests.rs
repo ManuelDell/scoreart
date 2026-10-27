@@ -411,3 +411,80 @@ fn reads_hidden_staves_verses_and_breaks() {
     );
     assert!(back.measures[1].system_break);
 }
+
+/// A 6/8 measure written as two 3/8 halves with a hidden barline, an uncounted pickup with a
+/// line break, a volta labelled "1." for the second pass, and moved rehearsal marks and text.
+const MS_IRREGULAR: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<museScore version="4.60">
+  <Score>
+    <Division>480</Division>
+    <Part id="1"><Staff><StaffType group="pitched"/></Staff><trackName>Voice</trackName>
+      <Instrument id="voice"><longName>Voice</longName></Instrument></Part>
+    <Staff id="1">
+      <Measure>
+        <voice>
+          <TimeSig><sigN>6</sigN><sigD>8</sigD></TimeSig>
+          <RehearsalMark><placement>below</placement><offset x="-9.4" y="5.7"/><text>Vers</text></RehearsalMark>
+          <Chord><dots>1</dots><durationType>quarter</durationType><Note><pitch>67</pitch><tpc>15</tpc></Note></Chord>
+          <Chord><dots>1</dots><durationType>quarter</durationType><Note><pitch>69</pitch><tpc>17</tpc></Note></Chord>
+        </voice>
+      </Measure>
+      <Measure len="3/8">
+        <voice>
+          <Chord><dots>1</dots><durationType>quarter</durationType><Note><pitch>71</pitch><tpc>19</tpc></Note></Chord>
+          <BarLine><visible>0</visible></BarLine>
+        </voice>
+      </Measure>
+      <Measure len="3/8">
+        <voice>
+          <Rest><durationType>quarter</durationType></Rest>
+          <Chord><durationType>eighth</durationType><Note><pitch>67</pitch><tpc>15</tpc></Note></Chord>
+        </voice>
+      </Measure>
+      <Measure len="3/8">
+        <irregular>1</irregular>
+        <LayoutBreak><subtype>line</subtype></LayoutBreak>
+        <voice>
+          <PlayTechAnnotation><offset x="6" y="-4.7"/><text>Instrumente fallen ein</text></PlayTechAnnotation>
+          <Chord><dots>1</dots><durationType>quarter</durationType><Note><pitch>67</pitch><tpc>15</tpc></Note></Chord>
+        </voice>
+      </Measure>
+      <Measure>
+        <voice>
+          <Spanner type="Volta"><Volta><beginText>1.</beginText><endings>2</endings></Volta>
+            <next><location><measures>1</measures></location></next></Spanner>
+          <Rest><durationType>measure</durationType><duration>6/8</duration></Rest>
+        </voice>
+      </Measure>
+    </Staff>
+  </Score>
+</museScore>
+"#;
+
+#[test]
+fn reads_irregular_measures_and_placements() {
+    let s = from_bytes(MS_IRREGULAR.as_bytes()).unwrap();
+    assert_eq!(s.measures.len(), 5);
+    assert_eq!(s.measure_ticks(0), TPQ * 3);
+    assert_eq!(s.measure_ticks(1), TPQ * 3 / 2, "len=\"3/8\"");
+    let half = s.voice(0, 0, 2, 0).unwrap();
+    assert_eq!(half.events.len(), 2, "no padding rests: {:?}", half.events);
+    assert_eq!(s.measures[1].barline, Barline::Hidden);
+    assert!(s.measures[3].uncounted && s.measures[3].system_break);
+    assert_eq!(s.measure_number(4), 4, "the pickup is not counted");
+    assert_eq!(s.measures[4].volta, Some(2));
+    assert_eq!(s.measures[4].volta_text.as_deref(), Some("1."));
+    let p = s.measures[0].rehearsal_place.unwrap();
+    assert!(p.below && p.dx == -94 && p.dy == 57);
+    let t = &s.voice(0, 0, 3, 0).unwrap().events[0];
+    assert_eq!(t.text.as_deref(), Some("Instrumente fallen ein"));
+    assert_eq!(t.text_place.map(|p| (p.dx, p.dy)), Some((60, -47)));
+    // All of it survives MusicXML.
+    let back = from_str(&to_string(&s)).unwrap();
+    assert_eq!(back.measure_ticks(1), TPQ * 3 / 2);
+    assert_eq!(back.measures[1].barline, Barline::Hidden);
+    assert!(back.measures[3].uncounted && back.measures[3].system_break);
+    assert_eq!(back.measures[4].volta_text.as_deref(), Some("1."));
+    assert_eq!(back.measures[0].rehearsal_place, s.measures[0].rehearsal_place);
+    assert_eq!(back.voice(0, 0, 3, 0).unwrap().events[0].text_place, t.text_place);
+}

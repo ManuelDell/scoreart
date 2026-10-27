@@ -281,6 +281,9 @@ pub struct Event {
     /// Staff text / expression ("dolce", "pizz." …).
     #[serde(default)]
     pub text: Option<String>,
+    /// Where the staff text was moved to.
+    #[serde(default)]
+    pub text_place: Option<Placement>,
 }
 
 /// Most lyric verses kept per note.
@@ -332,6 +335,7 @@ impl Event {
             arpeggio: Arpeggio::None,
             chord_symbol: None,
             text: None,
+            text_place: None,
         }
     }
 
@@ -568,6 +572,8 @@ pub enum Barline {
     Double,
     Final,
     RepeatEnd,
+    /// No barline is drawn (e.g. between two halves of one written measure).
+    Hidden,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -604,6 +610,47 @@ pub struct MeasureInfo {
     /// A new page starts after this measure.
     #[serde(default)]
     pub page_break: bool,
+    /// Length in ticks when it differs from the time signature (pickup, split measure).
+    #[serde(default)]
+    pub actual: Option<u32>,
+    /// Left out of the measure numbering (e.g. a pickup).
+    #[serde(default)]
+    pub uncounted: bool,
+    /// The volta's printed label when it is not "n." (e.g. "1." on the ending for pass 2).
+    #[serde(default)]
+    pub volta_text: Option<String>,
+    /// Where the rehearsal mark was moved to (None = default place above the staff).
+    #[serde(default)]
+    pub rehearsal_place: Option<Placement>,
+}
+
+/// A text moved from its default place: offset in tenths of a staff space (y downwards), and
+/// whether it sits below the staff instead of above.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Placement {
+    pub dx: i16,
+    pub dy: i16,
+    pub below: bool,
+}
+
+impl Placement {
+    /// From an offset in staff spaces.
+    pub fn from_sp(dx: f64, dy: f64, below: bool) -> Placement {
+        let t = |v: f64| (v * 10.0).round().clamp(-2000.0, 2000.0) as i16;
+        Placement {
+            dx: t(dx),
+            dy: t(dy),
+            below,
+        }
+    }
+
+    pub fn dx_sp(&self) -> f32 {
+        f32::from(self.dx) / 10.0
+    }
+
+    pub fn dy_sp(&self) -> f32 {
+        f32::from(self.dy) / 10.0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -844,7 +891,22 @@ impl Score {
     }
 
     pub fn measure_ticks(&self, measure: usize) -> u32 {
-        self.time_at(measure).measure_ticks()
+        self.measures
+            .get(measure)
+            .and_then(|i| i.actual)
+            .filter(|t| *t > 0)
+            .map(|t| t.min(TPQ * 64))
+            .unwrap_or_else(|| self.time_at(measure).measure_ticks())
+    }
+
+    /// The number printed for a measure (uncounted measures are skipped).
+    pub fn measure_number(&self, measure: usize) -> usize {
+        1 + self
+            .measures
+            .iter()
+            .take(measure)
+            .filter(|i| !i.uncounted)
+            .count()
     }
 
     /// The clef in effect for `staff` of `part` at the start of `measure`.

@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use scoreart_model::marks::MARKS;
 use scoreart_model::{
     Anchor, Arpeggio, Articulation, Barline, Clef, Duration, Dynamic, Event, Grace, Jump, KeySig,
-    MeasureInfo, Meta, Note, NoteHead, NoteValue, Part, PartMeasure, Pitch, Score, Spanner, SpannerKind,
-    StaffMeasure, Step, TPQ, Tempo, TimeSig, TimeSymbol, Tremolo, Tuplet, Voice, clip, limits,
+    MeasureInfo, Meta, Note, NoteHead, NoteValue, Part, PartMeasure, Pitch, Placement, Score, Spanner,
+    SpannerKind, StaffMeasure, Step, TPQ, Tempo, TimeSig, TimeSymbol, Tremolo, Tuplet, Voice, clip, limits,
 };
 
 use crate::Error;
@@ -204,6 +204,20 @@ fn line_kind(c: &Element) -> Option<SpannerKind> {
     }
 }
 
+/// A text the user moved in MuseScore: `<offset x y>` (staff spaces) and `<placement>`.
+fn placement_of(e: &Element) -> Option<Placement> {
+    let below = e.child_text("placement").is_some_and(|p| p.trim() == "below");
+    let off = e.child("offset");
+    let num = |k: &str| {
+        off.and_then(|o| o.attr(k))
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .filter(|v| v.is_finite())
+            .unwrap_or(0.0)
+    };
+    let (x, y) = (num("x"), num("y"));
+    (below || x != 0.0 || y != 0.0).then(|| Placement::from_sp(x, y, below))
+}
+
 fn jump_of_label(label: &str) -> Option<Jump> {
     Some(match label.trim().to_ascii_lowercase().as_str() {
         "segno" | "varsegno" => Jump::Segno,
@@ -390,6 +404,17 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                     .measures
                     .get_mut(mi)
                     .ok_or(Error::Invalid("measure".into()))?;
+                // A measure whose real length differs from the time signature (len="3/8"), and
+                // one left out of the numbering (<irregular>).
+                if let Some(len) = m_el.attr("len") {
+                    let t = fraction_ticks(len);
+                    if t > 0 {
+                        info.actual = u32::try_from(t).ok();
+                    }
+                }
+                if m_el.child_text("irregular").is_some_and(|v| v.trim() == "1") {
+                    info.uncounted = true;
+                }
                 if m_el.has("startRepeat") {
                     info.repeat_start = true;
                 }
@@ -443,6 +468,7 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                 let mut pending_dyn: Option<Dynamic> = None;
                 let mut pending_marks: Vec<Articulation> = Vec::new();
                 let mut pending_text: Option<String> = None;
+                let mut pending_place: Option<Placement> = None;
                 let mut pending_chord: Option<String> = None;
                 // Pending moves of the voice position by <location>; MuseScore may step back
                 // to anchor a line and forward again, so only the net move counts.
@@ -535,6 +561,7 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                         "RehearsalMark" if top_staff => {
                             if let Some(info) = score.measures.get_mut(mi) {
                                 info.rehearsal = Some(clip(&flat_text(c.child("text").unwrap_or(c))));
+                                info.rehearsal_place = placement_of(c);
                             }
                         }
                         "SystemText" if top_staff => {
@@ -563,6 +590,9 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                                     info.jumps.push(j);
                                 }
                             } else if !txt.is_empty() {
+                                if pending_text.is_none() {
+                                    pending_place = placement_of(c);
+                                }
                                 pending_text = Some(match pending_text.take() {
                                     Some(p) => format!("{p} {txt}"),
                                     None => txt,
@@ -630,12 +660,17 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                                             .clamp(1, 9);
                                         let span =
                                             next.child_num("measures").unwrap_or(1.0).max(1.0) as usize;
+                                        let label = c
+                                            .path(&["Volta", "beginText"])
+                                            .map(flat_text)
+                                            .filter(|t| !t.is_empty() && *t != format!("{n}."));
                                         for m in mi..(mi + span).min(mi + 64) {
                                             if score.measures.len() <= m {
                                                 score.measures.push(MeasureInfo::default());
                                             }
                                             if let Some(info) = score.measures.get_mut(m) {
                                                 info.volta = Some(n);
+                                                info.volta_text = label.clone().map(|t| clip(&t));
                                             }
                                         }
                                     }
@@ -912,6 +947,7 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                             }
                             e.dynamic = pending_dyn.take().or(e.dynamic);
                             e.text = pending_text.take();
+                            e.text_place = pending_place.take();
                             e.chord_symbol = pending_chord.take();
                             push_event(&mut voice, &mut t, e);
                         }
@@ -922,6 +958,9 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                                     "double" => info.barline = Barline::Double,
                                     "end" | "final" => info.barline = Barline::Final,
                                     "end-repeat" => info.barline = Barline::RepeatEnd,
+                                    _ if c.child_text("visible").is_some_and(|v| v.trim() == "0") => {
+                                        info.barline = Barline::Hidden
+                                    }
                                     _ => {}
                                 }
                             }

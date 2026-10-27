@@ -124,8 +124,9 @@ fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Styl
         let mut onsets: BTreeSet<u32> = BTreeSet::new();
         let mut lead: HashMap<u32, f32> = HashMap::new();
         let mut extra: HashMap<u32, f32> = HashMap::new();
-        // Width the lyrics need from each onset to the next (they share the note's own space).
-        let mut lyric_need: HashMap<u32, f32> = HashMap::new();
+        // Lyrics: between two syllables of one verse there must be room for half of each (they
+        // are centred on their notes) and a gap or hyphen: (from, to, width) constraints.
+        let mut lyric_need: Vec<(u32, u32, f32)> = Vec::new();
         for (pi, part) in score.parts.iter().enumerate() {
             let Some(pm) = part.measures.get(m) else { continue };
             for (si, sm) in pm.staves.iter().enumerate() {
@@ -134,6 +135,41 @@ fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Styl
                     continue;
                 }
                 for (vi, v) in sm.voices.iter().enumerate() {
+                    // Per verse: the previous syllable (onset, half width, hyphen after it).
+                    let mut prev_syl: Vec<Option<(u32, f32, bool)>> = Vec::new();
+                    for (e, on) in v.events.iter().zip(v.onsets()) {
+                        for (verse, l) in e.lyrics.iter().enumerate().filter(|(_, l)| !l.is_empty()) {
+                            if prev_syl.len() <= verse {
+                                prev_syl.resize(verse + 1, None);
+                            }
+                            let half = syllable_width(l) / 2.0;
+                            if let Some(Some((pon, phalf, hyphen))) = prev_syl.get(verse).copied() {
+                                let gap = if hyphen { 1.1 } else { 0.5 };
+                                lyric_need.push((pon, on, phalf + half + gap));
+                            }
+                            if let Some(slot) = prev_syl.get_mut(verse) {
+                                *slot = Some((on, half, l.ends_with('-')));
+                            }
+                        }
+                    }
+                    // Chord symbols (left-aligned on their note) must not run into the next one.
+                    let mut prev_chord: Option<(u32, f32)> = None;
+                    for (e, on) in v.events.iter().zip(v.onsets()) {
+                        if let Some(cs) = &e.chord_symbol {
+                            let w = text_width(&chord_text(cs), 2.2) * 0.85;
+                            if let Some((pon, pw)) = prev_chord {
+                                lyric_need.push((pon, on, pw + 0.8));
+                            }
+                            prev_chord = Some((on, w));
+                        }
+                    }
+                    if let Some((pon, pw)) = prev_chord {
+                        lyric_need.push((pon, len, pw - 0.5));
+                    }
+                    // The last syllable needs half its width (and its hyphen) before the barline.
+                    for (pon, phalf, hyphen) in prev_syl.into_iter().flatten() {
+                        lyric_need.push((pon, len, phalf + if hyphen { 1.1 } else { 0.3 }));
+                    }
                     for (ei, (e, on)) in v.events.iter().zip(v.onsets()).enumerate() {
                         onsets.insert(on);
                         let n_acc = (0..e.notes().len())
@@ -160,15 +196,17 @@ fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Styl
                             x += 1.0;
                         }
                         x += trail_extra(e);
-                        // Room for the widest syllable of any verse (and a hyphen after it).
-                        let lw = e
-                            .lyrics
-                            .iter()
-                            .map(|l| syllable_width(l) + if l.ends_with('-') { 1.2 } else { 0.0 })
-                            .fold(0.0f32, f32::max);
-                        if lw > 0.0 {
-                            let need = lyric_need.entry(on).or_insert(0.0);
-                            *need = need.max(lw + 0.7);
+                        // The first syllable of a measure hangs left into the space before it.
+                        if on == 0 {
+                            let half = e
+                                .lyrics
+                                .iter()
+                                .map(|l| syllable_width(l) / 2.0)
+                                .fold(0.0f32, f32::max);
+                            if half > 1.2 {
+                                let l = lead.entry(on).or_insert(0.0);
+                                *l = l.max(half - 1.2);
+                            }
                         }
                         let ex = extra.entry(on).or_insert(0.0);
                         *ex = ex.max(x);
@@ -181,9 +219,18 @@ fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Styl
         let mut cols = Vec::with_capacity(ticks.len());
         for (i, &t) in ticks.iter().enumerate() {
             let next = ticks.get(i + 1).copied().unwrap_or(len.max(t + 1));
-            let notes = space_for(next - t, style.spacing) + extra.get(&t).copied().unwrap_or(0.0);
-            let sp = notes.max(lyric_need.get(&t).copied().unwrap_or(0.0));
+            let sp = space_for(next - t, style.spacing) + extra.get(&t).copied().unwrap_or(0.0);
             cols.push((t, lead.get(&t).copied().unwrap_or(0.0), sp));
+        }
+        // Widen the columns between two syllables when they are too close.
+        for (from, to, need) in lyric_need {
+            let have: f32 = cols.iter().filter(|c| c.0 >= from && c.0 < to).map(|c| c.2).sum();
+            if have > 0.0 && have < need {
+                let k = need / have;
+                for c in cols.iter_mut().filter(|c| c.0 >= from && c.0 < to) {
+                    c.2 *= k;
+                }
+            }
         }
         // Changes drawn at the measure start when it is not the first of a system.
         let info = score.measures.get(m);
@@ -329,7 +376,14 @@ fn break_systems(score: &Score, plans: &[MeasurePlan], width: f32) -> Vec<System
         while m < plans.len() {
             let Some(p) = plans.get(m) else { break };
             let w = p.fixed() + p.stretch() + if ms.is_empty() { 0.0 } else { p.prefix };
-            if !ms.is_empty() && used + w > avail {
+            // The second half of a measure written as two (hidden barline) always follows.
+            let joined = m > 0
+                && !ms.is_empty()
+                && score
+                    .measures
+                    .get(m - 1)
+                    .is_some_and(|i| i.barline == Barline::Hidden);
+            if !ms.is_empty() && used + w > avail && !joined {
                 break;
             }
             used += w;
@@ -644,12 +698,18 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
         // Vertical plan: top of every staff relative to the system top.
         let mut tops: Vec<(usize, usize, f32)> = Vec::new();
         let mut sy = 0.0f32;
+        let first_in_sys = sys.measures.first().copied();
         let has_above = sys.measures.iter().any(|m| {
             score.measures.get(*m).is_some_and(|i| {
+                // A rehearsal mark starting the system sits beside the clef; one moved below
+                // the staff needs no row above it.
+                let rehearsal_row = i.rehearsal.is_some()
+                    && Some(*m) != first_in_sys
+                    && !i.rehearsal_place.is_some_and(|p| p.below);
                 i.tempo.is_some()
                     || i.text.is_some()
                     || i.tempo_text.is_some()
-                    || i.rehearsal.is_some()
+                    || rehearsal_row
                     || !i.jumps.is_empty()
             })
         });
@@ -848,7 +908,7 @@ fn draw_system(
     // Measure number at the start of every system but the first.
     if first_m > 0 {
         o.text(
-            &(first_m + 1).to_string(),
+            &score.measure_number(first_m).to_string(),
             x_start,
             sys_top - 2.0,
             1.4,
@@ -940,9 +1000,22 @@ fn draw_system(
             let ty = top + t0 - (row_reach + 1.4).max(2.6);
             let mut tx = cols.first().map(|c| c.1).unwrap_or(mx);
             if let Some(r) = &info.rehearsal {
-                // Boxed rehearsal mark above the barline.
+                // Boxed rehearsal mark: above the barline; at the start of a system above the
+                // clef; below the staff when moved there; plus the user's offset.
                 let w = text_width(r, 2.2) + 1.0;
-                let (bx0, by1) = (m_start - 0.4, ty - 2.6);
+                let staff_top = top + t0;
+                let place = info.rehearsal_place.unwrap_or_default();
+                let (mut bx0, mut by1) = if place.below {
+                    let bottom = tops.last().map_or(staff_top + 4.0, |t| top + t.2 + 4.0);
+                    (m_start - 0.4, bottom + 2.0 + 2.6)
+                } else if k == 0 {
+                    // Clear of the measure number.
+                    (x_start, staff_top - 3.6)
+                } else {
+                    (m_start - 0.4, ty - 2.6)
+                };
+                bx0 += place.dx_sp();
+                by1 += place.dy_sp();
                 o.text(r, bx0 + w / 2.0, by1 - 0.6, 2.2, Align::Center, true, false);
                 for (a, b, c, d2) in [
                     (bx0, by1, bx0 + w, by1),
@@ -952,7 +1025,9 @@ fn draw_system(
                 ] {
                     o.line(a, b, c, d2, 0.16, None);
                 }
-                tx = tx.max(bx0 + w + 0.8);
+                if k > 0 && info.rehearsal_place.is_none() {
+                    tx = tx.max(bx0 + w + 0.8);
+                }
             }
             for j in info.jumps.iter().filter(|j| !j.at_end()) {
                 let name = match j {
@@ -1103,15 +1178,12 @@ fn draw_system(
             o.line(xa, vy, xb, vy, 0.16, None);
             if starts_here {
                 o.line(xa, vy, xa, vy + 2.0, 0.16, None);
-                o.text(
-                    &format!("{n}."),
-                    xa + 0.5,
-                    vy + 1.7,
-                    1.7,
-                    Align::Left,
-                    true,
-                    false,
-                );
+                let label = score
+                    .measures
+                    .get(m)
+                    .and_then(|i| i.volta_text.clone())
+                    .unwrap_or_else(|| format!("{n}."));
+                o.text(&label, xa + 0.5, vy + 1.7, 1.7, Align::Left, true, false);
             }
             if closed {
                 o.line(xb, vy, xb, vy + 2.0, 0.16, None);
@@ -1154,6 +1226,7 @@ fn draw_brace(o: &mut Out, x: f32, top: f32, bottom: f32) {
 fn draw_barline(o: &mut Out, x: f32, top: f32, bottom: f32, kind: Barline, staff_tops: &[f32]) {
     let h = bottom - top;
     match kind {
+        Barline::Hidden => {}
         Barline::Regular => o.line(
             x - g::THIN_BAR / 2.0,
             top,
@@ -1970,6 +2043,15 @@ fn out_staff_box(
         // Dynamics and lyrics under the staff (whole voice, also on rests).
         // Per verse: where the last hyphenated syllable ended (x, y).
         let mut hyphen_from: Vec<Option<(f32, f32)>> = Vec::new();
+        // One line for this voice's chord symbols in the measure, clear of the highest note.
+        let chord_row_used = v.events.iter().any(|e| e.chord_symbol.is_some());
+        let chord_row = geos
+            .iter()
+            .filter_map(|gg| anchors.get(&gg.ev).map(|a| a.top.min(a.stem_end)))
+            .fold(d.top, f32::min)
+            .min(d.top)
+            - 1.6;
+        let chord_row = chord_row.min(d.top - 3.0);
         for (gg, e) in geos.iter().zip(v.events.iter()) {
             if let Some(dy) = e.dynamic {
                 let mut x = gg.x - 0.2;
@@ -1986,12 +2068,8 @@ fn out_staff_box(
                 }
             }
             if let Some(cs) = &e.chord_symbol {
-                let reach = anchors
-                    .get(&gg.ev)
-                    .map(|a| a.top.min(a.stem_end))
-                    .unwrap_or(d.top)
-                    - 1.6;
-                let y = reach.min(d.top - 3.0) - if e.text.is_some() { 2.2 } else { 0.0 };
+                // All chord symbols of the measure sit on one line.
+                let y = chord_row;
                 o.push(
                     Shape::Text {
                         text: chord_text(cs),
@@ -2011,11 +2089,24 @@ fn out_staff_box(
                     .map(|a| a.top.min(a.stem_end))
                     .unwrap_or(d.top)
                     - 1.4;
-                let y = reach.min(d.top - 2.2);
+                // Above the chord symbols when the measure has any.
+                let y = match chord_row_used {
+                    true => chord_row - 2.6,
+                    false => reach.min(d.top - 2.2),
+                };
+                // Moved by the user: below the staff and/or by an offset.
+                // A moved text is measured from MuseScore's base: just above (or below) the staff.
+                let place = e.text_place.unwrap_or_default();
+                let y = match e.text_place {
+                    Some(p) if p.below => d.top + 4.0 + 3.0,
+                    Some(_) => d.top - 1.5,
+                    None => y,
+                } + place.dy_sp();
+                let text_x = gg.x + place.dx_sp();
                 o.push(
                     Shape::Text {
                         text: t.clone(),
-                        x: gg.x,
+                        x: text_x,
                         y,
                         size: 1.9,
                         align: Align::Left,

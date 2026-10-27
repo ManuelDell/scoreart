@@ -7,11 +7,25 @@ use scoreart_model::marks::{MARKS, XmlGroup};
 use scoreart_model::{
     Anchor, Arpeggio, Articulation, Barline, Clef, Duration, Dynamic, Event, EventKind, Grace,
     InstrumentChange, Jump, KeySig, MeasureInfo, Meta, Note, NoteHead, NoteValue, Part, PartMeasure,
-    PartSound, Pitch, Score, Spanner, SpannerKind, StaffMeasure, Step, TPQ, Tempo, TimeSig, TimeSymbol,
-    Tremolo, Tuplet, Voice, clip, limits,
+    PartSound, Pitch, Placement, Score, Spanner, SpannerKind, StaffMeasure, Step, TPQ, Tempo, TimeSig,
+    TimeSymbol, Tremolo, Tuplet, Voice, clip, limits,
 };
 
 use crate::Error;
+
+/// Placement of a moved text: the direction's `placement` and the element's
+/// `relative-x`/`relative-y` (tenths, y up).
+fn placement_attrs(direction: &Element, el: &Element) -> Option<Placement> {
+    let below = direction.attr("placement") == Some("below");
+    let num = |k: &str| {
+        el.attr(k)
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .filter(|v| v.is_finite())
+            .unwrap_or(0.0)
+    };
+    let (x, y) = (num("relative-x"), num("relative-y"));
+    (below || x != 0.0 || y != 0.0).then(|| Placement::from_sp(x / 10.0, -y / 10.0, below))
+}
 use crate::dom::Element;
 
 /// A line that starts or stops on a note.
@@ -290,6 +304,7 @@ fn read_part(
     let mut open_note: HashMap<(usize, usize, Family, String), (SpannerKind, Anchor)> = HashMap::new();
     let mut open_dir: HashMap<(usize, String), (SpannerKind, usize, Anchor)> = HashMap::new();
     let mut open_ending: Option<(u8, usize)> = None;
+    let mut ending_label: Option<String> = None;
     let mut repeat_staves: Vec<bool> = vec![false; limits::MAX_STAVES];
 
     for (mi, m_el) in part_el.children_named("measure").enumerate() {
@@ -304,6 +319,8 @@ fn read_part(
         let mut pending_dyn: Vec<(usize, u64, Dynamic)> = Vec::new();
         let mut pending_text: Vec<(usize, u64, String, bool)> = Vec::new(); // (staff, t, text, is_chord_symbol)
         let mut instrument_change: Option<InstrumentChange> = None;
+        // Moved staff texts: (staff, time, placement).
+        let mut pending_place: Vec<(usize, u64, Placement)> = Vec::new();
         let mut dir_marks: Vec<(usize, u64, DirMark)> = Vec::new();
         let mut graces: HashMap<(usize, u32), Vec<Grace>> = HashMap::new();
         let mut t: u64 = 0;
@@ -675,6 +692,7 @@ fn read_part(
                     let has_tempo = c.path(&["direction-type", "metronome"]).is_some()
                         || c.child("sound").is_some_and(|s| s.attr("tempo").is_some());
                     let mut words_here: Option<String> = None;
+                    let mut words_place: Option<Placement> = None;
                     for dt in c.children_named("direction-type") {
                         for k in &dt.children {
                             match k.name.as_str() {
@@ -692,6 +710,9 @@ fn read_part(
                                 }
                                 "words" => {
                                     let w = k.text.trim();
+                                    if words_here.is_none() {
+                                        words_place = placement_attrs(c, k);
+                                    }
                                     if !w.is_empty() {
                                         words_here = Some(match words_here.take() {
                                             Some(prev) => format!("{prev} {w}"),
@@ -702,6 +723,7 @@ fn read_part(
                                 "rehearsal" => {
                                     if first_part && let Some(info) = score.measures.get_mut(mi) {
                                         info.rehearsal = Some(clip(k.text.trim()));
+                                        info.rehearsal_place = placement_attrs(c, k);
                                     }
                                 }
                                 "segno" => {
@@ -880,6 +902,9 @@ fn read_part(
                                 info.text = Some(clip(&w));
                             }
                         } else {
+                            if let Some(p) = words_place {
+                                pending_place.push((staff, t, p));
+                            }
                             pending_text.push((staff, t, w, false));
                         }
                     }
@@ -911,6 +936,7 @@ fn read_part(
                         match c.child_text("bar-style") {
                             Some("light-heavy") => info.barline = Barline::Final,
                             Some("light-light") => info.barline = Barline::Double,
+                            Some("none") => info.barline = Barline::Hidden,
                             _ => {}
                         }
                     }
@@ -922,14 +948,21 @@ fn read_part(
                             .unwrap_or(1)
                             .clamp(1, 9);
                         match e.attr("type") {
-                            Some("start") => open_ending = Some((num, mi)),
+                            Some("start") => {
+                                open_ending = Some((num, mi));
+                                let label = e.text.trim();
+                                ending_label =
+                                    (!label.is_empty() && label != format!("{num}.")).then(|| clip(label));
+                            }
                             Some("stop") | Some("discontinue") => {
                                 let (n, from) = open_ending.take().unwrap_or((num, mi));
                                 for m in from..=mi {
                                     if let Some(x) = score.measures.get_mut(m) {
                                         x.volta = Some(n);
+                                        x.volta_text = ending_label.clone();
                                     }
                                 }
+                                ending_label = None;
                             }
                             _ => {}
                         }
@@ -962,6 +995,13 @@ fn read_part(
                 r.event.dynamic.get_or_insert(dy);
             }
         }
+        for (staff, at, p) in pending_place {
+            if let Some(i) = target(&mut raws, staff, at)
+                && let Some(r) = raws.get_mut(i)
+            {
+                r.event.text_place = Some(p);
+            }
+        }
         for (staff, at, text, chord) in pending_text {
             if let Some(i) = target(&mut raws, staff, at)
                 && let Some(r) = raws.get_mut(i)
@@ -977,6 +1017,20 @@ fn read_part(
             }
         }
 
+        // A measure shorter than its time signature (pickup, split measure) keeps its length;
+        // implicit="yes" leaves it out of the numbering.
+        if first_part {
+            let content = raws.iter().map(|r| r.onset + r.ticks).max().unwrap_or(0);
+            let full = u64::from(score.time_at(mi).measure_ticks());
+            if let Some(info) = score.measures.get_mut(mi) {
+                if content > 0 && content < full {
+                    info.actual = u32::try_from(content).ok();
+                }
+                if m_el.attr("implicit") == Some("yes") {
+                    info.uncounted = true;
+                }
+            }
+        }
         // Group into staves and voices; voice numbers map to indices in ascending order per staff.
         let mut pm = PartMeasure {
             instrument_change: instrument_change.take(),

@@ -5,8 +5,8 @@ use std::fmt::Write as _;
 
 use scoreart_model::marks::XmlGroup;
 use scoreart_model::{
-    Accidental, Arpeggio, Barline, Clef, Event, EventKind, Jump, MeasureInfo, Pitch, Score, Spanner,
-    SpannerKind, TPQ, TimeSymbol, Tremolo,
+    Accidental, Arpeggio, Barline, Clef, Event, EventKind, Jump, MeasureInfo, Pitch, Placement, Score,
+    Spanner, SpannerKind, TPQ, TimeSymbol, Tremolo,
 };
 
 use crate::dom::esc;
@@ -370,7 +370,12 @@ pub fn write(score: &Score) -> String {
             let prev_info = mi.checked_sub(1).and_then(|i| score.measures.get(i));
             let next_info = score.measures.get(mi + 1);
             let len = score.measure_ticks(mi);
-            let _ = writeln!(x, "    <measure number=\"{}\">", mi + 1);
+            let _ = writeln!(
+                x,
+                "    <measure number=\"{}\"{}>",
+                mi + 1,
+                if info.uncounted { " implicit=\"yes\"" } else { "" }
+            );
             // A line or page break after the previous measure.
             if let Some(p) = prev_info
                 && (p.system_break || p.page_break)
@@ -389,7 +394,12 @@ pub fn write(score: &Score) -> String {
                     x.push_str("<bar-style>heavy-light</bar-style>");
                 }
                 if let Some(v) = volta_start {
-                    let _ = write!(x, "<ending number=\"{v}\" type=\"start\">{v}.</ending>");
+                    let label = info.volta_text.clone().unwrap_or_else(|| format!("{v}."));
+                    let _ = write!(
+                        x,
+                        "<ending number=\"{v}\" type=\"start\">{}</ending>",
+                        esc(&label)
+                    );
                 }
                 if info.repeat_start {
                     x.push_str("<repeat direction=\"forward\"/>");
@@ -536,6 +546,7 @@ pub fn write(score: &Score) -> String {
                 Barline::Regular => None,
                 Barline::Double => Some("light-light"),
                 Barline::Final | Barline::RepeatEnd => Some("light-heavy"),
+                Barline::Hidden => Some("none"),
             };
             if style.is_some() || volta_end.is_some() {
                 x.push_str("      <barline location=\"right\">");
@@ -564,12 +575,24 @@ pub fn write(score: &Score) -> String {
     x
 }
 
+/// `relative-x`/`relative-y` (tenths, y up) and the placement of a moved text.
+fn place_attrs(p: Option<Placement>) -> (&'static str, String) {
+    match p {
+        Some(p) => (
+            if p.below { "below" } else { "above" },
+            format!(" relative-x=\"{}\" relative-y=\"{}\"", p.dx, -p.dy),
+        ),
+        None => ("above", String::new()),
+    }
+}
+
 fn write_measure_directions(x: &mut String, info: &MeasureInfo, effective_tempo: u16) {
     if let Some(r) = &info.rehearsal {
+        let (placement, rel) = place_attrs(info.rehearsal_place);
         direction(
             x,
-            "above",
-            &format!("<rehearsal enclosure=\"square\">{}</rehearsal>", esc(r)),
+            placement,
+            &format!("<rehearsal enclosure=\"square\"{rel}>{}</rehearsal>", esc(r)),
             None,
             "",
         );
@@ -660,10 +683,11 @@ fn write_event(
         direction(x, "below", &body, staff, "");
     }
     if let Some(t) = &e.text {
+        let (placement, rel) = place_attrs(e.text_place);
         direction(
             x,
-            "above",
-            &format!("<words font-style=\"italic\">{}</words>", esc(t)),
+            placement,
+            &format!("<words font-style=\"italic\"{rel}>{}</words>", esc(t)),
             staff,
             "",
         );
