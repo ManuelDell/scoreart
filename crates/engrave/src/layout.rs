@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use scoreart_model::edit::EventRef;
 use scoreart_model::{
-    Accidental, Articulation, Barline, Clef, Event, KeySig, NoteValue, Pitch, Score, TPQ, TimeSig, TimeSymbol,
+    Accidental, Barline, Clef, Event, KeySig, NoteValue, Pitch, Score, SpannerKind, TPQ, TimeSig, TimeSymbol,
 };
 
 use crate::glyphs as g;
@@ -126,8 +126,13 @@ fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Styl
                         let n_acc = (0..e.notes().len())
                             .filter(|ni| acc.contains_key(&(pi, si, m, vi, ei, *ni)))
                             .count();
-                        if n_acc > 0 {
-                            let w = 1.25 * (n_acc.min(3) as f32) + 0.2;
+                        let mut w = if n_acc > 0 {
+                            1.25 * (n_acc.min(3) as f32) + 0.2
+                        } else {
+                            0.0
+                        };
+                        w += lead_extra(e);
+                        if w > 0.0 {
                             let l = lead.entry(on).or_insert(0.0);
                             *l = l.max(w);
                         }
@@ -141,6 +146,7 @@ fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Styl
                         if has_second(e) {
                             x += 1.0;
                         }
+                        x += trail_extra(e);
                         if e.lyric.as_ref().is_some_and(|l| !l.is_empty()) {
                             let lw = e
                                 .lyric
@@ -186,6 +192,49 @@ fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Styl
         plans.push(MeasurePlan { cols, len, prefix });
     }
     plans
+}
+
+/// Room needed left of the noteheads: grace notes, arpeggio, slides in, parentheses.
+fn lead_extra(e: &Event) -> f32 {
+    let mut w = 0.0;
+    let graces: usize = e.grace.iter().map(|_| 1).sum();
+    if graces > 0 {
+        w += graces as f32 * 1.15 + 0.5;
+    }
+    if e.arpeggio != scoreart_model::Arpeggio::None {
+        w += 1.3;
+    }
+    if e.articulations
+        .iter()
+        .any(|a| a.def().place == scoreart_model::marks::Place::Before)
+    {
+        w += 1.6;
+    }
+    if e.notes().iter().any(|n| n.paren) {
+        w += 0.5;
+    }
+    w
+}
+
+/// Room needed right of the noteheads: slides out, breath marks, parentheses.
+fn trail_extra(e: &Event) -> f32 {
+    let mut w = 0.0;
+    if e.articulations
+        .iter()
+        .any(|a| a.def().place == scoreart_model::marks::Place::After)
+    {
+        w += 1.6;
+    }
+    if e.articulations
+        .iter()
+        .any(|a| a.def().place == scoreart_model::marks::Place::Breath)
+    {
+        w += 1.2;
+    }
+    if e.notes().iter().any(|n| n.paren) {
+        w += 0.5;
+    }
+    w
 }
 
 fn has_second(e: &Event) -> bool {
@@ -459,6 +508,7 @@ fn draw_time(o: &mut Out, x: f32, top: f32, t: TimeSig) -> f32 {
 #[derive(Clone, Debug)]
 struct EvGeo {
     ev: EventRef,
+    onset: u32,
     x: f32,
     value: NoteValue,
     rest: bool,
@@ -485,6 +535,7 @@ struct Ctx<'a> {
     acc: &'a HashMap<NoteKey, Accidental>,
     /// Tie anchors per (event, pitch).
     heads: HashMap<(EventRef, Pitch), TieEnd>,
+    events: HashMap<EventRef, EvAnchor>,
     system_ends: Vec<(usize, f32, f32)>,
 }
 
@@ -501,6 +552,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
         score,
         acc: &acc,
         heads: HashMap::new(),
+        events: HashMap::new(),
         system_ends: Vec::new(),
     };
     let mut page = Page {
@@ -544,12 +596,22 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
         let mut tops: Vec<(usize, usize, f32)> = Vec::new();
         let mut sy = 0.0f32;
         let has_above = sys.measures.iter().any(|m| {
-            score
-                .measures
-                .get(*m)
-                .is_some_and(|i| i.tempo.is_some() || i.text.is_some())
+            score.measures.get(*m).is_some_and(|i| {
+                i.tempo.is_some()
+                    || i.text.is_some()
+                    || i.tempo_text.is_some()
+                    || i.rehearsal.is_some()
+                    || !i.jumps.is_empty()
+            })
         });
         if has_above {
+            sy += 6.0;
+        }
+        if sys
+            .measures
+            .iter()
+            .any(|m| score.measures.get(*m).is_some_and(|i| i.volta.is_some()))
+        {
             sy += 2.5;
         }
         for (pi, part) in score.parts.iter().enumerate() {
@@ -613,6 +675,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
     }
     // Ties need both ends placed.
     draw_ties(&ctx, &mut out, &mut page, page_index);
+    draw_spanners(&ctx, &mut out, &mut page, page_index);
     out.pages.push(page);
     out
 }
@@ -737,6 +800,12 @@ fn draw_system(
     }
 
     let mut mx = content_x;
+    let mut boxes: Vec<(usize, f32, f32)> = Vec::new();
+    // How far the top staff's content reaches up: the text row (tempo, rehearsal, jumps) sits above it.
+    let row_reach = tops
+        .first()
+        .map(|t| staff_reach(score, t.0, t.1, &sys.measures).0)
+        .unwrap_or(0.0);
     for (k, &m) in sys.measures.iter().enumerate() {
         let Some(plan) = plans.get(m) else { continue };
         let info = score.measures.get(m).cloned().unwrap_or_default();
@@ -809,8 +878,51 @@ fn draw_system(
 
         // Tempo and measure text above the top staff.
         if let Some(&(_, _, t0)) = tops.first() {
-            let ty = top + t0 - 2.6;
+            let ty = top + t0 - (row_reach + 1.4).max(2.6);
             let mut tx = cols.first().map(|c| c.1).unwrap_or(mx);
+            if let Some(r) = &info.rehearsal {
+                // Boxed rehearsal mark above the barline.
+                let w = text_width(r, 2.2) + 1.0;
+                let (bx0, by1) = (m_start - 0.4, ty - 2.6);
+                o.text(r, bx0 + w / 2.0, by1 - 0.6, 2.2, Align::Center, true, false);
+                for (a, b, c, d2) in [
+                    (bx0, by1, bx0 + w, by1),
+                    (bx0, by1 - 2.6, bx0 + w, by1 - 2.6),
+                    (bx0, by1, bx0, by1 - 2.6),
+                    (bx0 + w, by1, bx0 + w, by1 - 2.6),
+                ] {
+                    o.line(a, b, c, d2, 0.16, None);
+                }
+                tx = tx.max(bx0 + w + 0.8);
+            }
+            for j in info.jumps.iter().filter(|j| !j.at_end()) {
+                let name = match j {
+                    scoreart_model::Jump::Segno => "segno",
+                    scoreart_model::Jump::Coda => "coda",
+                    _ => "codaSquare",
+                };
+                if let Some((c, w, lo, _)) = crate::smufl::get(name) {
+                    o.glyph(c, tx, ty + lo, None);
+                    tx += w + 0.8;
+                }
+            }
+            if let Some(tt) = &info.tempo_text {
+                o.text(tt, tx, ty, 2.0, Align::Left, true, false);
+                tx += text_width(tt, 2.0) + 0.8;
+            }
+            let mut end_x = m_end - 0.3;
+            for j in info.jumps.iter().filter(|j| j.at_end()) {
+                if let Some(t) = j.text() {
+                    if *j == scoreart_model::Jump::ToCoda
+                        && let Some((c, w, lo, _)) = crate::smufl::get("coda")
+                    {
+                        o.glyph(c, end_x - w, ty + lo, None);
+                        end_x -= w + 0.5;
+                    }
+                    o.text(t, end_x, ty, 1.9, Align::Right, true, true);
+                    end_x -= text_width(t, 1.9) + 1.0;
+                }
+            }
             if let Some(tempo) = info.tempo {
                 o.push(
                     Shape::Glyph {
@@ -843,6 +955,7 @@ fn draw_system(
             out_staff_box(
                 &mut o,
                 &mut ctx.heads,
+                &mut ctx.events,
                 ctx.score,
                 ctx.acc,
                 StaffDraw {
@@ -883,8 +996,51 @@ fn draw_system(
             };
             draw_barline(&mut o, bx, pt, pb, info.barline, &staff_tops);
         }
+        boxes.push((m, m_start, m_end));
         mx = bx;
         let _ = sys_h;
+    }
+    // Volta brackets over the top staff.
+    if let Some(&(_, _, t0)) = tops.first() {
+        let vy = top + t0 - (row_reach + 1.4).max(2.6) - 3.6;
+        let mut k = 0;
+        while k < boxes.len() {
+            let Some(&(m, x0, _)) = boxes.get(k) else { break };
+            let Some(n) = score.measures.get(m).and_then(|i| i.volta) else {
+                k += 1;
+                continue;
+            };
+            let mut j = k;
+            while boxes
+                .get(j + 1)
+                .is_some_and(|b| score.measures.get(b.0).and_then(|i| i.volta) == Some(n))
+            {
+                j += 1;
+            }
+            let Some(&(lm, _, x1)) = boxes.get(j) else { break };
+            let last = score.measures.get(lm);
+            let continues = score.measures.get(lm + 1).and_then(|i| i.volta) == Some(n);
+            let closed = !continues && (n == 1 || last.is_some_and(|i| i.barline == Barline::RepeatEnd));
+            let (xa, xb) = (x0 + 0.3, x1 - 0.4);
+            let starts_here = m == 0 || score.measures.get(m - 1).and_then(|i| i.volta) != Some(n);
+            o.line(xa, vy, xb, vy, 0.16, None);
+            if starts_here {
+                o.line(xa, vy, xa, vy + 2.0, 0.16, None);
+                o.text(
+                    &format!("{n}."),
+                    xa + 0.5,
+                    vy + 1.7,
+                    1.7,
+                    Align::Left,
+                    true,
+                    false,
+                );
+            }
+            if closed {
+                o.line(xb, vy, xb, vy + 2.0, 0.16, None);
+            }
+            k = j + 1;
+        }
     }
 }
 
@@ -987,6 +1143,7 @@ fn col_x(cols: &[(u32, f32)], tick: u32) -> f32 {
 fn out_staff_box(
     o: &mut Out,
     heads: &mut HashMap<(EventRef, Pitch), TieEnd>,
+    anchors: &mut HashMap<EventRef, EvAnchor>,
     score: &Score,
     acc: &HashMap<NoteKey, Accidental>,
     d: StaffDraw,
@@ -1005,6 +1162,14 @@ fn out_staff_box(
             measure: d.measure,
         },
     );
+    if sm.measure_repeat {
+        if let Some((c, w, _, _)) = crate::smufl::get("repeat1Bar") {
+            let first = d.cols.first().map(|c| c.1).unwrap_or(d.x0);
+            let last = d.cols.last().map(|c| c.1).unwrap_or(d.x1);
+            o.glyph(c, (first - PAD_LEFT + last) / 2.0 - w / 2.0, d.top + 2.0, None);
+        }
+        return;
+    }
     let multi = sm.voices.len() > 1;
     for (vi, v) in sm.voices.iter().enumerate() {
         let onsets = v.onsets();
@@ -1036,6 +1201,20 @@ fn out_staff_box(
             };
             o.glyph(c, x, y, Some(ev));
             o.hit(x - 0.2, y - 0.3, x + w + 0.2, y + 0.8, Target::Rest { ev });
+            anchors.insert(
+                ev,
+                EvAnchor {
+                    page: o.page_index,
+                    system: d.system,
+                    x_left: first,
+                    x_right: last - 1.0,
+                    top: y - 1.0,
+                    bottom: y + 1.0,
+                    up: true,
+                    stem_end: y - 1.0,
+                    staff_top: d.top,
+                },
+            );
             continue;
         }
         // Pass 1: positions, stem directions, beam groups.
@@ -1054,7 +1233,15 @@ fn out_staff_box(
             let heads_v: Vec<(Pitch, f32, f32)> = e
                 .notes()
                 .iter()
-                .map(|n| (n.pitch, d.top + note_y(d.clef, n.pitch), x))
+                .map(|n| {
+                    (
+                        n.pitch,
+                        d.top
+                            + note_y(d.clef, n.pitch)
+                            + f32::from(score.ottava_at(d.part, d.staff, d.measure, on)) * 3.5,
+                        x,
+                    )
+                })
                 .collect();
             let beamable = !e.is_rest() && e.duration.value.beams() > 0;
             let gi = on / group_ticks;
@@ -1078,6 +1265,7 @@ fn out_staff_box(
             };
             geos.push(EvGeo {
                 ev,
+                onset: on,
                 x,
                 value: e.duration.value,
                 rest: e.is_rest(),
@@ -1293,13 +1481,38 @@ fn out_staff_box(
                 }
                 o.glyph(c, gg.x, y, Some(ev));
                 o.hit(gg.x - 0.1, y - 1.5, gg.x + w + 0.1, y + 1.5, Target::Rest { ev });
+                let mut above = (d.top - 0.9).min(y - 2.0);
+                for a in e
+                    .articulations
+                    .iter()
+                    .filter(|a| a.def().place == scoreart_model::marks::Place::Above)
+                {
+                    if let Some((c, mw, lo, hi)) = g::mark(*a, true) {
+                        o.glyph(c, gg.x + w / 2.0 - mw / 2.0, above + lo, Some(ev));
+                        above -= hi - lo + 0.35;
+                    }
+                }
+                anchors.insert(
+                    ev,
+                    EvAnchor {
+                        page: o.page_index,
+                        system: d.system,
+                        x_left: gg.x,
+                        x_right: gg.x + w,
+                        top: y - 1.0,
+                        bottom: y + 1.0,
+                        up: true,
+                        stem_end: y - 1.0,
+                        staff_top: d.top,
+                    },
+                );
                 for k in 0..e.duration.dots {
                     o.glyph(g::DOT, gg.x + w + 0.3 + 0.5 * f32::from(k), y - 0.5, Some(ev));
                 }
                 draw_tuplet(o, gg, e, &geos, v, d.top);
                 continue;
             }
-            let (head, head_w) = g::notehead(gg.value);
+            let (_, head_w) = g::notehead(gg.value);
             // Ledger lines.
             let min_y = gg.heads.iter().map(|h| h.1).fold(f32::MAX, f32::min);
             let max_y = gg.heads.iter().map(|h| h.1).fold(f32::MIN, f32::max);
@@ -1320,7 +1533,11 @@ fn out_staff_box(
             let mut dot_ys: Vec<f32> = Vec::new();
             let right_edge = gg.heads.iter().map(|h| h.2).fold(f32::MIN, f32::max) + head_w;
             let left_edge = gg.heads.iter().map(|h| h.2).fold(f32::MAX, f32::min);
+            let mut acc_room = 0.0f32;
+            let notes = e.notes();
             for (ni, h) in gg.heads.iter().enumerate().rev() {
+                let note = notes.get(ni);
+                let (head, _) = g::head_for(note.map(|n| n.head).unwrap_or_default(), gg.value);
                 o.glyph(head, h.2, h.1, Some(ev));
                 o.hit(
                     h.2,
@@ -1329,13 +1546,23 @@ fn out_staff_box(
                     h.1 + 0.5,
                     Target::Note { ev, note: ni },
                 );
+                let paren = note.is_some_and(|n| n.paren);
+                if paren {
+                    if let Some((c, _, _, _)) = crate::smufl::get("noteheadParenthesisLeft") {
+                        o.glyph(c, h.2 - 0.45, h.1, Some(ev));
+                    }
+                    if let Some((c, _, _, _)) = crate::smufl::get("noteheadParenthesisRight") {
+                        o.glyph(c, h.2 + head_w + 0.08, h.1, Some(ev));
+                    }
+                }
                 if let Some(a) = acc.get(&(d.part, d.staff, d.measure, gg.ev.voice, gg.ev.index, ni)) {
                     let (c, w) = g::accidental(*a);
                     let col = (0..4)
                         .find(|c| !acc_cols.iter().any(|(y, cc)| cc == c && (y - h.1).abs() < 2.9))
                         .unwrap_or(3);
                     acc_cols.push((h.1, col));
-                    let ax = left_edge - 0.2 - w - col as f32 * 1.15;
+                    let ax = left_edge - 0.2 - w - col as f32 * 1.15 - if paren { 0.45 } else { 0.0 };
+                    acc_room = acc_room.max(left_edge - ax + 0.2);
                     o.glyph(c, ax, h.1, Some(ev));
                 }
                 if e.duration.dots > 0 {
@@ -1359,54 +1586,365 @@ fn out_staff_box(
                 heads.insert((ev, h.0), anchor);
             }
             // Stem and flag.
+            let stem_start = if gg.up {
+                max_y - g::STEM_Y
+            } else {
+                min_y + g::STEM_Y
+            };
             if gg.value.has_stem() {
-                let start = if gg.up {
-                    max_y - g::STEM_Y
-                } else {
-                    min_y + g::STEM_Y
-                };
-                o.line(gg.stem_x, start, gg.stem_x, gg.stem_end, g::STEM, Some(ev));
+                o.line(gg.stem_x, stem_start, gg.stem_x, gg.stem_end, g::STEM, Some(ev));
                 if gg.beam_group.is_none()
                     && let Some((c, _)) = g::flag(gg.value.beams(), gg.up)
                 {
                     o.glyph(c, gg.stem_x - g::STEM / 2.0, gg.stem_end, Some(ev));
                 }
             }
-            // Articulations: opposite the stem; fermata above the staff.
-            let mut above_y = (min_y - 1.0).min(d.top - 0.6);
-            let mut below_y = max_y + 1.0;
-            let mut art_above = (min_y - 0.9).min(if gg.up { f32::MAX } else { gg.stem_end - 0.6 });
-            for a in &e.articulations {
-                let above = if *a == Articulation::Fermata { true } else { !gg.up };
-                let (c, w) = g::articulation(*a, above);
-                let ax = gg.x + head_w / 2.0 - w / 2.0;
-                if *a == Articulation::Fermata {
-                    let y = above_y.min(gg.stem_end - 0.5).min(d.top - 0.8);
-                    o.glyph(c, ax, y, Some(ev));
-                    above_y = y - 1.6;
-                } else if above {
-                    let y = snap_space(art_above, d.top, -1.0);
-                    o.glyph(c, ax, y, Some(ev));
-                    art_above = y - 1.0;
+            // Tremolo strokes through the stem (above a whole note).
+            let trem = match e.tremolo {
+                scoreart_model::Tremolo::None => None,
+                scoreart_model::Tremolo::Strokes(n) => crate::smufl::get(match n {
+                    1 => "tremolo1",
+                    2 => "tremolo2",
+                    4 => "tremolo4",
+                    _ => "tremolo3",
+                }),
+                scoreart_model::Tremolo::Buzz => crate::smufl::get("buzzRoll"),
+            };
+            if let Some((c, w, lo, hi)) = trem {
+                let (cx, cy) = if gg.value.has_stem() {
+                    let far = if gg.up {
+                        gg.stem_end + 1.2
+                    } else {
+                        gg.stem_end - 1.2
+                    };
+                    (gg.stem_x, (far + if gg.up { min_y } else { max_y }) / 2.0)
                 } else {
-                    let y = snap_space(below_y, d.top, 1.0);
-                    o.glyph(c, ax, y, Some(ev));
-                    below_y = y + 1.0;
+                    (gg.x + head_w / 2.0, min_y - 2.0)
+                };
+                o.glyph(c, cx - w / 2.0, cy + (lo + hi) / 2.0, Some(ev));
+            }
+            // Arpeggio: a wavy line (or bracket) left of the chord.
+            if e.arpeggio != scoreart_model::Arpeggio::None {
+                let ax = left_edge - acc_room - 0.9;
+                let (y0, y1) = (min_y - 0.6, max_y + 0.6);
+                if e.arpeggio == scoreart_model::Arpeggio::Bracket {
+                    o.line(ax, y0, ax, y1, g::THIN_BAR, Some(ev));
+                    o.line(ax, y0, ax + 0.5, y0, g::THIN_BAR, Some(ev));
+                    o.line(ax, y1, ax + 0.5, y1, g::THIN_BAR, Some(ev));
+                } else {
+                    let mut yy = y0;
+                    let mut left = true;
+                    while yy < y1 {
+                        let ny = (yy + 0.45).min(y1);
+                        let (xa, xb) = if left {
+                            (ax - 0.22, ax + 0.22)
+                        } else {
+                            (ax + 0.22, ax - 0.22)
+                        };
+                        o.line(xa, yy, xb, ny, 0.16, Some(ev));
+                        left = !left;
+                        yy = ny;
+                    }
+                    let arrow = match e.arpeggio {
+                        scoreart_model::Arpeggio::Up => {
+                            crate::smufl::get("arrowheadBlackUp").map(|a| (a, y0 - 0.1))
+                        }
+                        scoreart_model::Arpeggio::Down => {
+                            crate::smufl::get("arrowheadBlackDown").map(|a| (a, y1 + 0.1))
+                        }
+                        _ => None,
+                    };
+                    if let Some(((c, w, lo, hi), at)) = arrow {
+                        let base = if e.arpeggio == scoreart_model::Arpeggio::Up {
+                            at + lo
+                        } else {
+                            at + hi
+                        };
+                        o.push(
+                            Shape::Glyph {
+                                c,
+                                x: ax - w * 0.35,
+                                y: base,
+                                scale: 0.7,
+                            },
+                            Some(ev),
+                        );
+                    }
                 }
             }
+            // Grace notes before the chord: small, stem up, slashed for acciaccaturas.
+            let ngr = e.grace.len();
+            for (gi, gr) in e.grace.iter().enumerate() {
+                let gx = left_edge
+                    - acc_room
+                    - if e.arpeggio != scoreart_model::Arpeggio::None {
+                        1.3
+                    } else {
+                        0.0
+                    }
+                    - (ngr - gi) as f32 * 1.15
+                    - 0.2;
+                const S: f32 = 0.62;
+                let mut top_y = f32::MAX;
+                let mut bot_y = f32::MIN;
+                for p in &gr.pitches {
+                    let shift =
+                        f32::from(score.ottava_at(d.part, d.staff, d.measure, gg_onset(&geos, gg))) * 3.5;
+                    let y = d.top + note_y(d.clef, *p) + shift;
+                    top_y = top_y.min(y);
+                    bot_y = bot_y.max(y);
+                    o.push(
+                        Shape::Glyph {
+                            c: g::HEAD_BLACK,
+                            x: gx,
+                            y,
+                            scale: S,
+                        },
+                        Some(ev),
+                    );
+                    let mut ly = d.top - 1.0;
+                    while ly >= y - 0.01 && ly > d.top - 20.0 {
+                        o.line(
+                            gx - 0.25,
+                            ly,
+                            gx + g::HEAD_W * S + 0.25,
+                            ly,
+                            g::LEDGER * 0.8,
+                            Some(ev),
+                        );
+                        ly -= 1.0;
+                    }
+                    let mut ly = d.top + 5.0;
+                    while ly <= y + 0.01 && ly < d.top + 24.0 {
+                        o.line(
+                            gx - 0.25,
+                            ly,
+                            gx + g::HEAD_W * S + 0.25,
+                            ly,
+                            g::LEDGER * 0.8,
+                            Some(ev),
+                        );
+                        ly += 1.0;
+                    }
+                }
+                if top_y <= bot_y {
+                    let sx = gx + g::HEAD_W * S - g::STEM * 0.4;
+                    let end = top_y - 2.5;
+                    o.line(sx, bot_y - 0.1, sx, end, g::STEM * 0.8, Some(ev));
+                    if let Some((c, _)) = g::flag(gr.value.beams().max(1), true) {
+                        o.push(
+                            Shape::Glyph {
+                                c,
+                                x: sx - g::STEM * 0.4,
+                                y: end,
+                                scale: S,
+                            },
+                            Some(ev),
+                        );
+                    }
+                    if gr.slash {
+                        o.line(sx - 0.55, end + 1.25, sx + 0.75, end + 0.35, 0.12, Some(ev));
+                    }
+                }
+            }
+            // Marks: near the head opposite the stem, others above the staff, breaths after.
+            let multi_side = multi.then_some(vi % 2 == 0);
+            let near_above = multi_side.unwrap_or(!gg.up);
+            let mut near: Vec<scoreart_model::Articulation> = e
+                .articulations
+                .iter()
+                .copied()
+                .filter(|a| a.def().place == scoreart_model::marks::Place::Near)
+                .collect();
+            near.sort_by_key(|a| {
+                if matches!(a.id(), "staccato" | "tenuto" | "portato") || a.id().starts_with("staccatissimo")
+                {
+                    0
+                } else {
+                    1
+                }
+            });
+            let mut up_cursor = (min_y - 0.75).min(if gg.up && gg.value.has_stem() {
+                gg.stem_end - 0.5
+            } else {
+                f32::MAX
+            });
+            let mut down_cursor = (max_y + 0.75).max(if !gg.up && gg.value.has_stem() {
+                gg.stem_end + 0.5
+            } else {
+                f32::MIN
+            });
+            for a in &near {
+                let Some((c, w, lo, hi)) = g::mark(*a, near_above) else {
+                    continue;
+                };
+                let ax = gg.x + head_w / 2.0 - w / 2.0;
+                let h = hi - lo;
+                if near_above {
+                    let mut bottom = up_cursor;
+                    if h < 0.7 {
+                        bottom = snap_space(bottom - h / 2.0, d.top, -1.0) + h / 2.0;
+                    }
+                    o.glyph(c, ax, bottom + lo, Some(ev));
+                    up_cursor = bottom - h - 0.3;
+                } else {
+                    let mut topy = down_cursor;
+                    if h < 0.7 {
+                        topy = snap_space(topy + h / 2.0, d.top, 1.0) - h / 2.0;
+                    }
+                    o.glyph(c, ax, topy + hi, Some(ev));
+                    down_cursor = topy + h + 0.3;
+                }
+            }
+            let mut above = up_cursor
+                .min(d.top - 0.9)
+                .min(if near_above { up_cursor } else { min_y - 1.0 });
+            let mut above_marks: Vec<scoreart_model::Articulation> = e
+                .articulations
+                .iter()
+                .copied()
+                .filter(|a| a.def().place == scoreart_model::marks::Place::Above)
+                .collect();
+            // Fermatas outermost.
+            above_marks.sort_by_key(|a| a.is_fermata());
+            for a in &above_marks {
+                let Some((c, w, lo, hi)) = g::mark(*a, true) else {
+                    continue;
+                };
+                let ax = gg.x + head_w / 2.0 - w / 2.0;
+                o.glyph(c, ax, above + lo, Some(ev));
+                above -= hi - lo + 0.35;
+            }
+            // Fingerings above everything on the note.
+            let mut fy = above - 0.2;
+            for (ni, n) in notes.iter().enumerate().rev() {
+                if let Some(f) = &n.fingering {
+                    let hx = gg.heads.get(ni).map(|h| h.2).unwrap_or(gg.x);
+                    o.push(
+                        Shape::Text {
+                            text: f.clone(),
+                            x: hx + head_w / 2.0,
+                            y: fy,
+                            size: 1.6,
+                            align: Align::Center,
+                            bold: false,
+                            italic: false,
+                        },
+                        Some(ev),
+                    );
+                    fy -= 1.4;
+                }
+            }
+            for a in e
+                .articulations
+                .iter()
+                .filter(|a| a.def().place == scoreart_model::marks::Place::Breath)
+            {
+                if let Some((c, _, lo, hi)) = g::mark(*a, true) {
+                    let x = right_edge + 0.55;
+                    let base = if a.id().starts_with("caesura") {
+                        d.top + 1.6 + lo.min(0.0)
+                    } else {
+                        d.top - 0.4 + lo
+                    };
+                    let _ = hi;
+                    o.glyph(c, x, base, Some(ev));
+                }
+            }
+            for a in &e.articulations {
+                let place = a.def().place;
+                if !matches!(
+                    place,
+                    scoreart_model::marks::Place::Before | scoreart_model::marks::Place::After
+                ) {
+                    continue;
+                }
+                let Some((c, w, _, _)) = g::mark(*a, true) else {
+                    continue;
+                };
+                if place == scoreart_model::marks::Place::Before {
+                    o.glyph(c, left_edge - acc_room - w - 0.2, max_y, Some(ev));
+                } else {
+                    o.glyph(c, right_edge + 0.25, min_y, Some(ev));
+                }
+            }
+            anchors.insert(
+                ev,
+                EvAnchor {
+                    page: o.page_index,
+                    system: d.system,
+                    x_left: left_edge,
+                    x_right: right_edge,
+                    top: min_y,
+                    bottom: max_y,
+                    up: gg.up,
+                    stem_end: if gg.value.has_stem() {
+                        gg.stem_end
+                    } else if gg.up {
+                        min_y
+                    } else {
+                        max_y
+                    },
+                    staff_top: d.top,
+                },
+            );
             draw_tuplet(o, gg, e, &geos, v, d.top);
         }
         // Dynamics and lyrics under the staff (whole voice, also on rests).
         for (gg, e) in geos.iter().zip(v.events.iter()) {
             if let Some(dy) = e.dynamic {
                 let mut x = gg.x - 0.2;
-                let y = d.top + 4.0 + 3.0;
+                let low = anchors
+                    .get(&gg.ev)
+                    .map(|a| a.bottom.max(if a.up { a.bottom } else { a.stem_end }))
+                    .unwrap_or(d.top);
+                let y = (d.top + 4.0 + 3.0).max(low + 2.6);
                 for ch in dy.id().chars() {
                     if let Some((c, w)) = g::dynamic_letter(ch) {
                         o.glyph(c, x, y, Some(gg.ev));
                         x += w - 0.1;
                     }
                 }
+            }
+            if let Some(cs) = &e.chord_symbol {
+                let reach = anchors
+                    .get(&gg.ev)
+                    .map(|a| a.top.min(a.stem_end))
+                    .unwrap_or(d.top)
+                    - 1.6;
+                let y = reach.min(d.top - 3.0) - if e.text.is_some() { 2.2 } else { 0.0 };
+                o.push(
+                    Shape::Text {
+                        text: chord_text(cs),
+                        x: gg.x,
+                        y,
+                        size: 2.2,
+                        align: Align::Left,
+                        bold: true,
+                        italic: false,
+                    },
+                    Some(gg.ev),
+                );
+            }
+            if let Some(t) = &e.text {
+                let reach = anchors
+                    .get(&gg.ev)
+                    .map(|a| a.top.min(a.stem_end))
+                    .unwrap_or(d.top)
+                    - 1.4;
+                let y = reach.min(d.top - 2.2);
+                o.push(
+                    Shape::Text {
+                        text: t.clone(),
+                        x: gg.x,
+                        y,
+                        size: 1.9,
+                        align: Align::Left,
+                        bold: false,
+                        italic: true,
+                    },
+                    Some(gg.ev),
+                );
             }
             if let Some(l) = &e.lyric {
                 let y = d.top + 4.0 + 5.6;
@@ -1426,6 +1964,42 @@ fn out_staff_box(
         }
         let _ = d.x1;
     }
+}
+
+/// Onset of an event from its geometry list position.
+fn gg_onset(geos: &[EvGeo], gg: &EvGeo) -> u32 {
+    let _ = geos;
+    gg.onset
+}
+
+/// Chord symbols with real sharps and flats.
+fn chord_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_letter = false;
+    for c in s.chars() {
+        let mapped = match c {
+            '#' => '♯',
+            'b' if prev_letter => '♭',
+            c => c,
+        };
+        prev_letter = matches!(c, 'A'..='G');
+        out.push(mapped);
+    }
+    out
+}
+
+/// Where an event was drawn, for lines (slurs, hairpins …).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct EvAnchor {
+    page: usize,
+    system: usize,
+    x_left: f32,
+    x_right: f32,
+    top: f32,
+    bottom: f32,
+    up: bool,
+    stem_end: f32,
+    staff_top: f32,
 }
 
 /// Moves an articulation's y into a staff space (never on a line) inside the staff.
@@ -1621,21 +2195,577 @@ fn tie_shape(xa: f32, xb: f32, y: f32, up: bool) -> Shape {
 fn staff_reach(score: &Score, part: usize, staff: usize, measures: &[usize]) -> (f32, f32) {
     let mut up = 0.0f32;
     let mut down = 0.0f32;
+    let mut text_above = 0.0f32;
     for &m in measures {
         let clef = score.clef_at(part, staff, m);
         let Some(sm) = score.staff_measure(part, staff, m) else {
             continue;
         };
         for v in &sm.voices {
-            for e in &v.events {
+            for (e, on) in v.events.iter().zip(v.onsets()) {
+                let shift = f32::from(score.ottava_at(part, staff, m, on)) * 3.5;
                 let marks = if e.articulations.is_empty() { 0.0 } else { 1.6 };
+                let above_marks = e
+                    .articulations
+                    .iter()
+                    .filter(|a| a.def().place == scoreart_model::marks::Place::Above)
+                    .count() as f32
+                    * 1.7;
+                let finger = if e.notes().iter().any(|n| n.fingering.is_some()) {
+                    1.4
+                } else {
+                    0.0
+                };
                 for n in e.notes() {
-                    let y = note_y(clef, n.pitch);
-                    up = up.max(-(y - STEM_LEN) + marks).max(-y + 1.0 + marks);
+                    let y = note_y(clef, n.pitch) + shift;
+                    up = up
+                        .max(-(y - STEM_LEN) + marks)
+                        .max(-y + 1.0 + marks + above_marks + finger);
                     down = down.max(y + STEM_LEN - 4.0).max(y - 4.0 + 1.0);
                 }
+                up = up.max(above_marks + 1.0);
+                let mut t = 0.0;
+                if e.chord_symbol.is_some() {
+                    t += 2.6;
+                }
+                if e.text.is_some() {
+                    t += 2.2;
+                }
+                text_above = text_above.max(t);
             }
         }
     }
-    (up, down)
+    // Lines above and below the staff.
+    for sp in score
+        .spanners
+        .iter()
+        .filter(|s| s.part == part && s.staff == staff)
+    {
+        if !measures
+            .iter()
+            .any(|m| (sp.start.measure..=sp.end.measure).contains(m))
+        {
+            continue;
+        }
+        match sp.kind {
+            SpannerKind::Ottava(o) if o > 0 => up = up.max(up + 2.5),
+            SpannerKind::TrillLine | SpannerKind::Vibrato | SpannerKind::LetRing | SpannerKind::PalmMute => {
+                up = up.max(3.5)
+            }
+            SpannerKind::Ottava(_) | SpannerKind::Pedal => down = down.max(down + 2.5),
+            SpannerKind::Crescendo
+            | SpannerKind::Diminuendo
+            | SpannerKind::CrescendoLine
+            | SpannerKind::DiminuendoLine => down = down.max(3.6),
+            _ => {}
+        }
+    }
+    (up + text_above, down)
+}
+
+/// One piece of a line on one system.
+#[derive(Clone, Copy, Debug)]
+struct Seg {
+    page: usize,
+    x0: f32,
+    x1: f32,
+    top: f32,
+    first: bool,
+    last: bool,
+}
+
+fn segments(ctx: &Ctx, staves: &[StaffBox], a: EvAnchor, b: EvAnchor, part: usize, staff: usize) -> Vec<Seg> {
+    if a.system == b.system {
+        return vec![Seg {
+            page: a.page,
+            x0: a.x_left,
+            x1: b.x_right,
+            top: a.staff_top,
+            first: true,
+            last: true,
+        }];
+    }
+    let mut out = Vec::new();
+    let end_of = |sys: usize| ctx.system_ends.get(sys).map(|e| e.1).unwrap_or(a.x_right);
+    let start_of = |sys: usize| ctx.system_ends.get(sys).map(|e| e.2 - 0.8).unwrap_or(b.x_left);
+    out.push(Seg {
+        page: a.page,
+        x0: a.x_left,
+        x1: end_of(a.system),
+        top: a.staff_top,
+        first: true,
+        last: false,
+    });
+    for k in (a.system + 1)..b.system.min(a.system + 200) {
+        if let Some(sb) = staves
+            .iter()
+            .find(|s| s.system == k && s.part == part && s.staff == staff)
+        {
+            out.push(Seg {
+                page: sb.page,
+                x0: start_of(k),
+                x1: end_of(k),
+                top: sb.top,
+                first: false,
+                last: false,
+            });
+        }
+    }
+    out.push(Seg {
+        page: b.page,
+        x0: start_of(b.system),
+        x1: b.x_right,
+        top: b.staff_top,
+        first: false,
+        last: true,
+    });
+    out
+}
+
+fn dashed(items: &mut Vec<(usize, Shape)>, page: usize, x0: f32, x1: f32, y: f32) {
+    let mut x = x0;
+    let mut n = 0;
+    while x < x1 && n < 2000 {
+        let e = (x + 0.9).min(x1);
+        items.push((
+            page,
+            Shape::Line {
+                x1: x,
+                y1: y,
+                x2: e,
+                y2: y,
+                width: 0.16,
+            },
+        ));
+        x = e + 0.6;
+        n += 1;
+    }
+}
+
+fn glyph_run(items: &mut Vec<(usize, Shape)>, page: usize, name: &str, x0: f32, x1: f32, y: f32) {
+    let Some((c, w, _, _)) = crate::smufl::get(name) else {
+        return;
+    };
+    let step = w.max(0.2);
+    let mut x = x0;
+    let mut n = 0;
+    while x + step <= x1 + 0.01 && n < 2000 {
+        items.push((page, Shape::Glyph { c, x, y, scale: 1.0 }));
+        x += step;
+        n += 1;
+    }
+}
+
+fn draw_spanners(ctx: &Ctx, out: &mut Layout, last_page: &mut Page, last_index: usize) {
+    let score = ctx.score;
+    let mut items: Vec<(usize, Shape, EventRef)> = Vec::new();
+    for sp in &score.spanners {
+        let pos = |a: scoreart_model::Anchor| scoreart_model::edit::Pos {
+            part: sp.part,
+            staff: sp.staff,
+            voice: sp.voice,
+            measure: a.measure,
+            tick: a.tick,
+        };
+        let (Some(ea), Some(eb)) = (pos(sp.start).event(score), pos(sp.end).event(score)) else {
+            continue;
+        };
+        let (Some(a), Some(b)) = (ctx.events.get(&ea).copied(), ctx.events.get(&eb).copied()) else {
+            continue;
+        };
+        let segs = segments(ctx, &out.staves, a, b, sp.part, sp.staff);
+        let mut local: Vec<(usize, Shape)> = Vec::new();
+        match sp.kind {
+            SpannerKind::Slur => {
+                let multi = score
+                    .staff_measure(sp.part, sp.staff, sp.start.measure)
+                    .is_some_and(|s| s.voices.len() > 1);
+                let above = if multi { sp.voice % 2 == 0 } else { !a.up };
+                let end_y = |x: &EvAnchor| {
+                    if above {
+                        if x.up { x.stem_end - 0.3 } else { x.top - 0.9 }
+                    } else if !x.up {
+                        x.stem_end + 0.3
+                    } else {
+                        x.bottom + 0.9
+                    }
+                };
+                // Inner notes the slur must clear.
+                let mut inner: Vec<EvAnchor> = Vec::new();
+                let mut cur = ea;
+                for _ in 0..128 {
+                    let Some(n) = score.next_event(cur) else { break };
+                    if n == eb {
+                        break;
+                    }
+                    if let Some(x) = ctx.events.get(&n) {
+                        inner.push(*x);
+                    }
+                    cur = n;
+                }
+                let (ya, yb) = (end_y(&a), end_y(&b));
+                for s in &segs {
+                    let xa = if s.first { a.x_left + 0.55 } else { s.x0 };
+                    let xb = if s.last { b.x_right - 0.55 } else { s.x1 };
+                    let (y0, y1) = match (s.first, s.last) {
+                        (true, true) => (ya, yb),
+                        (true, false) => (ya, ya),
+                        (false, true) => (yb, yb),
+                        _ => (
+                            s.top + if above { -1.0 } else { 5.0 },
+                            s.top + if above { -1.0 } else { 5.0 },
+                        ),
+                    };
+                    let len = (xb - xa).max(0.5);
+                    let mut h = (0.5 + 0.06 * len).clamp(0.7, 2.4);
+                    for x in inner.iter().filter(|x| x.staff_top == s.top) {
+                        let cx = (x.x_left + x.x_right) / 2.0;
+                        if cx <= xa || cx >= xb {
+                            continue;
+                        }
+                        let line = y0 + (y1 - y0) * (cx - xa) / len;
+                        let obstacle = if above {
+                            x.top.min(if x.up { x.stem_end } else { x.top }) - 0.8
+                        } else {
+                            x.bottom.max(if x.up { x.bottom } else { x.stem_end }) + 0.8
+                        };
+                        let need = if above { line - obstacle } else { obstacle - line };
+                        if need > h * 0.8 {
+                            h = (need / 0.8).min(6.0);
+                        }
+                    }
+                    let sgn = if above { -1.0 } else { 1.0 };
+                    let c = h / 0.75 * sgn;
+                    local.push((
+                        s.page,
+                        Shape::Curve {
+                            p: [
+                                (xa, y0),
+                                (xa + len * 0.25, y0 + c),
+                                (xb - len * 0.25, y1 + c),
+                                (xb, y1),
+                            ],
+                            thick: 0.2,
+                        },
+                    ));
+                }
+            }
+            SpannerKind::Crescendo | SpannerKind::Diminuendo => {
+                let cresc = sp.kind == SpannerKind::Crescendo;
+                let dyn_room = |r: EventRef| {
+                    score
+                        .event(r)
+                        .and_then(|e| e.dynamic)
+                        .map(|d| d.id().len() as f32 * 1.3 + 0.4)
+                        .unwrap_or(0.0)
+                };
+                for s in &segs {
+                    let low = |x: &EvAnchor| x.bottom.max(if x.up { x.bottom } else { x.stem_end });
+                    let y = (s.top + 6.6)
+                        .max(if s.first { low(&a) + 2.2 } else { 0.0 })
+                        .max(if s.last { low(&b) + 2.2 } else { 0.0 });
+                    let x0 = if s.first { a.x_left + dyn_room(ea) } else { s.x0 };
+                    let x1 = if s.last { b.x_right + 0.6 } else { s.x1 - 0.4 };
+                    let (o0, o1) = match (cresc, s.first, s.last) {
+                        (true, f, l) => (if f { 0.0 } else { 0.3 }, if l { 0.6 } else { 0.45 }),
+                        (false, f, l) => (if f { 0.6 } else { 0.45 }, if l { 0.0 } else { 0.3 }),
+                    };
+                    local.push((
+                        s.page,
+                        Shape::Line {
+                            x1: x0,
+                            y1: y - o0,
+                            x2: x1,
+                            y2: y - o1,
+                            width: 0.16,
+                        },
+                    ));
+                    local.push((
+                        s.page,
+                        Shape::Line {
+                            x1: x0,
+                            y1: y + o0,
+                            x2: x1,
+                            y2: y + o1,
+                            width: 0.16,
+                        },
+                    ));
+                }
+            }
+            SpannerKind::CrescendoLine | SpannerKind::DiminuendoLine => {
+                let word = if sp.kind == SpannerKind::CrescendoLine {
+                    "cresc."
+                } else {
+                    "dim."
+                };
+                for s in &segs {
+                    let y = (s.top + 7.0).max(if s.first { a.bottom + 2.8 } else { 0.0 });
+                    let mut x0 = s.x0;
+                    if s.first {
+                        local.push((
+                            s.page,
+                            Shape::Text {
+                                text: word.into(),
+                                x: a.x_left,
+                                y,
+                                size: 1.9,
+                                align: Align::Left,
+                                bold: false,
+                                italic: true,
+                            },
+                        ));
+                        x0 = a.x_left + text_width(word, 1.9) + 0.4;
+                    }
+                    dashed(
+                        &mut local,
+                        s.page,
+                        x0,
+                        if s.last { b.x_right + 0.4 } else { s.x1 - 0.4 },
+                        y - 0.5,
+                    );
+                }
+            }
+            SpannerKind::Ottava(o) => {
+                let (alta, cont) = match o {
+                    1 => ("ottavaAlta", "ottava"),
+                    -1 => ("ottavaBassaVb", "ottava"),
+                    2 => ("quindicesimaAlta", "quindicesima"),
+                    -2 => ("quindicesimaBassa", "quindicesima"),
+                    3 => ("ventiduesimaAlta", "ventiduesima"),
+                    _ => ("ventiduesimaBassa", "ventiduesima"),
+                };
+                let up = o > 0;
+                for s in &segs {
+                    let y = if up {
+                        (s.top - 3.4)
+                            .min(if s.first {
+                                a.top.min(a.stem_end) - 3.0
+                            } else {
+                                f32::MAX
+                            })
+                            .min(if s.last {
+                                b.top.min(b.stem_end) - 3.0
+                            } else {
+                                f32::MAX
+                            })
+                    } else {
+                        (s.top + 7.0)
+                            .max(if s.first {
+                                a.bottom.max(a.stem_end) + 2.6
+                            } else {
+                                0.0
+                            })
+                            .max(if s.last {
+                                b.bottom.max(b.stem_end) + 2.6
+                            } else {
+                                0.0
+                            })
+                    };
+                    let name = if s.first { alta } else { cont };
+                    let Some((c, w, _, _)) = crate::smufl::get(name) else {
+                        continue;
+                    };
+                    let x0 = if s.first { a.x_left - 0.3 } else { s.x0 };
+                    local.push((
+                        s.page,
+                        Shape::Glyph {
+                            c,
+                            x: x0,
+                            y,
+                            scale: if s.first { 1.0 } else { 0.8 },
+                        },
+                    ));
+                    let ly = y - 0.8;
+                    let x1 = if s.last { b.x_right + 0.3 } else { s.x1 - 0.4 };
+                    dashed(&mut local, s.page, x0 + w + 0.3, x1, ly);
+                    if s.last {
+                        let hook = if up { ly + 1.1 } else { ly - 1.1 };
+                        local.push((
+                            s.page,
+                            Shape::Line {
+                                x1,
+                                y1: ly,
+                                x2: x1,
+                                y2: hook,
+                                width: 0.16,
+                            },
+                        ));
+                    }
+                }
+            }
+            SpannerKind::Pedal => {
+                for s in &segs {
+                    let y = (s.top + 8.6).max(if s.first { a.bottom + 4.0 } else { 0.0 });
+                    if s.first
+                        && let Some((c, _, _, _)) = crate::smufl::get("keyboardPedalPed")
+                    {
+                        local.push((
+                            s.page,
+                            Shape::Glyph {
+                                c,
+                                x: a.x_left - 0.3,
+                                y,
+                                scale: 1.0,
+                            },
+                        ));
+                    }
+                    if s.last
+                        && let Some((c, _, _, _)) = crate::smufl::get("keyboardPedalUp")
+                    {
+                        local.push((
+                            s.page,
+                            Shape::Glyph {
+                                c,
+                                x: b.x_right + 0.4,
+                                y,
+                                scale: 1.0,
+                            },
+                        ));
+                    }
+                }
+            }
+            SpannerKind::TrillLine | SpannerKind::Vibrato => {
+                let wiggle = if sp.kind == SpannerKind::TrillLine {
+                    "wiggleTrill"
+                } else {
+                    "wiggleVibrato"
+                };
+                for s in &segs {
+                    let y = (s.top - 1.2).min(if s.first {
+                        a.top.min(a.stem_end) - 1.3
+                    } else {
+                        f32::MAX
+                    });
+                    let mut x0 = s.x0;
+                    if s.first {
+                        x0 = a.x_left;
+                        if sp.kind == SpannerKind::TrillLine
+                            && let Some((c, w, lo, _)) = crate::smufl::get("ornamentTrill")
+                        {
+                            local.push((
+                                s.page,
+                                Shape::Glyph {
+                                    c,
+                                    x: x0,
+                                    y: y + lo,
+                                    scale: 1.0,
+                                },
+                            ));
+                            x0 += w + 0.2;
+                        }
+                    }
+                    let x1 = if s.last { b.x_right + 0.6 } else { s.x1 - 0.3 };
+                    glyph_run(&mut local, s.page, wiggle, x0, x1, y - 0.0);
+                }
+            }
+            SpannerKind::LetRing | SpannerKind::PalmMute => {
+                let word = if sp.kind == SpannerKind::LetRing {
+                    "let ring"
+                } else {
+                    "P.M."
+                };
+                for s in &segs {
+                    let y = (s.top - 1.6).min(if s.first {
+                        a.top.min(a.stem_end) - 1.4
+                    } else {
+                        f32::MAX
+                    });
+                    let mut x0 = s.x0;
+                    if s.first {
+                        local.push((
+                            s.page,
+                            Shape::Text {
+                                text: word.into(),
+                                x: a.x_left,
+                                y,
+                                size: 1.8,
+                                align: Align::Left,
+                                bold: false,
+                                italic: true,
+                            },
+                        ));
+                        x0 = a.x_left + text_width(word, 1.8) + 0.3;
+                    }
+                    let x1 = if s.last { b.x_right + 0.4 } else { s.x1 - 0.4 };
+                    dashed(&mut local, s.page, x0, x1, y - 0.6);
+                    if s.last {
+                        local.push((
+                            s.page,
+                            Shape::Line {
+                                x1,
+                                y1: y - 0.6,
+                                x2: x1,
+                                y2: y + 0.4,
+                                width: 0.16,
+                            },
+                        ));
+                    }
+                }
+            }
+            SpannerKind::Glissando | SpannerKind::WavyGlissando => {
+                let wavy = sp.kind == SpannerKind::WavyGlissando;
+                for s in &segs {
+                    let (xa, ya) = if s.first {
+                        (a.x_right + 0.3, a.top)
+                    } else {
+                        (s.x0, b.top)
+                    };
+                    let (xb, yb) = if s.last {
+                        (b.x_left - 0.4, b.top)
+                    } else {
+                        (s.x1, a.top)
+                    };
+                    if !wavy {
+                        local.push((
+                            s.page,
+                            Shape::Line {
+                                x1: xa,
+                                y1: ya,
+                                x2: xb,
+                                y2: yb,
+                                width: 0.16,
+                            },
+                        ));
+                        continue;
+                    }
+                    // Zigzag along the line.
+                    let (dx, dy) = (xb - xa, yb - ya);
+                    let len = (dx * dx + dy * dy).sqrt().max(0.1);
+                    let (nx, ny) = (-dy / len * 0.2, dx / len * 0.2);
+                    let steps = (len / 0.35).max(2.0) as usize;
+                    let mut prev = (xa, ya);
+                    for i in 1..=steps.min(400) {
+                        let t = i as f32 / steps as f32;
+                        let sgn = if i % 2 == 0 { 1.0 } else { -1.0 };
+                        let p = (xa + dx * t + nx * sgn, ya + dy * t + ny * sgn);
+                        local.push((
+                            s.page,
+                            Shape::Line {
+                                x1: prev.0,
+                                y1: prev.1,
+                                x2: p.0,
+                                y2: p.1,
+                                width: 0.14,
+                            },
+                        ));
+                        prev = p;
+                    }
+                }
+            }
+        }
+        items.extend(local.into_iter().map(|(p, s)| (p, s, ea)));
+    }
+    for (page, shape, ev) in items {
+        if page == last_index {
+            last_page.items.push(Item {
+                shape,
+                owner: Some(ev),
+            });
+        } else if let Some(p) = out.pages.get_mut(page) {
+            p.items.push(Item {
+                shape,
+                owner: Some(ev),
+            });
+        }
+    }
 }

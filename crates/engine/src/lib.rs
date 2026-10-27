@@ -100,6 +100,8 @@ pub struct Session {
     /// Where the next note goes in note-input mode.
     pub cursor: Pos,
     pub selection: Option<Selection>,
+    /// With an event selection: the other end of a selected range in the same voice.
+    pub range_end: Option<EventRef>,
     pub input: Input,
     /// File name (no directories) of the open score.
     pub file_name: String,
@@ -130,6 +132,7 @@ impl Session {
             style: Style::default(),
             cursor: Pos::default(),
             selection: None,
+            range_end: None,
             input: Input::default(),
             file_name: "Untitled.musicxml".into(),
             dirty: false,
@@ -150,7 +153,13 @@ impl Session {
             return Err(Error::Disabled(why));
         }
         let before = spec.undoable.then(|| self.score.clone());
-        let saved = (self.cursor, self.selection, self.input, self.last_pitch);
+        let saved = (
+            self.cursor,
+            self.selection,
+            self.input,
+            self.last_pitch,
+            self.range_end,
+        );
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (spec.run)(self, params)));
         let result = match outcome {
             Ok(r) => r,
@@ -177,7 +186,13 @@ impl Session {
                 if let Some(b) = before {
                     self.score = b;
                 }
-                (self.cursor, self.selection, self.input, self.last_pitch) = saved;
+                (
+                    self.cursor,
+                    self.selection,
+                    self.input,
+                    self.last_pitch,
+                    self.range_end,
+                ) = saved;
                 self.status = e.to_string();
                 Err(e)
             }
@@ -325,6 +340,76 @@ impl Session {
                 .unwrap_or_else(|| name.to_string());
             self.dirty = false;
         }
+    }
+
+    /// First and last event of the selection, in time order (one voice).
+    pub fn selected_range(&self) -> Option<(EventRef, EventRef)> {
+        match self.selection {
+            Some(Selection::Event { ev, .. }) => {
+                let other = self
+                    .range_end
+                    .filter(|r| {
+                        r.part == ev.part
+                            && r.staff == ev.staff
+                            && r.voice == ev.voice
+                            && self.score.event(*r).is_some()
+                    })
+                    .unwrap_or(ev);
+                if (other.measure, other.index) < (ev.measure, ev.index) {
+                    Some((other, ev))
+                } else {
+                    Some((ev, other))
+                }
+            }
+            Some(Selection::Measures {
+                part,
+                staff,
+                first,
+                last,
+            }) => {
+                let n = self
+                    .score
+                    .voice(part, staff, last, 0)
+                    .map(|v| v.events.len())
+                    .unwrap_or(1);
+                Some((
+                    EventRef {
+                        part,
+                        staff,
+                        voice: 0,
+                        measure: first,
+                        index: 0,
+                    },
+                    EventRef {
+                        part,
+                        staff,
+                        voice: 0,
+                        measure: last,
+                        index: n.saturating_sub(1),
+                    },
+                ))
+            }
+            None => None,
+        }
+    }
+
+    /// Every event in the selected range.
+    pub fn selected_events(&self) -> Vec<EventRef> {
+        let Some((a, b)) = self.selected_range() else {
+            return Vec::new();
+        };
+        let mut out = vec![a];
+        let mut cur = a;
+        while cur != b && out.len() < 4096 {
+            match self.score.next_event(cur) {
+                Some(n) => {
+                    out.push(n);
+                    cur = n;
+                }
+                None => break,
+            }
+        }
+        out
     }
 
     /// The selected event, if any.

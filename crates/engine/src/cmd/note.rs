@@ -367,7 +367,12 @@ pub fn commands() -> Vec<CommandSpec> {
                     if let Some(e) = s.score.event_mut(ev) {
                         if let Some(i) = e.articulations.iter().position(|x| *x == a) {
                             e.articulations.remove(i);
-                        } else if a == Articulation::Fermata || !e.is_rest() {
+                        } else if !e.is_rest()
+                            || matches!(
+                                a.def().place,
+                                scoreart_model::marks::Place::Above | scoreart_model::marks::Place::Breath
+                            )
+                        {
                             e.articulations.push(a);
                         }
                     }
@@ -527,9 +532,11 @@ fn rewrite_duration(s: &mut Session, ev: EventRef, d: Duration) -> Result<()> {
     if let Some(n) = pos.event(&s.score)
         && let Some(ne) = s.score.event_mut(n)
     {
-        ne.articulations = e.articulations;
-        ne.dynamic = e.dynamic;
-        ne.lyric = e.lyric;
+        // Keep every mark of the event; only the length changed.
+        let (kind, duration) = (ne.kind.clone(), ne.duration);
+        *ne = e;
+        ne.kind = kind;
+        ne.duration = duration;
         s.selection = Some(Selection::Event { ev: n, note: None });
     }
     Ok(())

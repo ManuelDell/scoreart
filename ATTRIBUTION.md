@@ -18,8 +18,9 @@ Schiller, 1785).
 
 | Asset | Author | Source | Licence | Notes |
 |---|---|---|---|---|
-| `assets/fonts/Bravura.otf` | Steinberg Media Technologies GmbH (Daniel Spreadbury) | https://github.com/steinbergmedia/bravura (`redist/otf/Bravura.otf`) | SIL Open Font License 1.1, Reserved Font Name "Bravura" (`assets/fonts/OFL-Bravura.txt`) | SMuFL reference font; bundled unmodified. Metrics used in `crates/engrave/src/glyphs.rs` come from its published `bravura_metadata.json` (same licence) |
+| `assets/fonts/Bravura.otf` | Steinberg Media Technologies GmbH (Daniel Spreadbury) | https://github.com/steinbergmedia/bravura (`redist/otf/Bravura.otf`) | SIL Open Font License 1.1, Reserved Font Name "Bravura" (`assets/fonts/OFL-Bravura.txt`) | SMuFL reference font; bundled unmodified. Metrics used in `crates/engrave/src/glyphs.rs` and `crates/engrave/src/smufl.rs` come from its published `bravura_metadata.json` (same licence); glyph names and code points are those of the SMuFL 1.4 specification (W3C Community Final Specification Agreement) |
 | `assets/fonts/OFL-Bravura.txt` | (licence text) | https://github.com/steinbergmedia/bravura (`redist/OFL.txt`) | — | |
 | `assets/app-icon/scoreart.svg` | ScoreArt contributors | original artwork drawn in SVG for this repository | MIT OR Apache-2.0 | App icon: a staff with two beamed notes on a violet tile |
 | `docs/images/app.png` | ScoreArt contributors | screenshot of ScoreArt itself showing its own sample score | MIT OR Apache-2.0 | Original; no third-party UI or assets |
 | `docs/images/ode-to-joy.svg` | ScoreArt contributors | rendered by `scoreart-cli convert sample` | MIT OR Apache-2.0 | Engraved with Bravura (OFL) outlines |
+| `docs/images/notation-showcase.svg` | ScoreArt contributors | rendered by `scoreart-cli convert` from a score written for this repository | MIT OR Apache-2.0 | Shows the notation marks; engraved with Bravura (OFL) outlines |

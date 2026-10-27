@@ -15,6 +15,7 @@
 
 pub mod glyphs;
 mod layout;
+pub mod smufl;
 
 pub use layout::layout;
 use scoreart_model::Clef;

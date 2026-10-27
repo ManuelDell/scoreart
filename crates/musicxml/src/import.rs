@@ -1,16 +1,25 @@
 //! MusicXML (score-partwise) → [`Score`]. Written from the MusicXML 4.0 specification.
-//! Unknown elements are ignored; what we read is listed in `docs/file-format-parity.md`.
+//! Unknown elements are ignored.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
+use scoreart_model::marks::{MARKS, XmlGroup};
 use scoreart_model::{
-    Articulation, Barline, Clef, Duration, Dynamic, Event, EventKind, KeySig, MeasureInfo, Meta, Note,
-    NoteValue, Part, PartMeasure, Pitch, Score, StaffMeasure, Step, TPQ, Tempo, TimeSig, TimeSymbol, Tuplet,
-    Voice, clip, limits,
+    Anchor, Arpeggio, Articulation, Barline, Clef, Duration, Dynamic, Event, EventKind, Grace, Jump, KeySig,
+    MeasureInfo, Meta, Note, NoteHead, NoteValue, Part, PartMeasure, Pitch, Score, Spanner, SpannerKind,
+    StaffMeasure, Step, TPQ, Tempo, TimeSig, TimeSymbol, Tremolo, Tuplet, Voice, clip, limits,
 };
 
 use crate::Error;
 use crate::dom::Element;
+
+/// A line that starts or stops on a note.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Family {
+    Slur,
+    Gliss,
+    Trill,
+}
 
 /// A note or rest as read, before it is placed into voices.
 struct Raw {
@@ -19,6 +28,15 @@ struct Raw {
     onset: u64,
     ticks: u64,
     event: Event,
+    starts: Vec<(Family, String, SpannerKind)>,
+    stops: Vec<(Family, String)>,
+}
+
+/// A line start or stop from a `<direction>` at a time position.
+#[derive(Clone, Debug)]
+enum DirMark {
+    Start { key: String, kind: SpannerKind },
+    Stop { key: String },
 }
 
 pub fn read(root: &Element) -> Result<Score, Error> {
@@ -58,7 +76,7 @@ pub fn read(root: &Element) -> Result<Score, Error> {
             .find(|i| i.0 == id)
             .map(|i| (i.1.clone(), i.2.clone(), i.3))
             .unwrap_or_else(|| (format!("Part {}", pi + 1), String::new(), 0));
-        let part = read_part(&mut score, pi == 0, part_el, id, name, abbr, program)?;
+        let part = read_part(&mut score, pi, part_el, id, name, abbr, program)?;
         score.parts.push(part);
     }
     if score.parts.is_empty() {
@@ -115,53 +133,140 @@ fn clef_of(el: &Element) -> Clef {
     }
 }
 
-fn articulations_of(n: &Element) -> Vec<Articulation> {
-    let mut out = Vec::new();
-    for notations in n.children_named("notations") {
-        if let Some(a) = notations.child("articulations") {
-            for c in &a.children {
-                let art = match c.name.as_str() {
-                    "staccato" => Some(Articulation::Staccato),
-                    "staccatissimo" | "spiccato" => Some(Articulation::Staccatissimo),
-                    "accent" => Some(Articulation::Accent),
-                    "tenuto" => Some(Articulation::Tenuto),
-                    "strong-accent" => Some(Articulation::Marcato),
-                    _ => None,
-                };
-                if let Some(a) = art
-                    && !out.contains(&a)
-                {
-                    out.push(a);
+/// The catalogue mark for a MusicXML element in a notations group.
+fn mark_for(group: XmlGroup, el: &Element) -> Option<Articulation> {
+    let name = el.name.as_str();
+    let text = el.text.trim();
+    let candidates = MARKS.iter().filter(|d| d.xml == group);
+    // Fermatas: the shape is the element's text.
+    if group == XmlGroup::Fermata {
+        let shape = if text.is_empty() { "normal" } else { text };
+        return MARKS
+            .iter()
+            .find(|d| d.xml == XmlGroup::Fermata && d.xml_name == shape)
+            .or_else(|| MARKS.iter().find(|d| d.id == "fermata"))
+            .and_then(|d| Articulation::from_id(d.id));
+    }
+    // A SMuFL name wins (other-* elements, special variants).
+    if let Some(smufl) = el.attr("smufl")
+        && let Some(d) = MARKS
+            .iter()
+            .find(|d| d.glyph_above == smufl || d.glyph_below == smufl)
+    {
+        return Articulation::from_id(d.id);
+    }
+    let mut best = None;
+    for d in candidates.filter(|d| d.xml_name == name) {
+        match d.xml_attr {
+            Some(("smufl", _)) => {}
+            Some((k, v)) => {
+                let actual = if k == "value" { Some(text) } else { el.attr(k) };
+                if actual == Some(v) {
+                    return Articulation::from_id(d.id);
                 }
             }
-        }
-        if notations.has("fermata") && !out.contains(&Articulation::Fermata) {
-            out.push(Articulation::Fermata);
+            None => best = best.or(Some(d)),
         }
     }
-    out
+    best.and_then(|d| Articulation::from_id(d.id))
 }
 
-fn tie_start(n: &Element) -> bool {
-    n.children_named("tie").any(|t| t.attr("type") == Some("start"))
-        || n.children_named("notations")
-            .any(|no| no.children_named("tied").any(|t| t.attr("type") == Some("start")))
+fn parse_pitch(p: &Element, step_tag: &str, oct_tag: &str) -> Pitch {
+    let step = p
+        .child_text(step_tag)
+        .and_then(|s| s.chars().next())
+        .and_then(Step::from_letter)
+        .unwrap_or(Step::C);
+    let alter = p.child_num("alter").unwrap_or(0.0).round() as i8;
+    let octave = p.child_num(oct_tag).unwrap_or(4.0) as i32;
+    Pitch::new(step, alter, octave)
+}
+
+/// Chord-symbol text from a `<harmony>` element.
+fn harmony_text(h: &Element) -> Option<String> {
+    let root = h.child("root")?;
+    let step = root.child_text("root-step")?.chars().next()?;
+    let alter = match root.child_num("root-alter").map(|a| a.round() as i32) {
+        Some(1) => "#",
+        Some(-1) => "b",
+        _ => "",
+    };
+    let kind_el = h.child("kind");
+    let suffix = kind_el
+        .and_then(|k| k.attr("text").map(str::to_string))
+        .or_else(|| {
+            kind_el.map(|k| {
+                match k.text.trim() {
+                    "major" | "" => "",
+                    "minor" => "m",
+                    "dominant" => "7",
+                    "major-seventh" => "maj7",
+                    "minor-seventh" => "m7",
+                    "diminished" => "dim",
+                    "diminished-seventh" => "dim7",
+                    "augmented" => "+",
+                    "half-diminished" => "m7b5",
+                    "suspended-fourth" => "sus4",
+                    "suspended-second" => "sus2",
+                    "major-sixth" => "6",
+                    "minor-sixth" => "m6",
+                    "dominant-ninth" => "9",
+                    "power" => "5",
+                    _ => "",
+                }
+                .to_string()
+            })
+        })
+        .unwrap_or_default();
+    let bass = h
+        .child("bass")
+        .and_then(|b| {
+            let s = b.child_text("bass-step")?.chars().next()?;
+            let a = match b.child_num("bass-alter").map(|a| a.round() as i32) {
+                Some(1) => "#",
+                Some(-1) => "b",
+                _ => "",
+            };
+            Some(format!("/{s}{a}"))
+        })
+        .unwrap_or_default();
+    Some(clip(&format!("{step}{alter}{suffix}{bass}")))
+}
+
+fn jump_from_words(w: &str) -> Option<Jump> {
+    let t = w.trim().trim_end_matches('.').to_ascii_lowercase();
+    Some(match t.as_str() {
+        "fine" => Jump::Fine,
+        "to coda" => Jump::ToCoda,
+        "d.c" | "da capo" => Jump::DaCapo,
+        "d.c. al fine" | "da capo al fine" => Jump::DaCapoAlFine,
+        "d.c. al coda" | "da capo al coda" => Jump::DaCapoAlCoda,
+        "d.s" | "dal segno" => Jump::DalSegno,
+        "d.s. al fine" | "dal segno al fine" => Jump::DalSegnoAlFine,
+        "d.s. al coda" | "dal segno al coda" => Jump::DalSegnoAlCoda,
+        _ => return None,
+    })
 }
 
 fn read_part(
     score: &mut Score,
-    first_part: bool,
+    pi: usize,
     part_el: &Element,
     id: String,
     name: String,
     abbreviation: String,
     program: u8,
 ) -> Result<Part, Error> {
+    let first_part = pi == 0;
     let mut divisions: u64 = 1;
     let mut staves: usize = 1;
     let mut clefs: BTreeMap<usize, Clef> = BTreeMap::new();
     let mut measures: Vec<PartMeasure> = Vec::new();
-    let mut time = score.measures.first().and_then(|m| m.time).unwrap_or_default();
+    // Open lines: (staff, voice, family, number) for note lines; (staff, key) for directions.
+    let mut open_note: HashMap<(usize, usize, Family, String), (SpannerKind, Anchor)> = HashMap::new();
+    let mut open_dir: HashMap<(usize, String), (SpannerKind, usize, Anchor)> = HashMap::new();
+    let mut open_ending: Option<(u8, usize)> = None;
+    let mut repeat_staves: Vec<bool> = vec![false; limits::MAX_STAVES];
 
     for (mi, m_el) in part_el.children_named("measure").enumerate() {
         if mi >= limits::MAX_MEASURES {
@@ -173,9 +278,11 @@ fn read_part(
         let mut raws: Vec<Raw> = Vec::new();
         let mut clef_changes: BTreeMap<usize, Clef> = BTreeMap::new();
         let mut pending_dyn: Vec<(usize, u64, Dynamic)> = Vec::new();
+        let mut pending_text: Vec<(usize, u64, String, bool)> = Vec::new(); // (staff, t, text, is_chord_symbol)
+        let mut dir_marks: Vec<(usize, u64, DirMark)> = Vec::new();
+        let mut graces: HashMap<(usize, u32), Vec<Grace>> = HashMap::new();
         let mut t: u64 = 0;
         let mut last_onset: u64 = 0;
-        let mut measure_end: u64 = 0;
 
         for c in &m_el.children {
             match c.name.as_str() {
@@ -213,7 +320,6 @@ fn read_part(
                                     _ => TimeSymbol::Normal,
                                 };
                                 info.time = Some(sig);
-                                time = sig;
                             }
                         }
                     }
@@ -232,54 +338,204 @@ fn read_part(
                             }
                         }
                     }
+                    for ms in c.children_named("measure-style") {
+                        if let Some(r) = ms.child("measure-repeat") {
+                            let on = r.attr("type") == Some("start");
+                            match ms.attr("number").and_then(|n| n.parse::<usize>().ok()) {
+                                Some(n) if n >= 1 => {
+                                    if let Some(x) = repeat_staves.get_mut(n - 1) {
+                                        *x = on;
+                                    }
+                                }
+                                _ => repeat_staves.iter_mut().for_each(|x| *x = on),
+                            }
+                        }
+                    }
                 }
                 "note" => {
-                    if c.has("grace") || c.has("cue") {
+                    if c.has("cue") {
                         continue;
                     }
-                    let dur = c.child_num("duration").unwrap_or(0.0).max(0.0) as u64;
-                    let ticks = dur.saturating_mul(u64::from(TPQ)) / divisions;
                     let staff = c
                         .child_num("staff")
                         .map(|s| (s as usize).max(1) - 1)
                         .unwrap_or(0)
                         .min(limits::MAX_STAVES - 1);
                     let voice = c.child_num("voice").map(|v| v as u32).unwrap_or(1);
+                    let pitch = c
+                        .child("pitch")
+                        .map(|p| parse_pitch(p, "step", "octave"))
+                        .or_else(|| {
+                            c.child("unpitched")
+                                .map(|p| parse_pitch(p, "display-step", "display-octave"))
+                        });
+                    // Grace notes wait for the next real note of their voice.
+                    if let Some(g) = c.child("grace") {
+                        let list = graces.entry((staff, voice)).or_default();
+                        if let Some(p) = pitch {
+                            if c.has("chord")
+                                && let Some(last) = list.last_mut()
+                            {
+                                if last.pitches.len() < limits::MAX_CHORD_NOTES {
+                                    last.pitches.push(p);
+                                }
+                            } else if list.len() < limits::MAX_GRACE {
+                                let value = c
+                                    .child_text("type")
+                                    .and_then(NoteValue::from_xml_name)
+                                    .unwrap_or(NoteValue::Eighth);
+                                list.push(Grace {
+                                    pitches: vec![p],
+                                    value,
+                                    slash: g.attr("slash") == Some("yes"),
+                                });
+                            }
+                        }
+                        continue;
+                    }
+                    let dur = c.child_num("duration").unwrap_or(0.0).max(0.0) as u64;
+                    let ticks = dur.saturating_mul(u64::from(TPQ)) / divisions;
                     let is_chord = c.has("chord");
                     let onset = if is_chord { last_onset } else { t };
-                    let note = c.child("pitch").map(|p| {
-                        let step = p
-                            .child_text("step")
-                            .and_then(|s| s.chars().next())
-                            .and_then(Step::from_letter)
-                            .unwrap_or(Step::C);
-                        let alter = p.child_num("alter").unwrap_or(0.0).round() as i8;
-                        let octave = p.child_num("octave").unwrap_or(4.0) as i32;
-                        let mut n = Note::new(Pitch::new(step, alter, octave));
-                        n.tie = tie_start(c);
+                    let note = pitch.map(|p| {
+                        let mut n = Note::new(p);
+                        n.tie = c.children_named("tie").any(|t| t.attr("type") == Some("start"))
+                            || c.children_named("notations")
+                                .any(|no| no.children_named("tied").any(|t| t.attr("type") == Some("start")));
+                        if let Some(h) = c.child("notehead") {
+                            n.head = NoteHead::from_id(h.text.trim()).unwrap_or_default();
+                            n.paren = h.attr("parentheses") == Some("yes");
+                        }
+                        if let Some(a) = c.child("accidental")
+                            && (a.attr("cautionary") == Some("yes")
+                                || a.attr("parentheses") == Some("yes")
+                                || a.attr("editorial") == Some("yes"))
+                        {
+                            n.forced = Some(scoreart_model::Accidental::from_alter(p.alter));
+                        }
+                        for no in c.children_named("notations") {
+                            if let Some(f) = no.path(&["technical", "fingering"]) {
+                                let txt = f.text.trim();
+                                if !txt.is_empty() {
+                                    n.fingering = Some(clip(txt));
+                                }
+                            }
+                        }
                         n
                     });
-                    let unpitched = c.child("unpitched").map(|p| {
-                        let step = p
-                            .child_text("display-step")
-                            .and_then(|s| s.chars().next())
-                            .and_then(Step::from_letter)
-                            .unwrap_or(Step::C);
-                        let octave = p.child_num("display-octave").unwrap_or(5.0) as i32;
-                        Note::new(Pitch::new(step, 0, octave))
-                    });
-                    let note = note.or(unpitched);
+                    // Marks and lines on this note (also read on chord notes; duplicates are ignored).
+                    let mut marks: Vec<Articulation> = Vec::new();
+                    let mut tremolo = Tremolo::None;
+                    let mut arpeggio = Arpeggio::None;
+                    let mut starts = Vec::new();
+                    let mut stops = Vec::new();
+                    for no in c.children_named("notations") {
+                        for ch in &no.children {
+                            match ch.name.as_str() {
+                                "articulations" => marks.extend(
+                                    ch.children
+                                        .iter()
+                                        .filter_map(|a| mark_for(XmlGroup::Articulations, a)),
+                                ),
+                                "fermata" => marks.extend(mark_for(XmlGroup::Fermata, ch)),
+                                "ornaments" => {
+                                    for o in &ch.children {
+                                        match o.name.as_str() {
+                                            "tremolo" => {
+                                                let n = o.text.trim().parse::<u8>().unwrap_or(3).clamp(1, 4);
+                                                tremolo = match o.attr("type") {
+                                                    Some("unmeasured") => Tremolo::Buzz,
+                                                    Some("start") | Some("stop") => tremolo,
+                                                    _ => Tremolo::Strokes(n),
+                                                };
+                                            }
+                                            "wavy-line" => {
+                                                let num = o.attr("number").unwrap_or("1").to_string();
+                                                match o.attr("type") {
+                                                    Some("start") => {
+                                                        let kind = if o
+                                                            .attr("smufl")
+                                                            .is_some_and(|v| v.contains("Vibrato"))
+                                                        {
+                                                            SpannerKind::Vibrato
+                                                        } else {
+                                                            SpannerKind::TrillLine
+                                                        };
+                                                        starts.push((Family::Trill, num, kind));
+                                                    }
+                                                    Some("stop") => stops.push((Family::Trill, num)),
+                                                    _ => {}
+                                                }
+                                            }
+                                            _ => marks.extend(mark_for(XmlGroup::Ornaments, o)),
+                                        }
+                                    }
+                                }
+                                "technical" => marks.extend(
+                                    ch.children
+                                        .iter()
+                                        .filter(|x| x.name != "fingering")
+                                        .filter_map(|x| mark_for(XmlGroup::Technical, x)),
+                                ),
+                                "arpeggiate" => {
+                                    arpeggio = match ch.attr("direction") {
+                                        Some("up") => Arpeggio::Up,
+                                        Some("down") => Arpeggio::Down,
+                                        _ => Arpeggio::Normal,
+                                    }
+                                }
+                                "non-arpeggiate" => arpeggio = Arpeggio::Bracket,
+                                "slur" => {
+                                    let num = ch.attr("number").unwrap_or("1").to_string();
+                                    match ch.attr("type") {
+                                        Some("start") => starts.push((Family::Slur, num, SpannerKind::Slur)),
+                                        Some("stop") => stops.push((Family::Slur, num)),
+                                        _ => {}
+                                    }
+                                }
+                                "glissando" | "slide" => {
+                                    let num = ch.attr("number").unwrap_or("1").to_string();
+                                    let kind = if ch.attr("line-type") == Some("wavy") {
+                                        SpannerKind::WavyGlissando
+                                    } else {
+                                        SpannerKind::Glissando
+                                    };
+                                    match ch.attr("type") {
+                                        Some("start") => starts.push((Family::Gliss, num, kind)),
+                                        Some("stop") => stops.push((Family::Gliss, num)),
+                                        _ => {}
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    // A trill line draws its own "tr": don't add the trill mark twice.
+                    if starts.iter().any(|(_, _, k)| *k == SpannerKind::TrillLine) {
+                        marks.retain(|m| m.id() != "trill");
+                    }
                     if is_chord {
-                        if let (Some(n), Some(prev)) = (
-                            note,
-                            raws.iter_mut()
-                                .rev()
-                                .find(|r| r.staff == staff && r.voice == voice),
-                        ) && let EventKind::Chord(notes) = &mut prev.event.kind
-                            && notes.len() < limits::MAX_CHORD_NOTES
+                        if let Some(prev) = raws
+                            .iter_mut()
+                            .rev()
+                            .find(|r| r.staff == staff && r.voice == voice)
                         {
-                            notes.push(n);
-                            notes.sort_by_key(|n| (n.pitch.diatonic(), n.pitch.alter));
+                            if let (Some(n), EventKind::Chord(notes)) = (note, &mut prev.event.kind)
+                                && notes.len() < limits::MAX_CHORD_NOTES
+                            {
+                                notes.push(n);
+                                notes.sort_by_key(|n| (n.pitch.diatonic(), n.pitch.alter));
+                            }
+                            for m in marks {
+                                if !prev.event.articulations.contains(&m) {
+                                    prev.event.articulations.push(m);
+                                }
+                            }
+                            if arpeggio != Arpeggio::None {
+                                prev.event.arpeggio = arpeggio;
+                            }
+                            prev.starts.extend(starts);
+                            prev.stops.extend(stops);
                         }
                         continue;
                     }
@@ -308,9 +564,15 @@ fn read_part(
                         Some(n) => Event::chord(vec![n], duration),
                         None => Event::rest(duration),
                     };
-                    event.articulations = articulations_of(c);
+                    marks.dedup();
+                    event.articulations = marks;
+                    event.tremolo = tremolo;
+                    event.arpeggio = arpeggio;
                     if let Some(l) = c.child("lyric").and_then(|l| l.child_text("text")) {
                         event.lyric = Some(clip(l));
+                    }
+                    if let Some(g) = graces.remove(&(staff, voice)) {
+                        event.grace = g;
                     }
                     raws.push(Raw {
                         staff,
@@ -318,10 +580,11 @@ fn read_part(
                         onset,
                         ticks,
                         event,
+                        starts,
+                        stops,
                     });
                     last_onset = onset;
                     t = t.saturating_add(ticks);
-                    measure_end = measure_end.max(t);
                 }
                 "backup" => {
                     let d = c.child_num("duration").unwrap_or(0.0).max(0.0) as u64;
@@ -330,45 +593,207 @@ fn read_part(
                 "forward" => {
                     let d = c.child_num("duration").unwrap_or(0.0).max(0.0) as u64;
                     t = t.saturating_add(d.saturating_mul(u64::from(TPQ)) / divisions);
-                    measure_end = measure_end.max(t);
+                }
+                "harmony" => {
+                    let staff = c.child_num("staff").map(|s| (s as usize).max(1) - 1).unwrap_or(0);
+                    if let Some(text) = harmony_text(c) {
+                        pending_text.push((staff, t, text, true));
+                    }
                 }
                 "direction" => {
                     let staff = c.child_num("staff").map(|s| (s as usize).max(1) - 1).unwrap_or(0);
+                    let system_text = c.attr("system") == Some("only-top");
+                    let has_tempo = c.path(&["direction-type", "metronome"]).is_some()
+                        || c.child("sound").is_some_and(|s| s.attr("tempo").is_some());
+                    let mut words_here: Option<String> = None;
                     for dt in c.children_named("direction-type") {
-                        if let Some(d) = dt.child("dynamics") {
-                            for k in &d.children {
-                                if let Some(dy) = Dynamic::from_id(&k.name) {
-                                    pending_dyn.push((staff, t, dy));
+                        for k in &dt.children {
+                            match k.name.as_str() {
+                                "dynamics" => {
+                                    for d in &k.children {
+                                        let id = if d.name == "other-dynamics" {
+                                            d.text.trim().to_string()
+                                        } else {
+                                            d.name.clone()
+                                        };
+                                        if let Some(dy) = Dynamic::from_id(&id) {
+                                            pending_dyn.push((staff, t, dy));
+                                        }
+                                    }
                                 }
+                                "words" => {
+                                    let w = k.text.trim();
+                                    if !w.is_empty() {
+                                        words_here = Some(match words_here.take() {
+                                            Some(prev) => format!("{prev} {w}"),
+                                            None => w.to_string(),
+                                        });
+                                    }
+                                }
+                                "rehearsal" => {
+                                    if first_part && let Some(info) = score.measures.get_mut(mi) {
+                                        info.rehearsal = Some(clip(k.text.trim()));
+                                    }
+                                }
+                                "segno" => {
+                                    if first_part && let Some(info) = score.measures.get_mut(mi) {
+                                        info.jumps.push(Jump::Segno);
+                                    }
+                                }
+                                "coda" => {
+                                    if first_part && let Some(info) = score.measures.get_mut(mi) {
+                                        let j = if k.attr("smufl") == Some("codaSquare") {
+                                            Jump::VariedCoda
+                                        } else {
+                                            Jump::Coda
+                                        };
+                                        info.jumps.push(j);
+                                    }
+                                }
+                                "metronome" => {
+                                    if first_part
+                                        && let Some(bpm) = k.child_num("per-minute")
+                                        && let Some(info) = score.measures.get_mut(mi)
+                                    {
+                                        info.tempo = Some(Tempo {
+                                            bpm: bpm.clamp(10.0, 400.0) as u16,
+                                        });
+                                    }
+                                }
+                                "wedge" => {
+                                    let key = format!("wedge{}", k.attr("number").unwrap_or("1"));
+                                    match k.attr("type") {
+                                        Some("crescendo") => dir_marks.push((
+                                            staff,
+                                            t,
+                                            DirMark::Start {
+                                                key,
+                                                kind: SpannerKind::Crescendo,
+                                            },
+                                        )),
+                                        Some("diminuendo") => dir_marks.push((
+                                            staff,
+                                            t,
+                                            DirMark::Start {
+                                                key,
+                                                kind: SpannerKind::Diminuendo,
+                                            },
+                                        )),
+                                        Some("stop") => dir_marks.push((staff, t, DirMark::Stop { key })),
+                                        _ => {}
+                                    }
+                                }
+                                "octave-shift" => {
+                                    let key = format!("8va{}", k.attr("number").unwrap_or("1"));
+                                    let size =
+                                        k.attr("size").and_then(|s| s.parse::<i32>().ok()).unwrap_or(8);
+                                    let oct = match size {
+                                        15 => 2,
+                                        22 => 3,
+                                        _ => 1,
+                                    };
+                                    match k.attr("type") {
+                                        // "down": the notes are printed lower than they sound → 8va.
+                                        Some("down") => dir_marks.push((
+                                            staff,
+                                            t,
+                                            DirMark::Start {
+                                                key,
+                                                kind: SpannerKind::Ottava(oct),
+                                            },
+                                        )),
+                                        Some("up") => dir_marks.push((
+                                            staff,
+                                            t,
+                                            DirMark::Start {
+                                                key,
+                                                kind: SpannerKind::Ottava(-oct),
+                                            },
+                                        )),
+                                        Some("stop") => dir_marks.push((staff, t, DirMark::Stop { key })),
+                                        _ => {}
+                                    }
+                                }
+                                "pedal" => {
+                                    let key = "pedal".to_string();
+                                    match k.attr("type") {
+                                        Some("start") => dir_marks.push((
+                                            staff,
+                                            t,
+                                            DirMark::Start {
+                                                key,
+                                                kind: SpannerKind::Pedal,
+                                            },
+                                        )),
+                                        Some("stop") => dir_marks.push((staff, t, DirMark::Stop { key })),
+                                        _ => {}
+                                    }
+                                }
+                                "dashes" | "bracket" => {
+                                    let key = format!("line{}", k.attr("number").unwrap_or("1"));
+                                    match k.attr("type") {
+                                        Some("start") => {
+                                            let w =
+                                                words_here.clone().unwrap_or_default().to_ascii_lowercase();
+                                            let kind = if w.starts_with("cresc") {
+                                                Some(SpannerKind::CrescendoLine)
+                                            } else if w.starts_with("dim") || w.starts_with("decresc") {
+                                                Some(SpannerKind::DiminuendoLine)
+                                            } else if w.starts_with("let ring") {
+                                                Some(SpannerKind::LetRing)
+                                            } else if w.starts_with("p.m") {
+                                                Some(SpannerKind::PalmMute)
+                                            } else {
+                                                None
+                                            };
+                                            if let Some(kind) = kind {
+                                                words_here = None;
+                                                dir_marks.push((staff, t, DirMark::Start { key, kind }));
+                                            }
+                                        }
+                                        Some("stop") => dir_marks.push((staff, t, DirMark::Stop { key })),
+                                        _ => {}
+                                    }
+                                }
+                                _ => {}
                             }
                         }
-                        if first_part
-                            && let Some(w) = dt.child_text("words")
-                            && !w.is_empty()
-                            && let Some(info) = score.measures.get_mut(mi)
-                            && info.text.is_none()
-                        {
-                            info.text = Some(clip(w));
-                        }
-                        if first_part
-                            && let Some(mm) = dt.child("metronome")
-                            && let Some(bpm) = mm.child_num("per-minute")
-                            && let Some(info) = score.measures.get_mut(mi)
-                        {
-                            info.tempo = Some(Tempo {
-                                bpm: bpm.clamp(10.0, 400.0) as u16,
-                            });
-                        }
                     }
-                    if first_part
-                        && let Some(s) = c.child("sound")
+                    let has_metronome = c.path(&["direction-type", "metronome"]).is_some();
+                    if let Some(s) = c.child("sound")
+                        && first_part
                         && let Some(tempo) = s.attr("tempo").and_then(|v| v.parse::<f64>().ok())
                         && tempo.is_finite()
-                        && let Some(info) = score.measures.get_mut(mi)
                     {
-                        info.tempo = Some(Tempo {
-                            bpm: tempo.clamp(10.0, 400.0) as u16,
-                        });
+                        let bpm = tempo.clamp(10.0, 400.0) as u16;
+                        // A tempo word that repeats the current tempo doesn't change it.
+                        let current = if mi == 0 {
+                            None
+                        } else {
+                            Some(score.tempo_at(mi - 1))
+                        };
+                        if (has_metronome || current != Some(bpm))
+                            && let Some(info) = score.measures.get_mut(mi)
+                        {
+                            info.tempo = Some(Tempo { bpm });
+                        }
+                    }
+                    if let Some(w) = words_here {
+                        if let Some(j) = jump_from_words(&w) {
+                            if first_part && let Some(info) = score.measures.get_mut(mi) {
+                                info.jumps.push(j);
+                            }
+                        } else if has_tempo {
+                            if first_part && let Some(info) = score.measures.get_mut(mi) {
+                                info.tempo_text = Some(clip(&w));
+                            }
+                        } else if system_text {
+                            if first_part && let Some(info) = score.measures.get_mut(mi) {
+                                info.text = Some(clip(&w));
+                            }
+                        } else {
+                            pending_text.push((staff, t, w, false));
+                        }
                     }
                 }
                 "sound" => {
@@ -401,39 +826,92 @@ fn read_part(
                             _ => {}
                         }
                     }
+                    if let Some(e) = c.child("ending") {
+                        let num = e
+                            .attr("number")
+                            .and_then(|n| n.split([',', ' ']).next())
+                            .and_then(|n| n.trim().parse::<u8>().ok())
+                            .unwrap_or(1)
+                            .clamp(1, 9);
+                        match e.attr("type") {
+                            Some("start") => open_ending = Some((num, mi)),
+                            Some("stop") | Some("discontinue") => {
+                                let (n, from) = open_ending.take().unwrap_or((num, mi));
+                                for m in from..=mi {
+                                    if let Some(x) = score.measures.get_mut(m) {
+                                        x.volta = Some(n);
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                 }
                 _ => {}
             }
         }
-        let _ = (time, measure_end);
 
-        // Attach dynamics to the event that starts at (or right after) their position.
+        // Attach dynamics and texts to the event that starts at (or right after) their position.
+        let target = |raws: &mut Vec<Raw>, staff: usize, at: u64| -> Option<usize> {
+            let s = staff.min(staves - 1);
+            raws.iter()
+                .enumerate()
+                .filter(|(_, r)| r.staff == s && r.onset >= at)
+                .min_by_key(|(_, r)| (r.onset, r.voice))
+                .map(|(i, _)| i)
+                .or_else(|| {
+                    raws.iter()
+                        .enumerate()
+                        .filter(|(_, r)| r.staff == s)
+                        .max_by_key(|(_, r)| r.onset)
+                        .map(|(i, _)| i)
+                })
+        };
         for (staff, at, dy) in pending_dyn {
-            if let Some(r) = raws
-                .iter_mut()
-                .filter(|r| r.staff == staff.min(staves - 1) && r.onset >= at)
-                .min_by_key(|r| (r.onset, r.voice))
+            if let Some(i) = target(&mut raws, staff, at)
+                && let Some(r) = raws.get_mut(i)
             {
                 r.event.dynamic.get_or_insert(dy);
+            }
+        }
+        for (staff, at, text, chord) in pending_text {
+            if let Some(i) = target(&mut raws, staff, at)
+                && let Some(r) = raws.get_mut(i)
+            {
+                if chord {
+                    r.event.chord_symbol = Some(text);
+                } else {
+                    r.event.text = Some(match r.event.text.take() {
+                        Some(prev) => clip(&format!("{prev} {text}")),
+                        None => clip(&text),
+                    });
+                }
             }
         }
 
         // Group into staves and voices; voice numbers map to indices in ascending order per staff.
         let mut pm = PartMeasure { staves: Vec::new() };
+        // Where each raw ended up: (staff, voice index, onset tick).
+        let mut placed: Vec<Option<(usize, usize, u32)>> = vec![None; raws.len()];
         for s in 0..staves {
             let mut sm = StaffMeasure {
                 voices: Vec::new(),
                 clef: clef_changes.get(&s).copied(),
+                measure_repeat: repeat_staves.get(s).copied().unwrap_or(false),
             };
             let mut numbers: Vec<u32> = raws.iter().filter(|r| r.staff == s).map(|r| r.voice).collect();
             numbers.sort_unstable();
             numbers.dedup();
-            for vn in numbers.into_iter().take(limits::MAX_VOICES) {
+            for (vi, vn) in numbers.into_iter().take(limits::MAX_VOICES).enumerate() {
                 let mut v = Voice::default();
                 let mut pos: u64 = 0;
-                let mut items: Vec<&Raw> = raws.iter().filter(|r| r.staff == s && r.voice == vn).collect();
-                items.sort_by_key(|r| r.onset);
-                for r in items {
+                let mut items: Vec<(usize, &Raw)> = raws
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, r)| r.staff == s && r.voice == vn)
+                    .collect();
+                items.sort_by_key(|(_, r)| r.onset);
+                for (ri, r) in items {
                     if r.onset > pos {
                         for d in Duration::decompose((r.onset - pos).min(u64::from(u32::MAX)) as u32) {
                             v.events.push(Event::rest(d));
@@ -444,6 +922,9 @@ fn read_part(
                         continue; // overlapping events in one voice: keep the first
                     }
                     v.events.push(r.event.clone());
+                    if let Some(p) = placed.get_mut(ri) {
+                        *p = Some((s, vi, pos.min(u64::from(u32::MAX)) as u32));
+                    }
                     pos = pos.saturating_add(r.ticks);
                     if v.events.len() >= limits::MAX_EVENTS_PER_VOICE {
                         break;
@@ -452,6 +933,70 @@ fn read_part(
                 sm.voices.push(v);
             }
             pm.staves.push(sm);
+        }
+
+        // Lines on notes.
+        for (ri, r) in raws.iter().enumerate() {
+            let Some(Some((s, v, tick))) = placed.get(ri).copied() else {
+                continue;
+            };
+            let here = Anchor { measure: mi, tick };
+            for (fam, num) in &r.stops {
+                if let Some((kind, start)) = open_note.remove(&(s, v, *fam, num.clone())) {
+                    score.spanners.push(Spanner {
+                        kind,
+                        part: pi,
+                        staff: s,
+                        voice: v,
+                        start,
+                        end: here,
+                    });
+                }
+            }
+            for (fam, num, kind) in &r.starts {
+                open_note.insert((s, v, *fam, num.clone()), (*kind, here));
+            }
+        }
+        // Lines from directions, anchored to voice 1 of their staff.
+        for (staff, at, mark) in dir_marks {
+            let s = staff.min(staves - 1);
+            let onsets: Vec<u32> = pm
+                .staves
+                .get(s)
+                .and_then(|sm| sm.voices.first())
+                .map(|v| v.onsets())
+                .unwrap_or_default();
+            let at32 = at.min(u64::from(u32::MAX)) as u32;
+            match mark {
+                DirMark::Start { key, kind } => {
+                    let tick = onsets
+                        .iter()
+                        .copied()
+                        .find(|o| *o >= at32)
+                        .or(onsets.last().copied())
+                        .unwrap_or(0);
+                    open_dir.insert((s, key), (kind, 0, Anchor { measure: mi, tick }));
+                }
+                DirMark::Stop { key } => {
+                    let tick = onsets
+                        .iter()
+                        .copied()
+                        .filter(|o| *o < at32)
+                        .max()
+                        .or(onsets.first().copied())
+                        .unwrap_or(0);
+                    if let Some((kind, v, start)) = open_dir.remove(&(s, key)) {
+                        score.spanners.push(Spanner {
+                            kind,
+                            part: pi,
+                            staff: s,
+                            voice: v,
+                            start,
+                            end: Anchor { measure: mi, tick },
+                        });
+                    }
+                }
+            }
         }
         measures.push(pm);
     }

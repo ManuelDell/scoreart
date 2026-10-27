@@ -110,7 +110,7 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "Select note or rest",
             menu: &[],
             shortcut: None,
-            params: "part, staff, measure, index, voice? (0), note? (index in chord)",
+            params: "part, staff, measure, index, voice? (0), note? (index in chord), extend? (bool: select a range from the current note)",
             enabled: always,
             run: |s, p| {
                 let ev = EventRef {
@@ -120,9 +120,40 @@ pub fn commands() -> Vec<CommandSpec> {
                     measure: need_usize(p, "measure")?,
                     index: need_usize(p, "index")?,
                 };
+                let extend = p.get("extend").and_then(Value::as_bool).unwrap_or(false);
+                if extend
+                    && let Some(Selection::Event { ev: cur, .. }) = s.selection
+                    && cur.part == ev.part
+                    && cur.staff == ev.staff
+                    && cur.voice == ev.voice
+                    && s.score.event(ev).is_some()
+                {
+                    s.range_end = Some(ev);
+                    return Ok(Value::Null);
+                }
                 select_event(s, ev, p_usize(p, "note"))?;
                 Ok(Value::Null)
             },
+            undoable: false,
+        },
+        CommandSpec {
+            id: "select.extend-next",
+            label: "Extend selection to the next note",
+            menu: &[],
+            shortcut: Some("Shift+Right"),
+            params: "",
+            enabled: always,
+            run: |s, _| extend(s, true),
+            undoable: false,
+        },
+        CommandSpec {
+            id: "select.extend-prev",
+            label: "Extend selection to the previous note",
+            menu: &[],
+            shortcut: Some("Shift+Left"),
+            params: "",
+            enabled: always,
+            run: |s, _| extend(s, false),
             undoable: false,
         },
         CommandSpec {
@@ -307,6 +338,22 @@ pub(crate) fn start_input(s: &mut Session) {
     s.input.active = true;
 }
 
+fn extend(s: &mut Session, forward: bool) -> Result<Value> {
+    let Some(Selection::Event { ev, .. }) = s.selection else {
+        return Ok(Value::Null);
+    };
+    let end = s.range_end.unwrap_or(ev);
+    let next = if forward {
+        s.score.next_event(end)
+    } else {
+        s.score.prev_event(end)
+    };
+    if let Some(n) = next {
+        s.range_end = Some(n);
+    }
+    Ok(Value::Null)
+}
+
 pub(crate) fn select_event(s: &mut Session, ev: EventRef, note: Option<usize>) -> Result<()> {
     let e = s
         .score
@@ -317,6 +364,7 @@ pub(crate) fn select_event(s: &mut Session, ev: EventRef, note: Option<usize>) -
         s.last_pitch = Some(p.pitch);
     }
     s.selection = Some(Selection::Event { ev, note });
+    s.range_end = None;
     if let Some(p) = ev.pos(&s.score) {
         s.cursor = p;
     }

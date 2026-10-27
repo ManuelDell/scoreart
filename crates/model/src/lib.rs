@@ -14,9 +14,13 @@
 )]
 
 pub mod edit;
+pub mod marks;
 mod pitch;
 mod time;
 
+pub use marks::{
+    Anchor, Arpeggio, Articulation, Dynamic, Grace, Jump, NoteHead, Spanner, SpannerKind, Tremolo,
+};
 pub use pitch::{Accidental, Pitch, Step};
 pub use time::{Duration, NoteValue, TPQ, Tuplet};
 
@@ -31,6 +35,8 @@ pub mod limits {
     pub const MAX_EVENTS_PER_VOICE: usize = 256;
     pub const MAX_CHORD_NOTES: usize = 16;
     pub const MAX_TEXT: usize = 1_000;
+    pub const MAX_SPANNERS: usize = 20_000;
+    pub const MAX_GRACE: usize = 8;
 }
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -213,104 +219,6 @@ impl TimeSig {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Articulation {
-    Staccato,
-    Staccatissimo,
-    Accent,
-    Tenuto,
-    Marcato,
-    Fermata,
-}
-
-impl Articulation {
-    pub const ALL: [Articulation; 6] = [
-        Articulation::Staccato,
-        Articulation::Staccatissimo,
-        Articulation::Accent,
-        Articulation::Tenuto,
-        Articulation::Marcato,
-        Articulation::Fermata,
-    ];
-    pub fn id(self) -> &'static str {
-        match self {
-            Articulation::Staccato => "staccato",
-            Articulation::Staccatissimo => "staccatissimo",
-            Articulation::Accent => "accent",
-            Articulation::Tenuto => "tenuto",
-            Articulation::Marcato => "marcato",
-            Articulation::Fermata => "fermata",
-        }
-    }
-    pub fn from_id(s: &str) -> Option<Articulation> {
-        Articulation::ALL.into_iter().find(|a| a.id() == s)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Dynamic {
-    PPP,
-    PP,
-    P,
-    MP,
-    MF,
-    F,
-    FF,
-    FFF,
-    SF,
-    SFZ,
-    FP,
-}
-
-impl Dynamic {
-    pub const ALL: [Dynamic; 11] = [
-        Dynamic::PPP,
-        Dynamic::PP,
-        Dynamic::P,
-        Dynamic::MP,
-        Dynamic::MF,
-        Dynamic::F,
-        Dynamic::FF,
-        Dynamic::FFF,
-        Dynamic::SF,
-        Dynamic::SFZ,
-        Dynamic::FP,
-    ];
-    pub fn id(self) -> &'static str {
-        match self {
-            Dynamic::PPP => "ppp",
-            Dynamic::PP => "pp",
-            Dynamic::P => "p",
-            Dynamic::MP => "mp",
-            Dynamic::MF => "mf",
-            Dynamic::F => "f",
-            Dynamic::FF => "ff",
-            Dynamic::FFF => "fff",
-            Dynamic::SF => "sf",
-            Dynamic::SFZ => "sfz",
-            Dynamic::FP => "fp",
-        }
-    }
-    pub fn from_id(s: &str) -> Option<Dynamic> {
-        Dynamic::ALL.into_iter().find(|d| d.id() == s)
-    }
-    /// MIDI velocity used for playback and MIDI export.
-    pub fn velocity(self) -> u8 {
-        match self {
-            Dynamic::PPP => 16,
-            Dynamic::PP => 33,
-            Dynamic::P => 49,
-            Dynamic::MP => 64,
-            Dynamic::MF => 80,
-            Dynamic::F => 96,
-            Dynamic::FF => 112,
-            Dynamic::FFF => 127,
-            Dynamic::SF | Dynamic::SFZ => 112,
-            Dynamic::FP => 96,
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Note {
     pub pitch: Pitch,
@@ -318,6 +226,14 @@ pub struct Note {
     pub tie: bool,
     /// Accidental the user forced to show (courtesy); `None` = automatic.
     pub forced: Option<Accidental>,
+    #[serde(default)]
+    pub head: NoteHead,
+    /// Notehead in parentheses (ghost note).
+    #[serde(default)]
+    pub paren: bool,
+    /// Fingering shown above the note ("1", "3-4", "p" …).
+    #[serde(default)]
+    pub fingering: Option<String>,
 }
 
 impl Note {
@@ -326,6 +242,9 @@ impl Note {
             pitch,
             tie: false,
             forced: None,
+            head: NoteHead::Normal,
+            paren: false,
+            fingering: None,
         }
     }
 }
@@ -347,6 +266,19 @@ pub struct Event {
     pub dynamic: Option<Dynamic>,
     #[serde(default)]
     pub lyric: Option<String>,
+    /// Grace notes before this event.
+    #[serde(default)]
+    pub grace: Vec<Grace>,
+    #[serde(default)]
+    pub tremolo: Tremolo,
+    #[serde(default)]
+    pub arpeggio: Arpeggio,
+    /// Chord symbol above the staff ("Cmaj7", "F#m7b5/E" …).
+    #[serde(default)]
+    pub chord_symbol: Option<String>,
+    /// Staff text / expression ("dolce", "pizz." …).
+    #[serde(default)]
+    pub text: Option<String>,
 }
 
 impl Event {
@@ -357,7 +289,19 @@ impl Event {
             articulations: Vec::new(),
             dynamic: None,
             lyric: None,
+            grace: Vec::new(),
+            tremolo: Tremolo::None,
+            arpeggio: Arpeggio::None,
+            chord_symbol: None,
+            text: None,
         }
+    }
+
+    /// Clears everything attached to the event except its kind and duration.
+    pub fn clear_marks(&mut self) {
+        let keep = (self.kind.clone(), self.duration);
+        *self = Event::rest(keep.1);
+        self.kind = keep.0;
     }
 
     pub fn chord(notes: Vec<Note>, duration: Duration) -> Event {
@@ -449,6 +393,9 @@ pub struct StaffMeasure {
     /// A clef change at the start of this measure.
     #[serde(default)]
     pub clef: Option<Clef>,
+    /// Shown as a one-measure repeat sign (and played like the previous measure).
+    #[serde(default)]
+    pub measure_repeat: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -500,6 +447,17 @@ pub struct MeasureInfo {
     pub repeat_start: bool,
     /// Free text above the system (rehearsal mark, expression).
     pub text: Option<String>,
+    /// Tempo word shown before the metronome mark ("Allegro").
+    #[serde(default)]
+    pub tempo_text: Option<String>,
+    /// Boxed rehearsal mark ("A", "12").
+    #[serde(default)]
+    pub rehearsal: Option<String>,
+    /// Volta (ending) number 1–9; consecutive measures with the same number share a bracket.
+    #[serde(default)]
+    pub volta: Option<u8>,
+    #[serde(default)]
+    pub jumps: Vec<Jump>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -516,6 +474,9 @@ pub struct Score {
     pub meta: Meta,
     pub measures: Vec<MeasureInfo>,
     pub parts: Vec<Part>,
+    /// Slurs, hairpins, octave lines, pedal, trill lines, glissandos …
+    #[serde(default)]
+    pub spanners: Vec<Spanner>,
 }
 
 /// An instrument template for new parts. Programs follow General MIDI (0-based).
@@ -834,7 +795,65 @@ impl Score {
                 }
             }
         }
-        // Ties into a rest or a different pitch are dropped later by the engraver; nothing to do here.
+        // Spanners must point at existing staves and measures, start before they end.
+        let n = self.measures.len();
+        let parts: Vec<usize> = self.parts.iter().map(Part::staff_count).collect();
+        let lens: Vec<u32> = (0..n).map(|m| self.measure_ticks(m)).collect();
+        self.spanners.truncate(limits::MAX_SPANNERS);
+        self.spanners.retain_mut(|sp| {
+            let ok = parts.get(sp.part).is_some_and(|st| sp.staff < *st)
+                && sp.voice < limits::MAX_VOICES
+                && sp.start.measure < n
+                && sp.end.measure < n;
+            if !ok {
+                return false;
+            }
+            if (sp.end.measure, sp.end.tick) < (sp.start.measure, sp.start.tick) {
+                std::mem::swap(&mut sp.start, &mut sp.end);
+            }
+            for a in [&mut sp.start, &mut sp.end] {
+                let len = lens.get(a.measure).copied().unwrap_or(1);
+                a.tick = a.tick.min(len.saturating_sub(1));
+            }
+            true
+        });
+        let mut seen = std::collections::HashSet::new();
+        self.spanners.retain(|sp| seen.insert(*sp));
+        // A canonical order, so equal scores compare equal whatever order lines were added in.
+        self.spanners.sort_by_key(|sp| {
+            (
+                sp.part,
+                sp.staff,
+                sp.voice,
+                sp.start.measure,
+                sp.start.tick,
+                sp.end.measure,
+                sp.end.tick,
+                sp.kind.id(),
+            )
+        });
+        for m in &mut self.measures {
+            m.volta = m.volta.filter(|v| (1..=9).contains(v));
+            m.jumps.truncate(4);
+        }
+    }
+
+    /// Octaves the notes at this point are displayed away from their pitch by an octave line
+    /// (8va = +1 means written an octave lower than sounding).
+    pub fn ottava_at(&self, part: usize, staff: usize, measure: usize, tick: u32) -> i8 {
+        self.spanners
+            .iter()
+            .filter(|s| s.part == part && s.staff == staff)
+            .filter_map(|s| match s.kind {
+                SpannerKind::Ottava(o) => Some((o, s)),
+                _ => None,
+            })
+            .find(|(_, s)| {
+                (s.start.measure, s.start.tick) <= (measure, tick)
+                    && (measure, tick) <= (s.end.measure, s.end.tick)
+            })
+            .map(|(o, _)| o)
+            .unwrap_or(0)
     }
 
     pub fn total_ticks(&self) -> u64 {

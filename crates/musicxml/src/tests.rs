@@ -40,9 +40,12 @@ fn imports_small_score() {
     let v = s.voice(0, 0, 0, 0).unwrap();
     assert_eq!(v.events.len(), 3);
     assert_eq!(v.events[0].duration.dots, 1);
-    assert_eq!(v.events[0].dynamic, Some(Dynamic::MF));
+    assert_eq!(v.events[0].dynamic, Dynamic::from_id("mf"));
     assert_eq!(v.events[0].lyric.as_deref(), Some("la"));
-    assert_eq!(v.events[1].articulations, vec![Articulation::Staccato]);
+    assert_eq!(
+        v.events[1].articulations,
+        vec![Articulation::from_id("staccato").unwrap()]
+    );
     assert_eq!(v.events[2].notes().len(), 2);
     assert!(v.events[2].notes()[1].tie);
     assert_eq!(s.measures[1].barline, Barline::Final);

@@ -28,17 +28,34 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
 - **Engraving** with the SMuFL reference font Bravura: clefs, key and time signatures, notes,
   chords (with seconds displaced), rests and whole-measure rests, accidentals (key- and
   measure-aware), dots, ledger lines, stems, flags, **beams** (grouped by beat, sloped, with
-  secondary beams and beamlets), **ties** (also across systems), articulations, fermatas,
-  dynamics, lyrics, tempo marks, system text, tuplet numbers, barlines and repeats, braces and
-  brackets, instrument names, measure numbers, title block — with automatic spacing,
-  justified system breaks and page breaks.
+  secondary beams and beamlets), **ties** (also across systems), lyrics, tempo marks, tuplet
+  numbers, barlines, braces and brackets, instrument names, measure numbers, title block —
+  with automatic spacing, justified system breaks and page breaks.
+- **The full set of notation marks** (at least what MuseScore's palettes offer), each one
+  displayed, editable, saved and read back through MusicXML:
+  - 12 **articulations** (accent, staccato, staccatissimo ×3, tenuto, portato, marcato, stress,
+    unstress, soft accent, laissez vibrer) and 7 **fermatas** (normal, short, long, very short,
+    very long, Henze long/short);
+  - **breaths and pauses** (4 breath marks, 4 caesuras), 19 **ornaments** (trill, short trill,
+    mordent, tremblement, prall-mordent, up/down prall, up/down mordent, prall up/down, turns,
+    shake, schleifer, Haydn), **techniques** (up/down bow, harmonic, thumb position, open,
+    stopped, half open, snap and left-hand pizzicato) and **jazz slides** (scoop, plop, doit, fall);
+  - 30 **dynamics** from pppppp to ffffff with sf, sfz, sffz, sfp, rfz, fz, fp, pf, n …;
+  - **lines**: slurs, crescendo/diminuendo hairpins and cresc./dim. lines, 8va/8vb/15ma/15mb/
+    22ma/22mb (notes are displaced on screen, sound at pitch), pedal, trill and vibrato lines,
+    let ring, palm mute, straight and wavy glissandos — drawn across system breaks;
+  - **grace notes** (acciaccatura, appoggiatura, 16th, 32nd), single-note **tremolos** (1–4
+    strokes, buzz roll), **arpeggios** (normal, up, down, bracket), **noteheads** (x, diamond,
+    slash, triangle, circle-x, cross, circled, parenthesised);
+  - **repeats and jumps**: voltas, segno, coda, varied coda, Fine, To Coda, D.C., D.S. and their
+    al Fine/al Coda forms, one-measure repeat sign; **rehearsal marks**, **tempo markings**,
+    **chord symbols**, **fingerings**, **staff text** and system text.
 - **Note input** the way scorewriter users expect: `N` toggles note input, `A`–`G` enter
   pitches (octave nearest the previous note, key signature applied), `1`–`8` pick durations
   (5 = quarter), `.` dots, `0` rests, `Shift+A`–`G` add chord notes, `↑`/`↓` semitones,
   `Ctrl+↑/↓` octaves, `T` ties, `Del` deletes, notes crossing a barline are split and tied,
   four voices, mouse input with a ghost note.
-- **Editing**: selection of notes, rests and measure ranges; palettes for clefs, keys, times,
-  articulations, dynamics, barlines, repeats and tempo; add/insert/delete measures; add,
+- **Editing**: selection of notes, rests, note ranges (`Shift+click`, `Shift+→`) and measure ranges; palettes for every mark above; add/insert/delete measures; add,
   rename and remove instruments (17 built-in); transpose; score properties; unlimited undo/redo.
 - **Files**: **MusicXML 4.0** is the native format (`.musicxml` and compressed `.mxl`, read and
   write — exchange scores with MuseScore, Dorico, Sibelius, Finale), **MIDI** export, **SVG**
@@ -47,12 +64,13 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   a same-origin page — for example a Nextcloud app — can open and save scores in it.
 - **Playback** with ScoreArt's own built-in synthesizer (no soundfont needed): `Space` plays
   from the selection with a moving playhead, notes sound while you enter them, repeats are
-  followed, dynamics and accents shape the volume. Desktop audio via cpal, Web Audio in the
+  followed, dynamics, accents, hairpins, grace notes, arpeggios, pedal and
+  one-measure repeats are heard. Desktop audio via cpal, Web Audio in the
   browser; **WAV** export.
 - **CLI** for conversion and for driving every command headlessly (agents, scripts).
 
-Not yet: PDF export, slurs, hairpins, tuplet input, multi-measure rests, part
-extraction, transposing instruments, percussion and tablature — see [ROADMAP.md](ROADMAP.md).
+Not yet: PDF export, tuplet input, multi-measure rests, part extraction, transposing
+instruments, percussion and tablature, two-note tremolos, ornament playback — see [ROADMAP.md](ROADMAP.md).
 
 ## Build and run
 
@@ -89,6 +107,9 @@ attribution, crate layering, wasm build).
 | `Ctrl+Z` / `Ctrl+Y` | undo / redo | `Ctrl+L` | lyric |
 | `Ctrl+S` / `Ctrl+Shift+S` | save / save as | `Ctrl+O` / `Ctrl+N` | open / new |
 | `Space` | play / stop | `Esc` | stop playback |
+| `S` | slur over the selection | `<` / `>` | crescendo / diminuendo hairpin |
+| `/` | grace note | `Shift+→` | extend the selection |
+| `Ctrl+K` | chord symbol | `Ctrl+T` / `Ctrl+M` | staff text / rehearsal mark |
 
 ## How it is built
 

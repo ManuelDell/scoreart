@@ -99,18 +99,40 @@ pub fn accidental(a: scoreart_model::Accidental) -> (char, f32) {
     }
 }
 
-/// Above/below glyph variants and widths.
-pub fn articulation(a: scoreart_model::Articulation, above: bool) -> (char, f32) {
-    use scoreart_model::Articulation::*;
-    let (u, d, w) = match a {
-        Accent => ('\u{E4A0}', '\u{E4A1}', 1.356),
-        Staccato => ('\u{E4A2}', '\u{E4A3}', 0.336),
-        Tenuto => ('\u{E4A4}', '\u{E4A5}', 1.352),
-        Staccatissimo => ('\u{E4A6}', '\u{E4A7}', 0.408),
-        Marcato => ('\u{E4AC}', '\u{E4AD}', 0.944),
-        Fermata => ('\u{E4C0}', '\u{E4C1}', 2.42),
+/// A catalogue mark's glyph (above or below variant): (char, width, bottom, top).
+pub fn mark(a: scoreart_model::Articulation, above: bool) -> Option<(char, f32, f32, f32)> {
+    let d = a.def();
+    crate::smufl::get(if above { d.glyph_above } else { d.glyph_below })
+}
+
+/// The notehead glyph for a shape and value: (char, width).
+pub fn head_for(head: scoreart_model::NoteHead, v: scoreart_model::NoteValue) -> (char, f32) {
+    use scoreart_model::NoteHead::*;
+    use scoreart_model::NoteValue::*;
+    let open = matches!(v, Half);
+    let whole = matches!(v, Whole | Breve);
+    let name = match (head, whole, open) {
+        (Normal, _, _) => return notehead(v),
+        (X, true, _) => "noteheadXWhole",
+        (X, _, true) => "noteheadXHalf",
+        (X, _, _) => "noteheadXBlack",
+        (Diamond, true, _) => "noteheadDiamondWhole",
+        (Diamond, _, true) => "noteheadDiamondHalf",
+        (Diamond, _, _) => "noteheadDiamondBlack",
+        (Slash, true, _) => "noteheadSlashWhiteWhole",
+        (Slash, _, true) => "noteheadSlashWhiteHalf",
+        (Slash, _, _) => "noteheadSlashHorizontalEnds",
+        (Triangle, true, _) => "noteheadTriangleUpWhole",
+        (Triangle, _, true) => "noteheadTriangleUpHalf",
+        (Triangle, _, _) => "noteheadTriangleUpBlack",
+        (CircleX, _, _) => "noteheadCircleX",
+        (Cross, _, _) => "noteheadPlusBlack",
+        (Circled, _, true) | (Circled, true, _) => "noteheadCircledHalf",
+        (Circled, _, _) => "noteheadCircledBlack",
     };
-    (if above { u } else { d }, w)
+    crate::smufl::get(name)
+        .map(|g| (g.0, g.1))
+        .unwrap_or_else(|| notehead(v))
 }
 
 /// Dynamic letters and their advance widths.
@@ -122,6 +144,7 @@ pub fn dynamic_letter(c: char) -> Option<(char, f32)> {
         'r' => ('\u{E523}', 1.108),
         's' => ('\u{E524}', 0.916),
         'z' => ('\u{E525}', 0.976),
+        'n' => ('\u{E526}', 1.232),
         _ => return None,
     })
 }

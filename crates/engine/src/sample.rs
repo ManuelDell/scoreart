@@ -80,10 +80,10 @@ pub fn ode_to_joy() -> Score {
         {
             ev.lyric = words.get(i).map(|w| w.to_string());
             if i == 0 {
-                ev.dynamic = Some(Dynamic::MP);
+                ev.dynamic = Dynamic::from_id("mp");
             }
             if i == 15 {
-                ev.dynamic = Some(Dynamic::MF);
+                ev.dynamic = Dynamic::from_id("mf");
             }
         }
     }

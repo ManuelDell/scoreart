@@ -60,6 +60,12 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
     let zoom = app.zoom;
     let selected = app.session.selection;
     let selected_ev = app.session.selected_event();
+    let range: std::collections::HashSet<scoreart_model::edit::EventRef> = if app.session.range_end.is_some()
+    {
+        app.session.selected_events().into_iter().collect()
+    } else {
+        Default::default()
+    };
     let input = app.session.input;
     let playhead = app.playback.as_ref().and_then(|p| p.at);
     let cursor = app.session.cursor;
@@ -124,7 +130,7 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 let ink = Color32::from_rgb(0x11, 0x11, 0x11);
                 for it in &page.items {
                     let sel = match (it.owner, selected_ev) {
-                        (Some(o), Some(s)) => o == s,
+                        (Some(o), Some(s)) => o == s || range.contains(&o),
                         _ => false,
                     } || match (it.owner, selected) {
                         (
@@ -343,11 +349,11 @@ fn handle_click(
     let r = match layout.hit(page, x, y) {
         Some(Target::Note { ev, note }) => s.execute(
             "select.event",
-            &json!({ "part": ev.part, "staff": ev.staff, "voice": ev.voice, "measure": ev.measure, "index": ev.index, "note": note }),
+            &json!({ "part": ev.part, "staff": ev.staff, "voice": ev.voice, "measure": ev.measure, "index": ev.index, "note": note, "extend": shift }),
         ),
         Some(Target::Rest { ev }) => s.execute(
             "select.event",
-            &json!({ "part": ev.part, "staff": ev.staff, "voice": ev.voice, "measure": ev.measure, "index": ev.index }),
+            &json!({ "part": ev.part, "staff": ev.staff, "voice": ev.voice, "measure": ev.measure, "index": ev.index, "extend": shift }),
         ),
         Some(Target::Measure { part, staff, measure }) => {
             s.execute("select.measure", &json!({ "part": part, "staff": staff, "measure": measure, "extend": shift }))

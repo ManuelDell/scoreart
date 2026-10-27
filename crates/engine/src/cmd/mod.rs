@@ -2,6 +2,7 @@
 //! the CLI and agents.
 
 mod edit;
+mod marks;
 mod note;
 mod score;
 
@@ -65,6 +66,7 @@ pub fn registry() -> &'static [CommandSpec] {
         let mut v = Vec::new();
         v.extend(edit::commands());
         v.extend(note::commands());
+        v.extend(marks::commands());
         v.extend(score::commands());
         v
     })

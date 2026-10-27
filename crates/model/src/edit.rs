@@ -136,13 +136,9 @@ impl Score {
                         n.tie = tie || n.tie && !continues && i + 1 == count;
                     }
                 }
-                events.push(Event {
-                    kind,
-                    duration: d,
-                    articulations: Vec::new(),
-                    dynamic: None,
-                    lyric: None,
-                });
+                let mut ev = Event::rest(d);
+                ev.kind = kind;
+                events.push(ev);
             }
             self.replace_span(pos, here, events)?;
             first = false;
@@ -206,9 +202,7 @@ impl Score {
                         note.tie = i + 1 < n;
                     }
                     if i > 0 {
-                        head.articulations.clear();
-                        head.dynamic = None;
-                        head.lyric = None;
+                        head.clear_marks();
                     }
                     out.push(head);
                 }
@@ -253,9 +247,7 @@ impl Score {
     pub fn make_rest(&mut self, r: EventRef) -> Result<()> {
         let e = self.event_mut(r).ok_or(Error::NotFound("event"))?;
         e.kind = EventKind::Rest;
-        e.articulations.clear();
-        e.lyric = None;
-        e.dynamic = None;
+        e.clear_marks();
         self.merge_rests(r.part, r.staff, r.measure, r.voice);
         Ok(())
     }
@@ -280,7 +272,9 @@ impl Score {
             let plain = e.is_rest()
                 && e.duration.tuplet.is_none()
                 && e.dynamic.is_none()
-                && e.articulations.is_empty();
+                && e.articulations.is_empty()
+                && e.text.is_none()
+                && e.chord_symbol.is_none();
             if plain {
                 run += e.ticks();
             } else {
@@ -299,6 +293,13 @@ impl Score {
             return Err(Error::Limit("measures"));
         }
         let appending = at == self.measures.len();
+        for sp in &mut self.spanners {
+            for a in [&mut sp.start, &mut sp.end] {
+                if a.measure >= at && !appending {
+                    a.measure += count;
+                }
+            }
+        }
         for _ in 0..count {
             self.measures.insert(at, MeasureInfo::default());
             for p in &mut self.parts {
@@ -338,6 +339,24 @@ impl Score {
         } else {
             None
         };
+        let removed = end - at;
+        self.spanners
+            .retain(|sp| !(sp.start.measure >= at && sp.end.measure < end));
+        for sp in &mut self.spanners {
+            if sp.start.measure >= end {
+                sp.start.measure -= removed;
+            } else if sp.start.measure >= at {
+                sp.start = crate::Anchor { measure: at, tick: 0 };
+            }
+            if sp.end.measure >= end {
+                sp.end.measure -= removed;
+            } else if sp.end.measure >= at {
+                sp.end = crate::Anchor {
+                    measure: at.saturating_sub(1),
+                    tick: u32::MAX,
+                };
+            }
+        }
         self.measures.drain(at..end);
         for p in &mut self.parts {
             let e = end.min(p.measures.len());

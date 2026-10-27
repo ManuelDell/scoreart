@@ -236,16 +236,18 @@ impl ScoreApp {
         }
         let events = ctx.input(|i| i.events.clone());
         for ev in events {
-            let egui::Event::Key {
-                key,
-                pressed: true,
-                modifiers: m,
-                ..
-            } = ev
-            else {
-                continue;
-            };
-            self.key(key, m);
+            match ev {
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers: m,
+                    ..
+                } => self.key(key, m),
+                // Characters without a key of their own: hairpins.
+                egui::Event::Text(t) if t == "<" => self.run("line.add", json!({ "type": "crescendo" })),
+                egui::Event::Text(t) if t == ">" => self.run("line.add", json!({ "type": "diminuendo" })),
+                _ => {}
+            }
         }
     }
 
@@ -299,6 +301,27 @@ impl ScoreApp {
             (Key::ArrowUp, _, _) if m.command && m.alt => self.run("select.staff-up", json!({})),
             (Key::ArrowDown, _, _) if m.command && m.alt => self.run("select.staff-down", json!({})),
             (Key::ArrowRight, _, _) if plain => self.run("select.next", json!({})),
+            (Key::ArrowRight, _, _) if shift_only => self.run("select.extend-next", json!({})),
+            (Key::ArrowLeft, _, _) if shift_only => self.run("select.extend-prev", json!({})),
+            (Key::S, _, _) if plain => self.run("line.add", json!({ "type": "slur" })),
+            (Key::Slash, _, _) if plain => self.run("note.grace", json!({ "type": "acciaccatura" })),
+            (Key::K, _, _) if cmd_only => {
+                self.dialog = Some(Dialog::Text {
+                    title: "Chord symbol (e.g. Cmaj7, F#m7/C#)",
+                    command: "note.chord-symbol",
+                    key: "text",
+                    value: String::new(),
+                })
+            }
+            (Key::T, _, _) if cmd_only => {
+                self.dialog = Some(Dialog::Text {
+                    title: "Staff text",
+                    command: "note.text",
+                    key: "text",
+                    value: String::new(),
+                })
+            }
+            (Key::M, _, _) if cmd_only => self.run("measure.rehearsal", json!({})),
             (Key::ArrowLeft, _, _) if plain => self.run("select.prev", json!({})),
             (Key::ArrowRight, _, _) if cmd_only => self.run("select.next-measure", json!({})),
             (Key::ArrowLeft, _, _) if cmd_only => self.run("select.prev-measure", json!({})),

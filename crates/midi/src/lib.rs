@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use scoreart_model::{Articulation, Barline, Score, TPQ};
+use scoreart_model::{Arpeggio, Barline, Score, SpannerKind, TPQ};
 
 /// MIDI ticks per quarter in exported files.
 pub const MIDI_TPQ: u16 = 480;
@@ -117,6 +117,15 @@ pub fn sequence(score: &Score) -> Sequence {
     // Open (tied) notes: (part, staff, voice, key) → index into seq.notes.
     let mut open: HashMap<(usize, usize, usize, u8), usize> = HashMap::new();
     let mut velocity: Vec<u8> = vec![80; score.parts.len()];
+    // Score position (repeats not unrolled) of a measure and tick, for spans.
+    let offsets: Vec<u64> = (0..score.measures.len())
+        .scan(0u64, |acc, m| {
+            let o = *acc;
+            *acc += u64::from(score.measure_ticks(m));
+            Some(o)
+        })
+        .collect();
+    let local = |m: usize, t: u32| -> u64 { offsets.get(m).copied().unwrap_or(0) + u64::from(t) };
     for &m in &order {
         seq.measure_starts.push((m, tick));
         let bpm = score.tempo_at(m);
@@ -129,42 +138,149 @@ pub fn sequence(score: &Score) -> Sequence {
         }
         for (pi, part) in score.parts.iter().enumerate() {
             let Some(pm) = part.measures.get(m) else { continue };
-            for (si, sm) in pm.staves.iter().enumerate() {
+            for (si, sm0) in pm.staves.iter().enumerate() {
+                // A one-measure repeat sign plays the last written measure again.
+                let mut src = m;
+                let mut sm = sm0;
+                while sm.measure_repeat && src > 0 {
+                    src -= 1;
+                    match part.measures.get(src).and_then(|x| x.staves.get(si)) {
+                        Some(x) => sm = x,
+                        None => break,
+                    }
+                }
+                let hairpins: Vec<_> = score
+                    .spanners
+                    .iter()
+                    .filter(|sp| sp.part == pi && sp.staff == si)
+                    .filter(|sp| {
+                        matches!(
+                            sp.kind,
+                            SpannerKind::Crescendo
+                                | SpannerKind::Diminuendo
+                                | SpannerKind::CrescendoLine
+                                | SpannerKind::DiminuendoLine
+                                | SpannerKind::Pedal
+                        )
+                    })
+                    .collect();
                 for (vi, v) in sm.voices.iter().enumerate() {
                     let mut t = tick;
-                    for e in &v.events {
+                    for (e, on) in v.events.iter().zip(v.onsets()) {
                         let d = u64::from(e.ticks());
-                        if let Some(dy) = e.dynamic
-                            && let Some(vel) = velocity.get_mut(pi)
-                        {
-                            *vel = dy.velocity();
+                        let here = local(src, on);
+                        let mut accent_vel: Option<u8> = None;
+                        if let Some(dy) = e.dynamic {
+                            if dy.is_level() {
+                                if let Some(vel) = velocity.get_mut(pi) {
+                                    *vel = dy.velocity();
+                                }
+                            } else if dy.id() == "fp" || dy.id() == "sfp" || dy.id() == "sfpp" {
+                                accent_vel = Some(dy.velocity());
+                                if let Some(vel) = velocity.get_mut(pi) {
+                                    *vel = if dy.id() == "sfpp" { 33 } else { 49 };
+                                }
+                            } else {
+                                accent_vel = Some(dy.velocity());
+                            }
                         }
-                        let vel = velocity.get(pi).copied().unwrap_or(80);
-                        let accent = e
-                            .articulations
-                            .iter()
-                            .any(|a| matches!(a, Articulation::Accent | Articulation::Marcato));
-                        let vel = if accent {
-                            vel.saturating_add(20).min(127)
-                        } else {
-                            vel
+                        let mut vel = i32::from(velocity.get(pi).copied().unwrap_or(80));
+                        // Hairpins swell or fade across their span.
+                        for hp in &hairpins {
+                            let (a, b) = (
+                                local(hp.start.measure, hp.start.tick),
+                                local(hp.end.measure, hp.end.tick),
+                            );
+                            if b > a && here >= a && here <= b {
+                                let f = (here - a) as f64 / (b - a) as f64;
+                                match hp.kind {
+                                    SpannerKind::Crescendo | SpannerKind::CrescendoLine => {
+                                        vel += (f * 28.0) as i32
+                                    }
+                                    SpannerKind::Diminuendo | SpannerKind::DiminuendoLine => {
+                                        vel -= (f * 28.0) as i32
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        if let Some(a) = accent_vel {
+                            vel = vel.max(i32::from(a));
+                        }
+                        for a in &e.articulations {
+                            vel += match a.id() {
+                                "accent" | "marcato" => 20,
+                                "stress" | "soft-accent" => 10,
+                                "unstress" => -12,
+                                _ => 0,
+                            };
+                        }
+                        let vel = vel.clamp(1, 127) as u8;
+                        let length = |d: u64| -> u64 {
+                            let ids: Vec<&str> = e.articulations.iter().map(|a| a.id()).collect();
+                            let f = if ids.iter().any(|i| i.starts_with("staccatissimo")) {
+                                0.3
+                            } else if ids.contains(&"staccato") {
+                                0.5
+                            } else if ids.contains(&"portato") {
+                                0.75
+                            } else {
+                                1.0
+                            };
+                            ((d as f64 * f) as u64).max(1)
                         };
-                        let short = e
-                            .articulations
+                        // Grace notes take a little time from the start of the note.
+                        let mut start = t;
+                        let graces: Vec<_> = e.grace.iter().filter(|g| !g.pitches.is_empty()).collect();
+                        if !graces.is_empty() && !e.is_rest() {
+                            let each = (u64::from(TPQ) / 8)
+                                .min(d / (2 * graces.len() as u64).max(1))
+                                .max(1);
+                            for g in &graces {
+                                for p in &g.pitches {
+                                    seq.notes.push(PlayNote {
+                                        start,
+                                        ticks: each,
+                                        key: p.midi(),
+                                        velocity: vel,
+                                        part: pi,
+                                        program: part.program,
+                                    });
+                                }
+                                start += each;
+                            }
+                        }
+                        // Pedal: notes ring to the end of the pedal line.
+                        let pedal_end = hairpins
                             .iter()
-                            .any(|a| matches!(a, Articulation::Staccato | Articulation::Staccatissimo));
-                        for n in e.notes() {
+                            .filter(|sp| sp.kind == SpannerKind::Pedal)
+                            .find(|sp| {
+                                local(sp.start.measure, sp.start.tick) <= here
+                                    && here <= local(sp.end.measure, sp.end.tick)
+                            })
+                            .map(|sp| local(sp.end.measure, sp.end.tick) + u64::from(TPQ));
+                        let n_notes = e.notes().len();
+                        for (ni, n) in e.notes().iter().enumerate() {
                             let key = n.pitch.midi();
                             let k = (pi, si, vi, key);
+                            // Rolled chords start one after another.
+                            let roll = match e.arpeggio {
+                                Arpeggio::Normal | Arpeggio::Up => ni as u64 * u64::from(TPQ) / 16,
+                                Arpeggio::Down => (n_notes - 1 - ni) as u64 * u64::from(TPQ) / 16,
+                                _ => 0,
+                            };
                             if let Some(&idx) = open.get(&k)
                                 && let Some(prev) = seq.notes.get_mut(idx)
                                 && prev.start + prev.ticks == t
                             {
                                 prev.ticks += d;
                             } else {
-                                let played = if short { (d / 2).max(1) } else { d };
+                                let mut played = length(d).saturating_sub(start - t + roll).max(1);
+                                if let Some(pe) = pedal_end {
+                                    played = played.max(pe.saturating_sub(here));
+                                }
                                 seq.notes.push(PlayNote {
-                                    start: t,
+                                    start: start + roll,
                                     ticks: played,
                                     key,
                                     velocity: vel,
