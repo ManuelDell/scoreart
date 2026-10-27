@@ -488,3 +488,108 @@ fn reads_irregular_measures_and_placements() {
     assert_eq!(back.measures[0].rehearsal_place, s.measures[0].rehearsal_place);
     assert_eq!(back.voice(0, 0, 3, 0).unwrap().events[0].text_place, t.text_place);
 }
+
+/// Odd meters and fine rhythms: 7/8, a change to 5/16, quintuplets, septuplets, double dots and
+/// 64ths.
+const MS_RHYTHMS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<museScore version="4.60">
+  <Score>
+    <Division>480</Division>
+    <Part id="1">
+      <Staff id="1"/>
+      <trackName>Flute</trackName>
+      <Instrument id="flute"><longName>Flute</longName><Channel><program value="73"/></Channel></Instrument>
+    </Part>
+    <Staff id="1">
+      <Measure>
+        <voice>
+          <TimeSig><sigN>7</sigN><sigD>8</sigD></TimeSig>
+          <Chord><durationType>quarter</durationType><Note><pitch>64</pitch><tpc>18</tpc></Note></Chord>
+          <Chord><durationType>quarter</durationType><Note><pitch>65</pitch><tpc>13</tpc></Note></Chord>
+          <Chord><dots>1</dots><durationType>quarter</durationType><Note><pitch>67</pitch><tpc>15</tpc></Note></Chord>
+        </voice>
+      </Measure>
+      <Measure>
+        <voice>
+          <TimeSig><sigN>5</sigN><sigD>16</sigD></TimeSig>
+          <Chord><durationType>16th</durationType><Note><pitch>67</pitch><tpc>15</tpc></Note></Chord>
+          <Chord><durationType>16th</durationType><Note><pitch>69</pitch><tpc>17</tpc></Note></Chord>
+          <Chord><dots>1</dots><durationType>eighth</durationType><Note><pitch>71</pitch><tpc>19</tpc></Note></Chord>
+        </voice>
+      </Measure>
+      <Measure>
+        <voice>
+          <TimeSig><sigN>4</sigN><sigD>4</sigD></TimeSig>
+          <Tuplet><normalNotes>4</normalNotes><actualNotes>5</actualNotes><baseNote>16th</baseNote></Tuplet>
+          <Chord><durationType>16th</durationType><Note><pitch>72</pitch><tpc>14</tpc></Note></Chord>
+          <Chord><durationType>16th</durationType><Note><pitch>74</pitch><tpc>16</tpc></Note></Chord>
+          <Chord><durationType>16th</durationType><Note><pitch>76</pitch><tpc>18</tpc></Note></Chord>
+          <Chord><durationType>16th</durationType><Note><pitch>77</pitch><tpc>13</tpc></Note></Chord>
+          <Chord><durationType>16th</durationType><Note><pitch>79</pitch><tpc>15</tpc></Note></Chord>
+          <endTuplet/>
+          <Tuplet><normalNotes>4</normalNotes><actualNotes>7</actualNotes><baseNote>16th</baseNote></Tuplet>
+          <Chord><durationType>16th</durationType><Note><pitch>72</pitch><tpc>14</tpc></Note></Chord>
+          <Chord><durationType>16th</durationType><Note><pitch>74</pitch><tpc>16</tpc></Note></Chord>
+          <Chord><durationType>16th</durationType><Note><pitch>76</pitch><tpc>18</tpc></Note></Chord>
+          <Chord><durationType>16th</durationType><Note><pitch>77</pitch><tpc>13</tpc></Note></Chord>
+          <Chord><durationType>16th</durationType><Note><pitch>79</pitch><tpc>15</tpc></Note></Chord>
+          <Chord><durationType>16th</durationType><Note><pitch>81</pitch><tpc>17</tpc></Note></Chord>
+          <Chord><durationType>16th</durationType><Note><pitch>83</pitch><tpc>19</tpc></Note></Chord>
+          <endTuplet/>
+          <Chord><durationType>half</durationType><Note><pitch>84</pitch><tpc>14</tpc></Note></Chord>
+        </voice>
+      </Measure>
+      <Measure>
+        <voice>
+          <Chord><dots>2</dots><durationType>eighth</durationType><Note><pitch>72</pitch><tpc>14</tpc></Note></Chord>
+          <Chord><durationType>32nd</durationType><Note><pitch>74</pitch><tpc>16</tpc></Note></Chord>
+          <Chord><durationType>64th</durationType><Note><pitch>76</pitch><tpc>18</tpc></Note></Chord>
+          <Chord><durationType>64th</durationType><Note><pitch>74</pitch><tpc>16</tpc></Note></Chord>
+          <Chord><durationType>64th</durationType><Note><pitch>72</pitch><tpc>14</tpc></Note></Chord>
+          <Chord><durationType>64th</durationType><Note><pitch>71</pitch><tpc>19</tpc></Note></Chord>
+          <Rest><dots>1</dots><durationType>eighth</durationType></Rest>
+          <Rest><durationType>half</durationType></Rest>
+        </voice>
+      </Measure>
+    </Staff>
+  </Score>
+</museScore>
+"#;
+
+#[test]
+fn reads_odd_meters_and_fine_rhythms() {
+    let s = from_bytes(MS_RHYTHMS.as_bytes()).unwrap();
+    let lens: Vec<u32> = (0..4).map(|m| s.measure_ticks(m)).collect();
+    assert_eq!(lens, [TPQ * 7 / 2, TPQ * 5 / 4, TPQ * 4, TPQ * 4]);
+    let counts = |s: &Score| -> Vec<usize> {
+        (0..4)
+            .map(|m| s.voice(0, 0, m, 0).unwrap().events.len())
+            .collect()
+    };
+    assert_eq!(counts(&s), [3, 3, 13, 8], "nothing padded or swallowed");
+    for m in 0..4 {
+        let sum: u32 = s
+            .voice(0, 0, m, 0)
+            .unwrap()
+            .events
+            .iter()
+            .map(|e| e.ticks())
+            .sum();
+        assert_eq!(sum, s.measure_ticks(m), "measure {} is exactly full", m + 1);
+    }
+    let tuplets = &s.voice(0, 0, 2, 0).unwrap().events;
+    assert_eq!(tuplets[0].duration.tuplet, Some(Tuplet { actual: 5, normal: 4 }));
+    assert_eq!(tuplets[5].duration.tuplet, Some(Tuplet { actual: 7, normal: 4 }));
+    assert_eq!(tuplets[5].ticks() * 7, TPQ, "septuplets are exact");
+    let fine = &s.voice(0, 0, 3, 0).unwrap().events;
+    assert_eq!(
+        (fine[0].duration.value, fine[0].duration.dots),
+        (NoteValue::Eighth, 2)
+    );
+    assert_eq!(fine[2].duration.value, NoteValue::N64th);
+    // MusicXML keeps all of it.
+    let back = from_str(&to_string(&s)).unwrap();
+    assert_eq!(counts(&back), counts(&s));
+    assert_eq!(back.voice(0, 0, 2, 0).unwrap().events, *tuplets);
+    assert_eq!(back.measures[1].time, s.measures[1].time);
+}

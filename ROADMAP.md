@@ -47,7 +47,8 @@
 
 ## Known limitations
 
-- MIDI import quantises to sixteenths: no triplets, one voice per staff, overlapping notes are
+- MIDI import quantises beat by beat; tuplets that do not start on a beat are not found, grace
+  notes become short notes, and there is one voice per staff; overlapping notes are
   cut at the next onset; repeats come in written out; drums (channel 10) are left out.
 
 - Ornaments (trills, turns, mordents) and tremolos are shown but not played as figures yet.

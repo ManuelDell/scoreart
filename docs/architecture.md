@@ -21,7 +21,8 @@ L1  crates/model          Score, parts, staves, measures, voices, events; edit p
 
 ## Model (`crates/model`)
 
-- Time in ticks, `TPQ = 1920` per quarter (2⁷·3·5: 64ths, triplets and quintuplets are exact).
+- Time in ticks, `TPQ = 13440` per quarter (2⁷·3·5·7: 64ths, triplets, quintuplets and septuplets are
+  exact).
 - `Score { meta, measures: Vec<MeasureInfo>, parts: Vec<Part> }`. `MeasureInfo` holds global
   changes (time, key, tempo, barline, repeat start, system text).
 - `Part { clefs (one per staff), measures: Vec<PartMeasure> }` → `StaffMeasure { voices, clef change }`

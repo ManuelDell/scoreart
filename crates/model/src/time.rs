@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-/// Ticks per quarter note. 1920 = 2⁷·3·5, so 64ths, triplets and quintuplets are exact.
-pub const TPQ: u32 = 1920;
+/// Ticks per quarter note. 13440 = 2⁷·3·5·7, so 64ths, triplets, quintuplets and septuplets are exact.
+pub const TPQ: u32 = 13440;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum NoteValue {

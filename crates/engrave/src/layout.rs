@@ -2218,53 +2218,55 @@ fn snap_space(y: f32, top: f32, dir: f32) -> f32 {
     }
 }
 
+/// The tuplet groups of a voice as first and last event index. A group is full once it lasts
+/// `normal` of its shortest note value (three triplet eighths last two eighths).
+fn tuplet_groups(v: &scoreart_model::Voice) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut open: Option<(usize, scoreart_model::Tuplet, u32, u32)> = None;
+    for (i, ev) in v.events.iter().enumerate() {
+        let Some(tu) = ev.duration.tuplet else {
+            if let Some((s, ..)) = open.take() {
+                out.push((s, i - 1));
+            }
+            continue;
+        };
+        let (start, acc, unit) = match open {
+            Some((s, t, acc, unit)) if t == tu => (s, acc, unit),
+            _ => {
+                if let Some((s, ..)) = open.take() {
+                    out.push((s, i - 1));
+                }
+                (i, 0, u32::MAX)
+            }
+        };
+        let acc = acc + ev.ticks();
+        let unit = unit.min(ev.duration.value.ticks());
+        if acc >= unit.saturating_mul(u32::from(tu.normal)) {
+            out.push((start, i));
+            open = None;
+        } else {
+            open = Some((start, tu, acc, unit));
+        }
+    }
+    if let Some((s, ..)) = open {
+        out.push((s, v.events.len() - 1));
+    }
+    out
+}
+
 /// Tuplet number centred over a tuplet group, drawn once at the group's first event.
 fn draw_tuplet(o: &mut Out, gg: &EvGeo, e: &Event, geos: &[EvGeo], v: &scoreart_model::Voice, top: f32) {
     let Some(tu) = e.duration.tuplet else { return };
     let idx = gg.ev.index;
-    // Is this the first event of its group?
-    let group_len = e.duration.value.ticks() * u32::from(tu.normal);
-    let mut start = 0usize;
-    let mut acc = 0u32;
-    for (i, ev) in v.events.iter().enumerate() {
-        if ev.duration.tuplet != Some(tu) {
-            acc = 0;
-            start = i + 1;
-            continue;
-        }
-        if acc == 0 {
-            start = i;
-        }
-        acc += ev.ticks() * u32::from(tu.actual) / u32::from(tu.normal.max(1));
-        if i >= idx && acc >= group_len {
-            break;
-        }
-        if acc >= group_len {
-            acc = 0;
-        }
-    }
-    if start != idx {
+    let Some(end) = tuplet_groups(v).into_iter().find(|g| g.0 == idx).map(|g| g.1) else {
         return;
-    }
-    let members: Vec<&EvGeo> = geos
+    };
+    let last = geos
         .iter()
         .skip(idx)
-        .take_while(|x| {
-            v.events
-                .get(x.ev.index)
-                .is_some_and(|ev| ev.duration.tuplet == Some(tu))
-        })
-        .collect();
-    let mut sum = 0u32;
-    let mut last = gg;
-    for m in &members {
-        sum += v.events.get(m.ev.index).map(|ev| ev.ticks()).unwrap_or(0) * u32::from(tu.actual)
-            / u32::from(tu.normal.max(1));
-        last = m;
-        if sum >= group_len {
-            break;
-        }
-    }
+        .take_while(|x| x.ev.index <= end)
+        .last()
+        .unwrap_or(gg);
     let cx = (gg.x + last.x + g::HEAD_W) / 2.0;
     let up = gg.up || gg.rest;
     let y = if up {

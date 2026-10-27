@@ -1,7 +1,8 @@
 //! Reading Standard MIDI Files into a score.
 //!
 //! MIDI stores performance, not notation, so this is an interpretation:
-//! - Note times are quantised to sixteenths.
+//! - Note times are quantised beat by beat to the simplest grid that fits: plain values down to
+//!   64ths, or triplets, quintuplets and septuplets.
 //! - Each track (or each channel of a single-track file) becomes a part.
 //! - Piano-like parts are split at middle C onto two staves; other parts get the clef that fits
 //!   their range.
@@ -15,11 +16,25 @@ use midly::{MetaMessage, MidiMessage, Smf, Timing, TrackEventKind};
 use scoreart_model::edit::Pos;
 use scoreart_model::{
     Clef, Duration, EventKind, INSTRUMENTS, Instrument, KeySig, Note, Pitch, Score, TPQ, Tempo, TimeSig,
-    clip, instrument, limits,
+    Tuplet, clip, instrument, limits,
 };
 
-/// The finest note value kept.
+/// Grid for time signature changes and for notes after the last measure.
 const GRID: u32 = TPQ / 4;
+/// Beat subdivisions tried per beat, with how much each is disfavoured (in beats of timing
+/// error): plain grids first, then triplets, quintuplets and septuplets.
+const GRIDS: [(u32, f64); 10] = [
+    (1, 0.0),
+    (2, 0.0),
+    (4, 0.01),
+    (3, 0.015),
+    (8, 0.025),
+    (6, 0.025),
+    (5, 0.03),
+    (16, 0.04),
+    (7, 0.04),
+    (12, 0.04),
+];
 /// Most notes read from one file.
 const MAX_NOTES: usize = 200_000;
 
@@ -89,10 +104,8 @@ pub fn from_smf(bytes: &[u8]) -> Result<Score, String> {
         Timing::Metrical(t) => u64::from(t.as_int().max(1)),
         Timing::Timecode(..) => return Err("MIDI files timed in SMPTE frames are not supported".into()),
     };
-    let to_ticks = |t: u64| -> u64 {
-        let raw = t.saturating_mul(u64::from(TPQ)) / ppq;
-        (raw + u64::from(GRID) / 2) / u64::from(GRID) * u64::from(GRID)
-    };
+    let raw = |t: u64| -> u64 { t.saturating_mul(u64::from(TPQ)) / ppq };
+    let to_ticks = |t: u64| -> u64 { snap(raw(t), u64::from(GRID)) };
 
     let mut tempo: Option<u32> = None;
     let mut times: BTreeMap<u64, (u8, u8)> = BTreeMap::new();
@@ -156,10 +169,10 @@ pub fn from_smf(bytes: &[u8]) -> Result<Score, String> {
                                 v.program = programs.get(usize::from(ch)).copied().flatten().unwrap_or(0);
                                 v.name = track_name.clone().unwrap_or_default();
                             }
-                            let (s, e) = (to_ticks(start), to_ticks(t));
+                            let (s, e) = (raw(start), raw(t));
                             v.notes.push(RawNote {
                                 start: s,
-                                end: e.max(s + u64::from(GRID)),
+                                end: e.max(s + 1),
                                 key: k.as_int(),
                             });
                             total += 1;
@@ -247,6 +260,7 @@ pub fn from_smf(bytes: &[u8]) -> Result<Score, String> {
         .max()
         .unwrap_or(0);
     let mut starts: Vec<u64> = Vec::new();
+    let mut lens: Vec<u64> = Vec::new();
     let mut changes: Vec<(usize, TimeSig)> = Vec::new();
     let mut cur = first_time;
     let mut at = 0u64;
@@ -261,7 +275,9 @@ pub fn from_smf(bytes: &[u8]) -> Result<Score, String> {
             }
         }
         starts.push(at);
-        at += u64::from(cur.measure_ticks().max(GRID));
+        let len = u64::from(cur.measure_ticks().max(GRID));
+        lens.push(len);
+        at += len;
     }
 
     let templates: Vec<&Instrument> = plans.iter().map(|p| template(p.program)).collect();
@@ -330,24 +346,224 @@ pub fn from_smf(bytes: &[u8]) -> Result<Score, String> {
         }
         score.normalize();
         for (staff, notes) in staves.iter().enumerate() {
-            let mut notes = notes.clone();
+            let beats = Beats::new(notes, &starts, &lens);
+            let mut notes: Vec<RawNote> = notes
+                .iter()
+                .map(|n| {
+                    let start = beats.quantise(n.start);
+                    let end = beats.quantise(n.end).max(start + beats.step(start));
+                    RawNote {
+                        start,
+                        end,
+                        key: n.key,
+                    }
+                })
+                .collect();
             notes.sort_by_key(|n| (n.start, n.key));
-            write_staff(&mut score, pi, staff, &notes, &starts, key_sig)?;
+            notes.dedup_by_key(|n| (n.start, n.key));
+            write_staff(&mut score, pi, staff, &notes, &beats, key_sig);
         }
     }
     score.normalize();
     Ok(score)
 }
 
+/// Rounds `t` to the nearest multiple of `step`.
+fn snap(t: u64, step: u64) -> u64 {
+    (t + step / 2) / step * step
+}
+
+/// One beat (a quarter, or the shorter rest of a measure) and the grid chosen for it.
+#[derive(Clone, Copy, Debug)]
+struct Beat {
+    start: u64,
+    len: u64,
+    /// Subdivisions of a quarter: 1, 2, 4, 8, 16 are plain; 3, 6, 12 triplets; 5 and 7
+    /// quintuplets and septuplets.
+    div: u32,
+}
+
+impl Beat {
+    fn step(&self) -> u64 {
+        u64::from(TPQ / self.div)
+    }
+
+    /// The tuplet ratio its notes are written in, if any.
+    fn tuplet(&self) -> Option<Tuplet> {
+        let (actual, normal) = match self.div {
+            3 | 12 => (3, 2),
+            6 => (6, 4),
+            5 => (5, 4),
+            7 => (7, 4),
+            _ => return None,
+        };
+        Some(Tuplet { actual, normal })
+    }
+}
+
+/// The beats of a staff, each with the grid that best fits the notes starting in it.
+struct Beats {
+    beats: BTreeMap<u64, Beat>,
+    /// Measure starts, and the end of the last measure.
+    starts: Vec<u64>,
+    end: u64,
+}
+
+impl Beats {
+    fn new(notes: &[RawNote], starts: &[u64], lens: &[u64]) -> Beats {
+        let mut onsets: Vec<u64> = notes.iter().map(|n| n.start).collect();
+        onsets.sort_unstable();
+        let mut ends: Vec<u64> = notes.iter().map(|n| n.end).collect();
+        ends.sort_unstable();
+        let within = |ts: &'_ [u64], at: u64, len: u64| -> std::ops::Range<usize> {
+            ts.partition_point(|t| *t < at)..ts.partition_point(|t| *t < at + len)
+        };
+        let mut beats = BTreeMap::new();
+        for (m, (&s, &len)) in starts.iter().zip(lens).enumerate() {
+            let end = s + len;
+            let mut at = s;
+            while at < end {
+                let blen = u64::from(TPQ).min(end - at);
+                let on = onsets.get(within(&onsets, at, blen)).unwrap_or(&[]);
+                let off = ends.get(within(&ends, at, blen)).unwrap_or(&[]);
+                let div = best_grid(on, off, at, blen);
+                beats.insert(
+                    at,
+                    Beat {
+                        start: at,
+                        len: blen,
+                        div,
+                    },
+                );
+                at += blen;
+                if beats.len() > 64 * limits::MAX_MEASURES {
+                    break;
+                }
+            }
+            if m + 1 == starts.len() {
+                break;
+            }
+        }
+        let end = starts.last().zip(lens.last()).map_or(0, |(s, l)| s + l);
+        Beats {
+            beats,
+            starts: starts.to_vec(),
+            end,
+        }
+    }
+
+    fn beat(&self, t: u64) -> Option<&Beat> {
+        self.beats
+            .range(..=t)
+            .next_back()
+            .map(|(_, b)| b)
+            .filter(|b| t < b.start + b.len)
+    }
+
+    /// The measure around `t`.
+    fn measure(&self, t: u64) -> usize {
+        self.starts.partition_point(|s| *s <= t).saturating_sub(1)
+    }
+
+    fn quantise(&self, t: u64) -> u64 {
+        match self.beat(t) {
+            Some(b) => (b.start + snap(t - b.start, b.step())).min(b.start + b.len),
+            None => snap(t, u64::from(GRID)),
+        }
+    }
+
+    fn step(&self, t: u64) -> u64 {
+        self.beat(t).map_or(u64::from(GRID), Beat::step)
+    }
+
+    /// Splits `[a, b)` at barlines and around tuplet beats, and gives each piece's durations.
+    fn pieces(&self, a: u64, b: u64) -> Vec<(u64, Vec<Duration>)> {
+        let mut cuts: Vec<u64> = self.starts.iter().copied().filter(|t| *t > a && *t < b).collect();
+        // Where a run of beats in one tuplet ratio begins or ends.
+        let first = self.beat(a).map_or(a, |x| x.start);
+        let mut prev = self.beat(first.saturating_sub(1)).and_then(Beat::tuplet);
+        for x in self.beats.range(first..b).map(|(_, x)| x) {
+            let cur = x.tuplet();
+            if cur != prev && x.start > a {
+                cuts.push(x.start);
+            }
+            prev = cur;
+        }
+        cuts.push(b);
+        cuts.sort_unstable();
+        cuts.dedup();
+        let mut out = Vec::new();
+        let mut at = a;
+        for cut in cuts {
+            if cut <= at {
+                continue;
+            }
+            let len = u32::try_from(cut - at).unwrap_or(u32::MAX).min(TPQ * 16);
+            let plain = durations(len);
+            let exact = plain.iter().map(|d| d.ticks()).sum::<u32>() == len;
+            // Inside tuplet beats only whole beats are written plainly.
+            let on_beats =
+                self.beat(at).is_some_and(|x| x.start == at) && self.beat(cut).is_none_or(|x| x.start == cut);
+            let durs = match self.beat(at).and_then(Beat::tuplet) {
+                Some(tu) if !(exact && on_beats) => {
+                    let scaled = len * u32::from(tu.actual) / u32::from(tu.normal);
+                    let mut ds = durations(scaled);
+                    if ds.iter().map(|d| d.ticks()).sum::<u32>() == scaled {
+                        for d in &mut ds {
+                            d.tuplet = Some(tu);
+                        }
+                        ds
+                    } else {
+                        plain
+                    }
+                }
+                _ => plain,
+            };
+            out.push((at, durs));
+            at = cut;
+        }
+        out
+    }
+}
+
+/// One duration of exactly `ticks` (double dots allowed), or the fewest that add up to it.
+fn durations(ticks: u32) -> Vec<Duration> {
+    Duration::from_ticks(ticks).map_or_else(|| Duration::decompose(ticks), |d| vec![d])
+}
+
+/// The grid for one beat: the one with the least timing error plus its complexity cost. Note
+/// ends count half as much as onsets.
+fn best_grid(onsets: &[u64], ends: &[u64], start: u64, len: u64) -> u32 {
+    let full = len == u64::from(TPQ);
+    let mut best = (4, f64::MAX);
+    for (div, cost) in GRIDS {
+        let step = u64::from(TPQ / div);
+        // A partial beat (the end of a 5/16 measure) only takes plain grids that fit it.
+        if !full && (!len.is_multiple_of(step) || matches!(div, 3 | 5 | 6 | 7 | 12)) {
+            continue;
+        }
+        let err = |ts: &[u64]| -> f64 {
+            ts.iter()
+                .map(|t| {
+                    let off = t - start;
+                    off.abs_diff(snap(off, step).min(len)) as f64
+                })
+                .sum()
+        };
+        let weight = onsets.len() as f64 + ends.len() as f64 / 2.0;
+        let score = (err(onsets) + err(ends) / 2.0) / f64::from(TPQ) / weight.max(1.0) + cost;
+        if score < best.1 {
+            best = (div, score);
+        }
+    }
+    best.0
+}
+
 /// Writes one staff's notes as chords and rests in voice 1.
-fn write_staff(
-    score: &mut Score,
-    part: usize,
-    staff: usize,
-    notes: &[RawNote],
-    starts: &[u64],
-    key: KeySig,
-) -> Result<(), String> {
+fn write_staff(score: &mut Score, part: usize, staff: usize, notes: &[RawNote], beats: &Beats, key: KeySig) {
+    // The staff as a sequence of chords and rests up to the end of the last measure.
+    let mut spans: Vec<(u64, u64, Vec<u8>)> = Vec::new();
+    let mut at = 0u64;
     let mut i = 0usize;
     while i < notes.len() {
         let Some(first) = notes.get(i) else { break };
@@ -357,53 +573,81 @@ fn write_staff(
             j += 1;
         }
         let group = notes.get(i..j).unwrap_or(&[]);
-        let next = notes.get(j).map(|n| n.start);
+        i = j;
+        if onset >= beats.end {
+            break;
+        }
         let mut end = group
             .iter()
             .map(|n| n.end)
             .min()
             .unwrap_or(onset + u64::from(GRID));
-        if let Some(nx) = next {
+        if let Some(nx) = notes.get(j).map(|n| n.start) {
             end = end.min(nx);
         }
-        i = j;
-        let len = end.saturating_sub(onset);
-        if len == 0 {
+        // Held notes are cut after four whole notes, as hung notes in a file often are.
+        end = end.min(beats.end).min(onset + u64::from(TPQ) * 16);
+        if end <= onset {
             continue;
         }
-        // Where the onset lies: measure and tick inside it.
-        let m = starts.partition_point(|s| *s <= onset).saturating_sub(1);
-        let tick = onset - starts.get(m).copied().unwrap_or(0);
-        let mut pos = Pos {
-            part,
-            staff,
-            voice: 0,
-            measure: m,
-            tick: u32::try_from(tick).unwrap_or(0),
-        };
+        if onset > at {
+            spans.push((at, onset, Vec::new()));
+        }
         let mut keys: Vec<u8> = group.iter().map(|n| n.key).collect();
         keys.sort_unstable();
         keys.dedup();
         keys.truncate(limits::MAX_CHORD_NOTES);
-        let pieces = Duration::decompose(u32::try_from(len).unwrap_or(u32::MAX).min(TPQ * 16));
-        let count = pieces.len();
-        for (k, d) in pieces.into_iter().enumerate() {
-            let notes: Vec<Note> = keys
-                .iter()
-                .map(|key_no| {
-                    let mut n = Note::new(Pitch::from_midi(i32::from(*key_no), key));
-                    n.tie = k + 1 < count;
-                    n
-                })
-                .collect();
-            match score.overwrite(pos, EventKind::Chord(notes), d) {
-                Ok(p) => pos = p,
-                // Past the last measure or a limit: stop this staff quietly.
-                Err(_) => return Ok(()),
+        spans.push((onset, end, keys));
+        at = end;
+    }
+    if at < beats.end {
+        spans.push((at, beats.end, Vec::new()));
+    }
+    let touched: std::collections::BTreeSet<usize> = spans
+        .iter()
+        .filter(|(_, _, k)| !k.is_empty())
+        .flat_map(|(a, b, _)| beats.measure(*a)..=beats.measure(b.saturating_sub(1)))
+        .collect();
+    for (a, b, keys) in spans {
+        let mut pieces = beats.pieces(a, b);
+        // Rests are already there; they are rewritten in measures with notes only.
+        if keys.is_empty() {
+            pieces.retain(|(start, _)| touched.contains(&beats.measure(*start)));
+        }
+        let count: usize = pieces.iter().map(|(_, d)| d.len()).sum();
+        let mut k = 0usize;
+        for (start, durs) in pieces {
+            let m = beats.measure(start);
+            let mut pos = Pos {
+                part,
+                staff,
+                voice: 0,
+                measure: m,
+                tick: u32::try_from(start - beats.starts.get(m).copied().unwrap_or(0)).unwrap_or(0),
+            };
+            for d in durs {
+                k += 1;
+                let kind = if keys.is_empty() {
+                    EventKind::Rest
+                } else {
+                    EventKind::Chord(
+                        keys.iter()
+                            .map(|key_no| {
+                                let mut n = Note::new(Pitch::from_midi(i32::from(*key_no), key));
+                                n.tie = k < count;
+                                n
+                            })
+                            .collect(),
+                    )
+                };
+                match score.overwrite(pos, kind, d) {
+                    Ok(p) => pos = p,
+                    // Past the last measure or a limit: stop this staff quietly.
+                    Err(_) => return,
+                }
             }
         }
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -576,5 +820,56 @@ mod tests {
             (u32::from(u16::MAX) * 100, off(0, 60)),
         ]]);
         let _ = from_smf(&far);
+    }
+
+    #[test]
+    fn finds_tuplets_and_fine_values() {
+        // 480 ticks per quarter: triplet eighths, quintuplet 16ths, 32nds, a dotted eighth and a
+        // 16th; then quarter triplets over two beats and a half note.
+        let mut notes: Vec<u32> = Vec::new();
+        notes.extend([160; 3]);
+        notes.extend([96; 5]);
+        notes.extend([60; 8]);
+        notes.extend([360, 120]);
+        notes.extend([320; 3]);
+        notes.push(960);
+        let mut track = Vec::new();
+        for (i, len) in notes.iter().enumerate() {
+            let key = 60 + (i % 12) as u8;
+            track.push((0, on(0, key)));
+            // Played a little short, as MIDI files often are.
+            track.push((len - 1, off(0, key)));
+            track.push((1, TrackEventKind::Meta(MetaMessage::Text(b""))));
+        }
+        let s = from_smf(&smf(vec![track])).unwrap();
+        let v = |m: usize| s.voice(0, 0, m, 0).unwrap().events.clone();
+        let m1 = v(0);
+        let shape: Vec<(NoteValue, u8, Option<u8>)> = m1
+            .iter()
+            .map(|e| {
+                (
+                    e.duration.value,
+                    e.duration.dots,
+                    e.duration.tuplet.map(|t| t.actual),
+                )
+            })
+            .collect();
+        let mut want = vec![(NoteValue::Eighth, 0, Some(3)); 3];
+        want.extend([(NoteValue::N16th, 0, Some(5)); 5]);
+        want.extend([(NoteValue::N32nd, 0, None); 8]);
+        want.extend([(NoteValue::Eighth, 1, None), (NoteValue::N16th, 0, None)]);
+        assert_eq!(shape, want);
+        assert!(
+            m1.iter().all(|e| matches!(e.kind, EventKind::Chord(_))),
+            "no gaps from short notes"
+        );
+        let m2 = v(1);
+        assert_eq!(m2.len(), 4);
+        assert!(
+            m2[..3]
+                .iter()
+                .all(|e| e.duration.value == NoteValue::Quarter && e.duration.tuplet.is_some())
+        );
+        assert_eq!(m2[3].duration.value, NoteValue::Half);
     }
 }
