@@ -8,7 +8,7 @@
 
 - Workspace, rules (`AGENTS.md`), licences, attribution check, `cargo xtask ci`
   (fmt, clippy, tests, assets, layers, wasm).
-- Model, MusicXML 4.0 / MXL round trip, MIDI export, SVG export.
+- Model, MusicXML 4.0 / MXL round trip, MIDI import and export, SVG export.
 - Engraver: spacing, justified systems, pages, stems, beams, flags, accidentals, ledger lines,
   dots, ties (also across systems), rests, multiple voices, chords with seconds, clefs, keys,
   times, barlines, repeats, braces, brackets, articulations, dynamics, lyrics, tempo, text.
@@ -40,12 +40,15 @@
 | 6 | **Nextcloud app** (reuse the `?host=parent` bridge, like the ArtCraft-Office integration) | Use it where the files are | 3–5 h |
 | 7 | Multi-measure rests, part extraction, transposing instruments | Ensemble work | 12–20 h |
 | 8 | Collision avoidance (lyrics, dynamics, articulations), better beam slopes, cross-staff beaming | Engraving quality | ongoing |
-| 9 | MIDI import; MusicXML corpus tests against files from other scorewriters | File exchange | 8–12 h |
+| 9 | MusicXML corpus tests against files from other scorewriters; MIDI import with triplets and voices | File exchange | 8–12 h |
 | 10 | Chord symbols, guitar tablature, percussion notation | Popular use | 15–25 h |
 | 11 | MCP server (agents drive the same commands) | Agent control | 3–5 h |
 | 12 | Interface translations (German first) | Reach | 4–6 h |
 
 ## Known limitations
+
+- MIDI import quantises to sixteenths: no triplets, one voice per staff, overlapping notes are
+  cut at the next onset; repeats come in written out; drums (channel 10) are left out.
 
 - Ornaments (trills, turns, mordents) and tremolos are shown but not played as figures yet.
 - No automatic collision avoidance between marks of neighbouring notes beyond stacking per note.

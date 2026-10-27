@@ -53,7 +53,7 @@ Source: `storytold/wordcraft`, `storytold/gridcraft` (MIT OR Apache-2.0) and
 | MusicXML 4.0 | W3C Community Group report under the W3C Community **Final Specification Agreement** (royalty-free commitments; XSD/DTD freely redistributable) | native file format. |
 | SMuFL 1.4 | W3C Community Group spec (same FSA) | glyph code points and engraving metrics. |
 | Bravura | SMuFL reference font by Steinberg, **SIL OFL 1.1**, reserved font name "Bravura" | bundled unmodified in `assets/fonts/` with `OFL-Bravura.txt`; if we ever subset or modify it, the result must be renamed. |
-| Standard MIDI File 1.0 | spec published by the MIDI Association | MIDI export (crate `midly`, Unlicense). |
+| Standard MIDI File 1.0 | spec published by the MIDI Association | MIDI import and export (crate `midly`, Unlicense). |
 | Engraving rules (e.g. from *Behind Bars*) | facts and conventions are not copyrightable; the book's text and examples are | rules implemented from general knowledge; never copy text or example scores. |
 | Keyboard shortcuts / workflow (N, A–G, 1–8 durations …) | functional, not copyrightable | MuseScore-like note input so users feel at home; own UI design, own icons. |
 | Sample scores | must be our own or public domain | only scores written for this repo or public-domain melodies (e.g. folk tunes), recorded in `ATTRIBUTION.md`. |

@@ -221,8 +221,8 @@ impl Host for WebHost {
         wasm_bindgen_futures::spawn_local(async move {
             let file = rfd::AsyncFileDialog::new()
                 .add_filter(
-                    "Scores (MusicXML, MuseScore)",
-                    &["musicxml", "mxl", "xml", "mscz", "mscx"],
+                    "Scores (MusicXML, MuseScore, MIDI)",
+                    &["musicxml", "mxl", "xml", "mscz", "mscx", "mid", "midi"],
                 )
                 .pick_file()
                 .await;

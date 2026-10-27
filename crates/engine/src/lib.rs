@@ -304,7 +304,12 @@ impl Session {
 
     /// Opens a score from bytes; the format is taken from the file name (MusicXML or MXL).
     pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<()> {
-        let score = scoreart_musicxml::from_bytes(bytes).map_err(|e| Error::File(e.to_string()))?;
+        let midi = bytes.starts_with(b"MThd");
+        let score = if midi {
+            scoreart_midi::from_smf(bytes).map_err(Error::File)?
+        } else {
+            scoreart_musicxml::from_bytes(bytes).map_err(|e| Error::File(e.to_string()))?
+        };
         let file_name = std::path::Path::new(name)
             .file_name()
             .map(|f| f.to_string_lossy().into_owned())
@@ -316,7 +321,12 @@ impl Session {
             ..Session::new(score)
         };
         let lower = self.file_name.to_ascii_lowercase();
-        self.status = if lower.ends_with(".mscz") || lower.ends_with(".mscx") {
+        self.status = if midi {
+            format!(
+                "Opened {} (MIDI, quantised to sixteenths) — Save writes MusicXML",
+                self.file_name
+            )
+        } else if lower.ends_with(".mscz") || lower.ends_with(".mscx") {
             format!("Opened {} (MuseScore) — Save writes MusicXML", self.file_name)
         } else {
             format!("Opened {}", self.file_name)

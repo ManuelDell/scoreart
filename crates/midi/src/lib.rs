@@ -9,6 +9,9 @@
     clippy::unreachable
 )]
 
+mod import;
+pub use import::from_smf;
+
 use std::collections::HashMap;
 
 use scoreart_model::{Arpeggio, Barline, Score, SpannerKind, TPQ};

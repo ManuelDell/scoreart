@@ -63,7 +63,8 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   write — exchange scores with MuseScore, Dorico, Sibelius, Finale), **MuseScore files**
   (`.mscz`, `.mscx` of MuseScore 3 and 4, checked against files saved by MuseScore Studio 4.7)
   open directly with notes, marks, lines, chord symbols, repeats and jumps (saving writes
-  MusicXML), **MIDI** export,
+  MusicXML), **MIDI** import (quantised to sixteenths; MuseScore's one-track-per-staff
+  files become parts with their staves) and export,
   **SVG** export with real glyph outlines, **WAV** export.
 - **Web build** with a `?host=parent` `postMessage` bridge (`scoreart:ready/open/save/dirty`) so
   a same-origin page — for example a Nextcloud app — can open and save scores in it.
