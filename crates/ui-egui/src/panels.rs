@@ -141,12 +141,7 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                             ui.close();
                         }
                         if ui.button(t("Tempo…")).clicked() {
-                            app.dialog = Some(Dialog::Text {
-                                title: t("Tempo (quarter notes per minute)"),
-                                command: "measure.tempo",
-                                key: "bpm",
-                                value: "100".into(),
-                            });
+                            open_tempo(app);
                             ui.close();
                         }
                     });
@@ -1077,12 +1072,78 @@ pub fn palette_content(app: &mut ScoreApp, ui: &mut egui::Ui) {
             }
         });
         section(ui, t("Tempo"), false, |ui| {
+            let unit = beat_unit_here(app);
             for bpm in [60, 72, 80, 92, 100, 108, 120, 132, 144] {
-                if text_button(ui, bpm.to_string(), &format!("♩ = {bpm}")).clicked() {
-                    app.run("measure.tempo", json!({ "bpm": bpm }));
+                if text_button(ui, bpm.to_string(), &format!("{} = {bpm}", unit_symbol(unit))).clicked() {
+                    app.run("measure.tempo", json!({ "bpm": bpm, "unit": unit.id() }));
                 }
             }
         });
+    });
+}
+
+/// The beat a tempo is counted in at the selection: dotted quarters in 6/8, 9/8 and 12/8.
+pub(crate) fn beat_unit_here(app: &ScoreApp) -> scoreart_model::BeatUnit {
+    let ts = app.session.score.time_at(app.session.focus().2);
+    if ts.beat_type == 8 && ts.beats.is_multiple_of(3) && ts.beats > 3 {
+        scoreart_model::BeatUnit::DottedQuarter
+    } else {
+        scoreart_model::BeatUnit::Quarter
+    }
+}
+
+pub(crate) fn unit_symbol(u: scoreart_model::BeatUnit) -> &'static str {
+    use scoreart_model::BeatUnit::*;
+    match u {
+        Eighth => "♪",
+        DottedEighth => "♪.",
+        Quarter => "♩",
+        DottedQuarter => "♩.",
+        Half => "𝅗𝅥",
+        DottedHalf => "𝅗𝅥.",
+    }
+}
+
+fn unit_name(u: scoreart_model::BeatUnit) -> &'static str {
+    use scoreart_model::BeatUnit::*;
+    match u {
+        Eighth => "Eighth",
+        DottedEighth => "Dotted eighth",
+        Quarter => "Quarter",
+        DottedQuarter => "Dotted quarter",
+        Half => "Half",
+        DottedHalf => "Dotted half",
+    }
+}
+
+/// Opens the tempo dialog with the beat of the selection.
+pub(crate) fn open_tempo(app: &mut ScoreApp) {
+    let unit = beat_unit_here(app);
+    let bpm = if unit == scoreart_model::BeatUnit::DottedQuarter {
+        "60"
+    } else {
+        "100"
+    };
+    app.dialog = Some(Dialog::Tempo {
+        bpm: bpm.into(),
+        unit,
+    });
+}
+
+/// Opens the measure-length dialog for the selection (a first measure is a pickup).
+pub(crate) fn open_measure_length(app: &mut ScoreApp) {
+    let m = app.session.focus().2;
+    let length = match app.session.score.measures.get(m).and_then(|i| i.actual) {
+        Some(t) => {
+            let eighths = t / (scoreart_model::TPQ / 2);
+            format!("{eighths}/8")
+        }
+        None if m == 0 => "1/8".into(),
+        None => String::new(),
+    };
+    app.dialog = Some(Dialog::MeasureLength {
+        length,
+        counted: m != 0,
     });
 }
 
@@ -1467,6 +1528,106 @@ pub fn dialogs(app: &mut ScoreApp, ctx: &egui::Context) {
             close = crate::texts::block_dialog(app, ctx, d);
             if !close {
                 return;
+            }
+        }
+        Dialog::Tempo { mut bpm, mut unit } => {
+            let resp = egui::Modal::new(egui::Id::unique("tempo_dialog")).show(ctx, |ui| {
+                ui.set_width(340.0);
+                ui.heading(t("Tempo"));
+                ui.label(
+                    RichText::new(t("Beats per minute of a note value (in 6/8: dotted quarters).")).small(),
+                );
+                ui.add_space(4.0);
+                let mut enter = false;
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("tempo-unit")
+                        .selected_text(unit_symbol(unit))
+                        .width(60.0)
+                        .show_ui(ui, |ui| {
+                            for u in scoreart_model::BeatUnit::ALL {
+                                ui.selectable_value(
+                                    &mut unit,
+                                    u,
+                                    format!("{}  {}", unit_symbol(u), t(unit_name(u))),
+                                );
+                            }
+                        });
+                    ui.label("=");
+                    let r = ui.add(egui::TextEdit::singleline(&mut bpm).desired_width(60.0));
+                    r.request_focus();
+                    enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                });
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    (
+                        ui.button(t("OK")).clicked() || enter,
+                        ui.button(t("Cancel")).clicked(),
+                    )
+                })
+                .inner
+            });
+            let (ok, cancel) = resp.inner;
+            if ok {
+                let n = bpm.trim().parse::<i64>().unwrap_or(0);
+                app.run("measure.tempo", json!({ "bpm": n, "unit": unit.id() }));
+                close = true;
+            } else if cancel || resp.should_close() {
+                close = true;
+            } else {
+                app.dialog = Some(Dialog::Tempo { bpm, unit });
+            }
+        }
+        Dialog::MeasureLength {
+            mut length,
+            mut counted,
+        } => {
+            let resp = egui::Modal::new(egui::Id::unique("length_dialog")).show(ctx, |ui| {
+                ui.set_width(380.0);
+                ui.heading(t("Measure length"));
+                ui.label(
+                    RichText::new(t(
+                        "For a pickup (upbeat) or a short measure: its length as a fraction of a whole note, e.g. 1/8 for one eighth.",
+                    ))
+                    .small(),
+                );
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    for l in ["1/8", "1/4", "3/8", "1/2", "5/8", "3/4"] {
+                        if ui.selectable_label(length == l, l).clicked() {
+                            length = l.to_string();
+                        }
+                    }
+                    if ui.selectable_label(length.trim().is_empty(), t("As the time signature")).clicked() {
+                        length.clear();
+                    }
+                });
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut length)
+                        .hint_text(t("As the time signature"))
+                        .desired_width(160.0),
+                );
+                let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                ui.checkbox(&mut counted, t("Count it in the measure numbers"));
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    (
+                        ui.button(t("OK")).clicked() || enter,
+                        ui.button(t("Cancel")).clicked(),
+                    )
+                })
+                .inner
+            });
+            let (ok, cancel) = resp.inner;
+            if ok {
+                app.run(
+                    "measure.length",
+                    json!({ "length": length.trim(), "counted": counted }),
+                );
+                close = true;
+            } else if cancel || resp.should_close() {
+                close = true;
+            } else {
+                app.dialog = Some(Dialog::MeasureLength { length, counted });
             }
         }
         Dialog::Shortcuts => {

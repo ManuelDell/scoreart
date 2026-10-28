@@ -267,7 +267,7 @@ pub fn sequence(score: &Score) -> Sequence {
         }
         let swing_here = swing_on && matches!(score.time_at(m).beat_type, 2 | 4);
         let key = score.key_at(m);
-        let bpm = f64::from(score.tempo_at(m).max(1));
+        let bpm = score.tempo_at(m).max(1.0);
         for (pi, part) in score.parts.iter().enumerate() {
             let Some(pm) = part.measures.get(m) else { continue };
             let program = part.program_at(m);

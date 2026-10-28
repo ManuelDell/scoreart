@@ -92,7 +92,7 @@ fn round_trip_piano_with_voices() {
     )
     .unwrap();
     s.staff_measure_mut(0, 1, 1).unwrap().clef = Some(Clef::Treble);
-    s.measures[1].tempo = Some(Tempo { bpm: 72 });
+    s.measures[1].tempo = Some(Tempo::quarter(72));
     let back = from_str(&to_string(&s)).unwrap();
     assert_eq!(s, back);
 }

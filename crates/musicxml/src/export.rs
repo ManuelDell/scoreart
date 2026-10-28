@@ -651,7 +651,7 @@ fn place_attrs(p: Option<Placement>) -> (&'static str, String) {
     }
 }
 
-fn write_measure_directions(x: &mut String, info: &MeasureInfo, effective_tempo: u16) {
+fn write_measure_directions(x: &mut String, info: &MeasureInfo, effective_tempo: f64) {
     if let Some(r) = &info.rehearsal {
         let (placement, rel) = place_attrs(info.rehearsal_place);
         direction(
@@ -680,9 +680,11 @@ fn write_measure_directions(x: &mut String, info: &MeasureInfo, effective_tempo:
             );
         }
         if let Some(t) = info.tempo {
+            let (unit, dotted) = t.unit.parts();
             let _ = write!(
                 body,
-                "<metronome><beat-unit>quarter</beat-unit><per-minute>{}</per-minute></metronome>",
+                "<metronome><beat-unit>{unit}</beat-unit>{}<per-minute>{}</per-minute></metronome>",
+                if dotted { "<beat-unit-dot/>" } else { "" },
                 t.bpm
             );
         } else if body.ends_with("<direction-type>") {
@@ -691,7 +693,7 @@ fn write_measure_directions(x: &mut String, info: &MeasureInfo, effective_tempo:
         // A tempo word alone still carries the tempo in effect, so readers know it is a tempo mark.
         let sound = format!(
             "<sound tempo=\"{}\"/>",
-            info.tempo.map(|t| t.bpm).unwrap_or(effective_tempo)
+            fmt_tempo(info.tempo.map_or(effective_tempo, |t| t.quarter_bpm()))
         );
         let _ = writeln!(
             x,
@@ -706,6 +708,16 @@ fn write_measure_directions(x: &mut String, info: &MeasureInfo, effective_tempo:
             None,
             " system=\"only-top\"",
         );
+    }
+}
+
+/// A tempo in quarter notes per minute, without needless decimals.
+fn fmt_tempo(q: f64) -> String {
+    let r = (q * 100.0).round() / 100.0;
+    if r.fract() == 0.0 {
+        format!("{r:.0}")
+    } else {
+        format!("{r}")
     }
 }
 

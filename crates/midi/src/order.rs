@@ -47,9 +47,13 @@ fn endings_around(score: &Score, m: usize) -> std::ops::Range<usize> {
     a..b
 }
 
-/// How many passes the repeat ending at `m` makes: two, or as many as its endings name.
-fn passes(score: &Score, m: usize) -> u8 {
-    endings_around(score, m)
+/// How many passes the repeat from `start` ending at `m` makes: two, or as many as the endings
+/// inside it or right after it name (a song whose refrain closes the repeat counts the passes
+/// of the verse endings: "1.+3." … "2.4.5.").
+fn passes(score: &Score, start: usize, m: usize) -> u8 {
+    let around = endings_around(score, m);
+    (start.min(m)..=m)
+        .chain(around)
         .flat_map(|i| ending_passes(score, i))
         .max()
         .unwrap_or(2)
@@ -131,7 +135,7 @@ pub fn play_order(score: &Score) -> Vec<usize> {
             }
         }
         if info.barline == Barline::RepeatEnd && after == After::First {
-            if pass < passes(score, m) {
+            if pass < passes(score, start, m) {
                 pass += 1;
                 m = start;
                 continue;
@@ -182,6 +186,22 @@ mod tests {
     fn score(n: usize) -> Score {
         let flute = instrument("flute").unwrap();
         Score::new("T", &[flute], TimeSig::default(), KeySig::default(), n)
+    }
+
+    #[test]
+    fn verse_endings_and_a_refrain_inside_the_repeat() {
+        // Verse | 1.+3. :| 2.4.5. | Refrain :|  — five verses, the refrain after 2, 4 and 5.
+        let mut s = score(5);
+        s.measures[1].volta = Some(1);
+        s.measures[1].volta_text = Some("1.+3.".into());
+        s.measures[1].barline = Barline::RepeatEnd;
+        s.measures[2].volta = Some(2);
+        s.measures[2].volta_text = Some("2.4.5.".into());
+        s.measures[4].barline = Barline::RepeatEnd;
+        assert_eq!(
+            play_order(&s),
+            vec![0, 1, 0, 2, 3, 4, 0, 1, 0, 2, 3, 4, 0, 2, 3, 4]
+        );
     }
 
     #[test]

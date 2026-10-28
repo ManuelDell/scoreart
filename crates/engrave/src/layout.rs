@@ -39,9 +39,45 @@ const LYRIC_SIZE: f32 = 1.8;
 /// Distance between the lines of different verses.
 const LYRIC_LINE: f32 = 2.4;
 
-/// Estimated width of a lyric syllable (without its joining hyphen).
-fn syllable_width(l: &str) -> f32 {
-    l.trim_end_matches('-').chars().count() as f32 * LYRIC_SIZE * 0.5
+/// A verse number in front of a syllable ("1. Mit" → "1.", "Mit"); it hangs left of the
+/// syllable, which alone is centred on its note.
+fn verse_number(l: &str) -> (Option<&str>, &str) {
+    let digits = l.chars().take_while(char::is_ascii_digit).count();
+    if digits > 0 && digits < 3 {
+        let rest = &l[digits..];
+        if let Some(r) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(".\u{a0}")) {
+            let r = r.trim_start();
+            if !r.is_empty() {
+                return (Some(&l[..digits + 1]), r);
+            }
+        }
+    }
+    (None, l)
+}
+
+/// Estimated width of text in the style of `kind` drawn `nominal` sp big by default.
+fn styled_width(f: &Fonts, kind: TextKind, s: &str, nominal: f32) -> f32 {
+    let per_char = if f.styles.get(kind).font == scoreart_model::TextFont::Sans {
+        0.53
+    } else {
+        0.48
+    };
+    s.chars().count() as f32 * f.size(kind, nominal) * per_char
+}
+
+/// Estimated width of a lyric syllable (without its joining hyphen and verse number).
+fn syllable_width(f: &Fonts, l: &str) -> f32 {
+    styled_width(
+        f,
+        TextKind::Lyrics,
+        verse_number(l).1.trim_end_matches('-'),
+        LYRIC_SIZE,
+    )
+}
+
+/// Distance between the lines of different verses, for the lyrics' size.
+fn lyric_line(f: &Fonts) -> f32 {
+    LYRIC_LINE * f.size(TextKind::Lyrics, LYRIC_SIZE) / LYRIC_SIZE
 }
 
 struct System {
@@ -50,6 +86,9 @@ struct System {
     stretch: f32,
     indent: f32,
     header: f32,
+    /// A last system too short to fill the line ends where its music ends (width from its
+    /// indent); None: it fills the line.
+    ragged: Option<f32>,
 }
 
 /// Displayed accidentals for every note, following key, measure-scoped carry and ties.
@@ -119,6 +158,7 @@ fn space_for(delta: u32, spacing: f32) -> f32 {
 }
 
 fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Style) -> Vec<MeasurePlan> {
+    let fonts = Fonts::of(score);
     let mut plans = Vec::with_capacity(score.measures.len());
     for m in 0..score.measures.len() {
         let len = score.measure_ticks(m);
@@ -143,9 +183,9 @@ fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Styl
                             if prev_syl.len() <= verse {
                                 prev_syl.resize(verse + 1, None);
                             }
-                            let half = syllable_width(l) / 2.0;
+                            let half = syllable_width(&fonts, l) / 2.0;
                             if let Some(Some((pon, phalf, hyphen))) = prev_syl.get(verse).copied() {
-                                let gap = if hyphen { 1.1 } else { 0.5 };
+                                let gap = if hyphen { 1.2 } else { 0.7 };
                                 lyric_need.push((pon, on, phalf + half + gap));
                             }
                             if let Some(slot) = prev_syl.get_mut(verse) {
@@ -157,9 +197,9 @@ fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Styl
                     let mut prev_chord: Option<(u32, f32)> = None;
                     for (e, on) in v.events.iter().zip(v.onsets()) {
                         if let Some(cs) = &e.chord_symbol {
-                            let w = text_width(&chord_text(cs), 2.2) * 0.85;
+                            let w = styled_width(&fonts, TextKind::ChordSymbol, &chord_text(cs), 2.2);
                             if let Some((pon, pw)) = prev_chord {
-                                lyric_need.push((pon, on, pw + 0.8));
+                                lyric_need.push((pon, on, pw + 1.0));
                             }
                             prev_chord = Some((on, w));
                         }
@@ -169,7 +209,7 @@ fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Styl
                     }
                     // The last syllable needs half its width (and its hyphen) before the barline.
                     for (pon, phalf, hyphen) in prev_syl.into_iter().flatten() {
-                        lyric_need.push((pon, len, phalf + if hyphen { 1.1 } else { 0.3 }));
+                        lyric_need.push((pon, len, phalf + if hyphen { 1.1 } else { 0.5 }));
                     }
                     for (ei, (e, on)) in v.events.iter().zip(v.onsets()).enumerate() {
                         onsets.insert(on);
@@ -202,7 +242,13 @@ fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Styl
                             let half = e
                                 .lyrics
                                 .iter()
-                                .map(|l| syllable_width(l) / 2.0)
+                                .map(|l| {
+                                    // A verse number hangs further left.
+                                    let num = verse_number(l).0.map_or(0.0, |n| {
+                                        styled_width(&fonts, TextKind::Lyrics, n, LYRIC_SIZE) + 0.5
+                                    });
+                                    syllable_width(&fonts, l) / 2.0 + num
+                                })
                                 .fold(0.0f32, f32::max);
                             if half > 1.2 {
                                 let l = lead.entry(on).or_insert(0.0);
@@ -371,6 +417,7 @@ fn one_system(score: &Score, plans: &[MeasurePlan]) -> System {
         stretch: 1.0,
         indent: name_indent(score, true),
         header: header_width(score, 0),
+        ragged: None,
     }
 }
 
@@ -444,14 +491,22 @@ fn break_systems(score: &Score, plans: &[MeasurePlan], width: f32) -> Vec<System
             1.0
         };
         let last = m >= plans.len();
+        let mut ragged = None;
         if last && used < avail * 0.75 {
             stretch = 1.0;
+            let repeats: f32 = ms
+                .iter()
+                .filter(|mi| score.measures.get(**mi).is_some_and(|i| i.repeat_start))
+                .count() as f32
+                * 1.6;
+            ragged = Some(header + used + repeats + 0.5);
         }
         systems.push(System {
             measures: ms,
             stretch,
             indent,
             header,
+            ragged,
         });
     }
     systems
@@ -882,7 +937,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                         style.part_gap
                     };
                 if lyrics {
-                    sy += 2.6 + LYRIC_LINE * (verses.saturating_sub(1)) as f32;
+                    sy += 2.6 + lyric_line(&Fonts::of(score)) * (verses.saturating_sub(1)) as f32;
                 }
             }
         }
@@ -930,7 +985,8 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                 f: fonts,
             };
             page_furniture(&mut o, score, &frame, mt, ph, mb);
-            y += 1.0;
+            // Room for what stands above the first staff (it is measured from 3 sp above it).
+            y += 3.0;
         }
         if !above.is_empty() {
             let mut o = Out {
@@ -1111,7 +1167,9 @@ fn draw_system(
 ) {
     let score = ctx.score;
     let x_start = margin + sys.indent;
-    let x_end = margin + width;
+    let x_end = sys
+        .ragged
+        .map_or(margin + width, |w| (x_start + w).min(margin + width));
     let first_m = sys.measures.first().copied().unwrap_or(0);
     let mut o = Out {
         page,
@@ -1361,18 +1419,38 @@ fn draw_system(
                 }
             }
             if let Some(tempo) = info.tempo {
+                // The beat unit: an eighth, quarter or half, perhaps dotted.
+                let (unit, dotted) = tempo.unit.parts();
+                let c = match unit {
+                    "eighth" => g::MET_EIGHTH_UP,
+                    "half" => g::MET_HALF_UP,
+                    _ => g::MET_QUARTER_UP,
+                };
                 o.push(
                     Shape::Glyph {
-                        c: g::MET_QUARTER_UP,
+                        c,
                         x: tx,
                         y: ty,
                         scale: 0.75,
                     },
                     None,
                 );
+                let mut lx = tx + 1.4;
+                if dotted {
+                    o.push(
+                        Shape::Glyph {
+                            c: g::MET_DOT,
+                            x: tx + 1.2,
+                            y: ty,
+                            scale: 0.75,
+                        },
+                        None,
+                    );
+                    lx += 0.6;
+                }
                 let label = format!("= {}", tempo.bpm);
-                let ts = o.styled(TextKind::Tempo, &label, tx + 1.4, ty, 1.9, Align::Left);
-                tx += (1.4 + text_width(&label, ts) + 1.0).max(7.0);
+                let ts = o.styled(TextKind::Tempo, &label, lx, ty, 1.9, Align::Left);
+                tx += (lx - tx + text_width(&label, ts) + 1.0).max(7.0);
             }
             if let Some(text) = &info.text {
                 o.styled(TextKind::SystemText, text, tx, ty, 1.9, Align::Left);
@@ -1416,6 +1494,7 @@ fn draw_system(
                     clef,
                     cols: &cols,
                     time: score.time_at(m),
+                    sys_x1: x_end,
                 },
             );
             out.staves.push(StaffBox {
@@ -1449,7 +1528,22 @@ fn draw_system(
     }
     // Volta brackets over the top staff.
     if let Some(&(_, _, t0)) = tops.first() {
-        let vy = top + t0 - (row_reach + 1.4).max(2.6) - 3.6;
+        // Above the text row (tempo, rehearsal marks, jumps) when the system has one, else
+        // right above what stands over the staff (chord symbols, high notes).
+        let text_row = sys.measures.iter().any(|m| {
+            score.measures.get(*m).is_some_and(|i| {
+                i.tempo.is_some()
+                    || i.text.is_some()
+                    || i.tempo_text.is_some()
+                    || i.rehearsal.is_some()
+                    || !i.jumps.is_empty()
+            })
+        });
+        let vy = if text_row {
+            top + t0 - (row_reach + 1.4).max(2.6) - 3.6
+        } else {
+            top + t0 - row_reach.max(1.0) - 2.6
+        };
         let mut k = 0;
         while k < boxes.len() {
             let Some(&(m, x0, _)) = boxes.get(k) else { break };
@@ -1575,6 +1669,8 @@ struct StaffDraw<'a> {
     clef: Clef,
     cols: &'a [(u32, f32)],
     time: TimeSig,
+    /// Where the system ends: texts are kept inside it.
+    sys_x1: f32,
 }
 
 fn col_x(cols: &[(u32, f32)], tick: u32) -> f32 {
@@ -1619,9 +1715,19 @@ fn out_staff_box(
     for (vi, v) in sm.voices.iter().enumerate() {
         let onsets = v.onsets();
         let mut geos: Vec<EvGeo> = Vec::with_capacity(v.events.len());
-        // Whole-measure rest.
-        if v.events.len() == 1
-            && v.events.first().is_some_and(Event::is_rest)
+        // Whole-measure rest; in a measure of its own length (pickup, short ending) an empty
+        // voice is a measure rest too, however its rests are split.
+        let irregular = score.measures.get(d.measure).is_some_and(|i| i.actual.is_some());
+        let plain_rest = |e: &Event| {
+            e.is_rest()
+                && e.dynamic.is_none()
+                && e.text.is_none()
+                && e.chord_symbol.is_none()
+                && e.articulations.is_empty()
+                && e.duration.tuplet.is_none()
+        };
+        if (v.events.len() == 1 && v.events.first().is_some_and(Event::is_rest)
+            || irregular && !v.events.is_empty() && v.events.iter().all(plain_rest))
             && v.ticks() == score.measure_ticks(d.measure)
         {
             let ev = EventRef {
@@ -2382,8 +2488,12 @@ fn out_staff_box(
                     Some(_) => d.top - 1.5,
                     None => y,
                 } + place.dy_sp();
-                let text_x = gg.x + place.dx_sp();
-                let w = t.chars().count() as f32 * 1.9 * 0.5;
+                let w = styled_width(&o.f, TextKind::StaffText, t, 1.9);
+                // Kept inside the system (an unmoved text never runs off the page).
+                let mut text_x = gg.x + place.dx_sp();
+                if place.dx == 0 {
+                    text_x = text_x.min(d.sys_x1 - w);
+                }
                 o.hit(
                     text_x - 0.2,
                     y - 1.6,
@@ -2395,12 +2505,17 @@ fn out_staff_box(
                 o.push(sh, Some(gg.ev));
             }
             for (verse, l) in e.lyrics.iter().enumerate().filter(|(_, l)| !l.is_empty()) {
-                let y = d.top + 4.0 + 5.6 + LYRIC_LINE * verse as f32;
+                let y = d.top + 4.0 + 5.6 + lyric_line(&o.f) * verse as f32;
                 let cx = gg.x + 0.59;
+                let (number, l) = verse_number(l);
+                if let Some(n) = number {
+                    let x = cx - syllable_width(&o.f, l) / 2.0 - 0.5;
+                    o.styled(TextKind::Lyrics, n, x, y, LYRIC_SIZE, Align::Right);
+                }
                 // A pending hyphen of this verse sits between the previous syllable and this one.
                 if let Some((from, py)) = hyphen_from.get_mut(verse).and_then(Option::take) {
                     let left = from;
-                    let right = cx - syllable_width(l) / 2.0;
+                    let right = cx - syllable_width(&o.f, l) / 2.0;
                     if right - left > 0.6 {
                         o.styled(
                             TextKind::Lyrics,
@@ -2421,7 +2536,7 @@ fn out_staff_box(
                         hyphen_from.resize(verse + 1, None);
                     }
                     if let Some(h) = hyphen_from.get_mut(verse) {
-                        *h = Some((cx + syllable_width(text) / 2.0, y));
+                        *h = Some((cx + syllable_width(&o.f, text) / 2.0, y));
                     }
                 }
             }
@@ -2665,7 +2780,8 @@ fn tie_shape(xa: f32, xb: f32, y: f32, up: bool) -> Shape {
 fn staff_reach(score: &Score, part: usize, staff: usize, measures: &[usize]) -> (f32, f32) {
     let mut up = 0.0f32;
     let mut down = 0.0f32;
-    let mut text_above = 0.0f32;
+    let mut chords = false;
+    let mut texts = false;
     for &m in measures {
         let clef = score.clef_at(part, staff, m);
         let Some(sm) = score.staff_measure(part, staff, m) else {
@@ -2694,14 +2810,8 @@ fn staff_reach(score: &Score, part: usize, staff: usize, measures: &[usize]) -> 
                     down = down.max(y + STEM_LEN - 4.0).max(y - 4.0 + 1.0);
                 }
                 up = up.max(above_marks + 1.0);
-                let mut t = 0.0;
-                if e.chord_symbol.is_some() {
-                    t += 2.6;
-                }
-                if e.text.is_some() {
-                    t += 2.2;
-                }
-                text_above = text_above.max(t);
+                chords |= e.chord_symbol.is_some();
+                texts |= e.text.is_some();
             }
         }
     }
@@ -2730,7 +2840,17 @@ fn staff_reach(score: &Score, part: usize, staff: usize, measures: &[usize]) -> 
             _ => {}
         }
     }
-    (up + text_above, down)
+    // Chord symbols sit on one row clear of the notes (at least 3 sp above the staff), staff
+    // texts above them.
+    let f = Fonts::of(score);
+    let mut reach = up;
+    if chords {
+        reach = (up + 1.6).max(3.0) + f.size(TextKind::ChordSymbol, 2.2) * 0.8 + 0.3;
+    }
+    if texts {
+        reach += f.size(TextKind::StaffText, 1.9) * 0.8 + 0.6;
+    }
+    (reach, down)
 }
 
 /// One piece of a line on one system.
@@ -2983,7 +3103,14 @@ fn draw_spanners(ctx: &Ctx, out: &mut Layout, last_page: &mut Page, last_index: 
                         .max(if s.first { low(&a) + 2.2 } else { 0.0 })
                         .max(if s.last { low(&b) + 2.2 } else { 0.0 });
                     let x0 = if s.first { a.x_left + dyn_room(ea) } else { s.x0 };
-                    let x1 = if s.last { b.x_right + 0.6 } else { s.x1 - 0.4 };
+                    // It ends before a dynamic on its last note (a hairpin "into" the f).
+                    let x1 = if !s.last {
+                        s.x1 - 0.4
+                    } else if dyn_room(eb) > 0.0 {
+                        (b.x_left - 0.8).max(x0 + 1.5)
+                    } else {
+                        b.x_right + 0.6
+                    };
                     let (o0, o1) = match (cresc, s.first, s.last) {
                         (true, f, l) => (if f { 0.0 } else { 0.3 }, if l { 0.6 } else { 0.45 }),
                         (false, f, l) => (if f { 0.6 } else { 0.45 }, if l { 0.0 } else { 0.3 }),

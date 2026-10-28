@@ -27,7 +27,7 @@ pub fn ode_to_joy() -> Score {
     s.meta.composer = "Ludwig van Beethoven".into();
     s.meta.lyricist = "Friedrich Schiller".into();
     if let Some(m) = s.measures.first_mut() {
-        m.tempo = Some(Tempo { bpm: 108 });
+        m.tempo = Some(Tempo::quarter(108));
     }
 
     let q = Duration::new(Quarter, 0);

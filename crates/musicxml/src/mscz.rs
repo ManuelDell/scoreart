@@ -527,9 +527,8 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                             let text = flat_text(c.child("text").unwrap_or(c));
                             if let Some(info) = score.measures.get_mut(mi) {
                                 if let Some(qps) = c.child_num("tempo") {
-                                    info.tempo = Some(Tempo {
-                                        bpm: (qps * 60.0).round().clamp(10.0, 400.0) as u16,
-                                    });
+                                    info.tempo =
+                                        Some(Tempo::quarter((qps * 60.0).round().clamp(10.0, 400.0) as u16));
                                 }
                                 // The element tree keeps no order between text and child elements:
                                 // prefer the formatted runs (<b>Allegro</b>) when there are any.

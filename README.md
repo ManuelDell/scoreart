@@ -85,6 +85,11 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   in MusicXML (`relative-x`/`relative-y`); MuseScore offsets of texts and dynamics are read.
   Double-clicking a staff text edits it. The mouse pointer shows a hand over anything that can
   be picked up.
+- **Pickups and odd measures**: *Measures → Length / pickup…* gives a measure its own length
+  (an upbeat of one eighth, a short first ending); a first measure that is shorter is left out
+  of the numbering. **Metronome marks** count any beat — ♪, ♩, ♩., 𝅗𝅥, 𝅗𝅥. (a new 6/8 score
+  counts dotted quarters). **Volta labels** like "1.+3." and "2.4.5." are printed and played on
+  those passes, also when the refrain closes the repeat (five verses, refrain after 2, 4 and 5).
 - **Texts as tagged blocks**: title, subtitle, composer, lyricist, copyright (foot of the first
   page), **headings** and **text blocks** between the systems, **headers**, **footers** and page
   numbers (from page 2). Each is a block of its kind that the hand picks up and moves freely;

@@ -3,8 +3,8 @@
 use serde_json::{Value, json};
 
 use scoreart_model::{
-    Barline, Clef, Instrument, InstrumentChange, KeySig, Line, PageFormat, PartSound, Rearrange, Score,
-    Tempo, TimeSig, TimeSymbol, clip, instrument, limits,
+    Barline, BeatUnit, Clef, Instrument, InstrumentChange, KeySig, Line, PageFormat, PartSound, Rearrange,
+    Score, TPQ, Tempo, TimeSig, TimeSymbol, clip, instrument, limits,
 };
 
 use super::{CommandSpec, always, need_i64, need_str, p_i64, p_str, p_usize};
@@ -64,7 +64,7 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "New score",
             menu: &["File"],
             shortcut: Some("Ctrl+N"),
-            params: "title?, composer?, instruments? ([ids], default [\"piano\"]), names? ([names of those instruments, e.g. translated]), time? (\"4/4\"), key? (fifths -7…7), measures? (16), tempo? (bpm)",
+            params: "title?, composer?, instruments? ([ids], default [\"piano\"]), names? ([names of those instruments, e.g. translated]), time? (\"4/4\"), key? (fifths -7…7), measures? (16), tempo? (beats per minute; in 6/8, 9/8, 12/8 dotted quarters)",
             enabled: always,
             run: |s, p| {
                 let ids: Vec<String> = match p.get("instruments") {
@@ -103,8 +103,15 @@ pub fn commands() -> Vec<CommandSpec> {
                 if let Some(t) = p_i64(p, "tempo")
                     && let Some(m) = score.measures.first_mut()
                 {
+                    // Compound meters (6/8, 9/8, 12/8) count dotted quarters.
+                    let compound = time.beat_type == 8 && time.beats.is_multiple_of(3) && time.beats > 3;
                     m.tempo = Some(Tempo {
                         bpm: t.clamp(10, 400) as u16,
+                        unit: if compound {
+                            BeatUnit::DottedQuarter
+                        } else {
+                            BeatUnit::Quarter
+                        },
                     });
                 }
                 let view = s.view;
@@ -296,10 +303,16 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "Tempo",
             menu: &["Add", "Text"],
             shortcut: None,
-            params: "bpm: quarter notes per minute (0 removes)",
+            params: "bpm: beats per minute (0 removes), unit? eighth|dotted-eighth|quarter|dotted-quarter|half|dotted-half (default quarter; e.g. dotted-quarter for 6/8)",
             enabled: always,
             run: |s, p| {
                 let bpm = need_i64(p, "bpm")?;
+                let unit = match p_str(p, "unit") {
+                    None => BeatUnit::Quarter,
+                    Some(u) => {
+                        BeatUnit::from_id(u).ok_or_else(|| Error::Param(format!("no beat unit {u:?}")))?
+                    }
+                };
                 let (m, _) = target_measures(s);
                 if let Some(info) = s.score.measures.get_mut(m) {
                     info.tempo = if bpm <= 0 {
@@ -307,10 +320,51 @@ pub fn commands() -> Vec<CommandSpec> {
                     } else {
                         Some(Tempo {
                             bpm: bpm.clamp(10, 400) as u16,
+                            unit,
                         })
                     };
                 }
                 Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "measure.length",
+            label: "Measure length (pickup)",
+            menu: &[],
+            shortcut: None,
+            params: "length: \"1/8\", \"3/4\" … (a fraction of a whole note; \"full\" = as the time signature), counted? true|false (in the measure numbering; a short first measure — a pickup — is not counted by default) — on the selected measures",
+            enabled: always,
+            run: |s, p| {
+                let l = need_str(p, "length")?.trim();
+                let ticks = if l == "full" || l.is_empty() {
+                    None
+                } else {
+                    let (a, b) = l
+                        .split_once('/')
+                        .ok_or_else(|| Error::Param(format!("length like 1/8, not {l:?}")))?;
+                    let a: u32 = a.trim().parse().map_err(|_| Error::Param("length".into()))?;
+                    let b: u32 = b.trim().parse().map_err(|_| Error::Param("length".into()))?;
+                    if a == 0 || !b.is_power_of_two() || b > 64 || a > 64 * b {
+                        return Err(Error::Param(format!("no measure length {l}")));
+                    }
+                    Some(TPQ * 4 * a / b)
+                };
+                let counted = p.get("counted").and_then(Value::as_bool);
+                let (first, last) = target_measures(s);
+                for m in first..=last {
+                    let full = s.score.time_at(m).measure_ticks();
+                    let Some(info) = s.score.measures.get_mut(m) else {
+                        continue;
+                    };
+                    info.actual = ticks.filter(|t| *t != full);
+                    info.uncounted = match counted {
+                        Some(c) => !c,
+                        None => m == 0 && info.actual.is_some_and(|t| t < full),
+                    };
+                }
+                s.score.normalize();
+                Ok(json!({ "ticks": ticks }))
             },
             undoable: true,
         },

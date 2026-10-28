@@ -305,6 +305,9 @@ pub fn commands() -> Vec<CommandSpec> {
                     return Err(Error::Param("tick past the end of the measure".into()));
                 }
                 s.cursor = pos;
+                // The cursor placed by hand wins over an older selection (note input starts here).
+                s.selection = None;
+                s.range_end = None;
                 Ok(Value::Null)
             },
             undoable: false,

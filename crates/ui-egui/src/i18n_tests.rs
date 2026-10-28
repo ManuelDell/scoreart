@@ -157,6 +157,16 @@ pub fn required_keys() -> BTreeSet<String> {
             add(s);
         }
     }
+    for k in [
+        "Eighth",
+        "Dotted eighth",
+        "Quarter",
+        "Dotted quarter",
+        "Half",
+        "Dotted half",
+    ] {
+        add(k);
+    }
     for k in scoreart_model::TextKind::ALL {
         add(k.label());
         add(k.group());

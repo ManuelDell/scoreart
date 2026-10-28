@@ -544,17 +544,34 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "Volta (ending)",
             menu: &[],
             shortcut: None,
-            params: "number: 1–9 (0 removes) — on the selected measures",
+            params: "number: 1–9 (0 removes; optional with a text: the volta there, else the text's first number), text? (the printed label when it is not \"n.\", e.g. \"1.+3.\" or \"2.4.5.\"; empty: \"n.\") — on the selected measures",
             enabled: has_selection,
             run: |s, p| {
-                let n = need_i64(p, "number")?;
+                let text = p_str(p, "text")
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                    .map(clip);
+                let (a, b) = measure_range(s);
+                let n = match (p_i64(p, "number"), &text) {
+                    (Some(n), _) => n,
+                    (None, Some(t)) => s
+                        .score
+                        .measures
+                        .get(a)
+                        .and_then(|i| i.volta)
+                        .map(i64::from)
+                        .or_else(|| t.chars().find_map(|c| c.to_digit(10)).map(i64::from))
+                        .filter(|n| *n > 0)
+                        .unwrap_or(1),
+                    (None, None) => return Err(Error::Param("number".into())),
+                };
                 if !(0..=9).contains(&n) {
                     return Err(Error::Param("number 0–9".into()));
                 }
-                let (a, b) = measure_range(s);
                 for m in a..=b {
                     if let Some(info) = s.score.measures.get_mut(m) {
                         info.volta = (n > 0).then_some(n as u8);
+                        info.volta_text = if n > 0 { text.clone() } else { None };
                     }
                 }
                 Ok(Value::Null)

@@ -585,10 +585,94 @@ pub enum Barline {
     Hidden,
 }
 
+/// The note value a metronome mark counts (♩ = 100, ♩. = 60 …).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BeatUnit {
+    Eighth,
+    DottedEighth,
+    #[default]
+    Quarter,
+    DottedQuarter,
+    Half,
+    DottedHalf,
+}
+
+impl BeatUnit {
+    pub const ALL: [BeatUnit; 6] = [
+        BeatUnit::Eighth,
+        BeatUnit::DottedEighth,
+        BeatUnit::Quarter,
+        BeatUnit::DottedQuarter,
+        BeatUnit::Half,
+        BeatUnit::DottedHalf,
+    ];
+
+    /// Its length in quarter notes.
+    pub fn quarters(self) -> f64 {
+        match self {
+            BeatUnit::Eighth => 0.5,
+            BeatUnit::DottedEighth => 0.75,
+            BeatUnit::Quarter => 1.0,
+            BeatUnit::DottedQuarter => 1.5,
+            BeatUnit::Half => 2.0,
+            BeatUnit::DottedHalf => 3.0,
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            BeatUnit::Eighth => "eighth",
+            BeatUnit::DottedEighth => "dotted-eighth",
+            BeatUnit::Quarter => "quarter",
+            BeatUnit::DottedQuarter => "dotted-quarter",
+            BeatUnit::Half => "half",
+            BeatUnit::DottedHalf => "dotted-half",
+        }
+    }
+
+    pub fn from_id(s: &str) -> Option<BeatUnit> {
+        BeatUnit::ALL.into_iter().find(|u| u.id() == s)
+    }
+
+    /// The undotted note value and whether it is dotted (MusicXML `beat-unit`, `beat-unit-dot`).
+    pub fn parts(self) -> (&'static str, bool) {
+        match self {
+            BeatUnit::Eighth => ("eighth", false),
+            BeatUnit::DottedEighth => ("eighth", true),
+            BeatUnit::Quarter => ("quarter", false),
+            BeatUnit::DottedQuarter => ("quarter", true),
+            BeatUnit::Half => ("half", false),
+            BeatUnit::DottedHalf => ("half", true),
+        }
+    }
+
+    pub fn from_parts(value: &str, dotted: bool) -> Option<BeatUnit> {
+        BeatUnit::ALL.into_iter().find(|u| u.parts() == (value, dotted))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Tempo {
-    /// Quarter notes per minute.
+    /// Beats (of `unit`) per minute.
     pub bpm: u16,
+    #[serde(default)]
+    pub unit: BeatUnit,
+}
+
+impl Tempo {
+    /// A tempo counted in quarter notes.
+    pub fn quarter(bpm: u16) -> Tempo {
+        Tempo {
+            bpm,
+            unit: BeatUnit::Quarter,
+        }
+    }
+
+    /// Quarter notes per minute.
+    pub fn quarter_bpm(&self) -> f64 {
+        f64::from(self.bpm.max(1)) * self.unit.quarters()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -1037,14 +1121,14 @@ impl Score {
             .unwrap_or_default()
     }
 
-    pub fn tempo_at(&self, measure: usize) -> u16 {
+    /// The tempo in effect at `measure`, in quarter notes per minute.
+    pub fn tempo_at(&self, measure: usize) -> f64 {
         self.measures
             .iter()
             .take(measure.saturating_add(1))
             .rev()
             .find_map(|m| m.tempo)
-            .map(|t| t.bpm)
-            .unwrap_or(100)
+            .map_or(100.0, |t| t.quarter_bpm())
     }
 
     pub fn measure_ticks(&self, measure: usize) -> u32 {

@@ -295,7 +295,7 @@ pub fn from_smf(bytes: &[u8]) -> Result<Score, String> {
     }
     if let (Some(us), Some(info)) = (tempo, score.measures.first_mut()) {
         let bpm = (60_000_000.0 / f64::from(us)).round().clamp(10.0, 400.0) as u16;
-        info.tempo = Some(Tempo { bpm });
+        info.tempo = Some(Tempo::quarter(bpm));
     }
     score.normalize();
     let key_sig = score.key_at(0);

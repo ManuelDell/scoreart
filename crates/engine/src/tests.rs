@@ -896,3 +896,184 @@ fn page_furniture_from_page_two() {
         }
     )));
 }
+
+/// Bugs found writing a 6/8 hymn with five verses, voltas "1.+3." / "2.4.5." and a refrain.
+#[test]
+fn hymn_in_six_eight() {
+    use scoreart_engrave::Shape;
+    let mut s = Session::default();
+    s.execute(
+        "file.new",
+        &json!({ "instruments": ["piano"], "time": "6/8", "measures": 6, "tempo": 55 }),
+    )
+    .unwrap();
+    // A new 6/8 score counts dotted quarters.
+    let t = s.score.measures[0].tempo.unwrap();
+    assert_eq!((t.bpm, t.unit), (55, scoreart_model::BeatUnit::DottedQuarter));
+    assert!((s.score.tempo_at(0) - 82.5).abs() < 1e-9);
+    // Pickup: a one-eighth first measure, not counted.
+    s.execute("select.measure", &json!({ "part": 0, "staff": 0, "measure": 0 }))
+        .unwrap();
+    s.execute("measure.length", &json!({ "length": "1/8" })).unwrap();
+    assert_eq!(s.score.measure_ticks(0), TPQ / 2);
+    assert_eq!(s.score.measure_number(1), 1);
+    assert!(s.execute("measure.length", &json!({ "length": "1/7" })).is_err());
+    // A short first ending, labelled "1.+3.".
+    s.execute("select.measure", &json!({ "part": 0, "staff": 0, "measure": 2 }))
+        .unwrap();
+    s.execute("measure.length", &json!({ "length": "5/8" })).unwrap();
+    s.execute("measure.volta", &json!({ "number": 1, "text": "1.+3." }))
+        .unwrap();
+    s.execute("measure.barline", &json!({ "type": "repeat-end" }))
+        .unwrap();
+    assert_eq!(s.score.measures[2].volta_text.as_deref(), Some("1.+3."));
+    // Tempo word and a dotted-quarter metronome mark in one place.
+    s.execute("select.measure", &json!({ "part": 0, "staff": 0, "measure": 3 }))
+        .unwrap();
+    s.execute("measure.tempo", &json!({ "bpm": 70, "unit": "dotted-quarter" }))
+        .unwrap();
+    s.execute("measure.tempo-text", &json!({ "text": "schneller" }))
+        .unwrap();
+    assert!(
+        s.execute("measure.tempo", &json!({ "bpm": 70, "unit": "crotchet" }))
+            .is_err()
+    );
+    // A verse number, a dynamic with a hairpin running into it, a long staff text at the end.
+    s.execute(
+        "cursor.set",
+        &json!({ "part": 0, "staff": 0, "measure": 4, "tick": 0 }),
+    )
+    .unwrap();
+    s.execute("input.toggle", &json!({})).unwrap();
+    s.execute("input.duration", &json!({ "value": "quarter" }))
+        .unwrap();
+    s.execute("input.dot", &json!({})).unwrap();
+    for st in ["a", "b", "c", "d"] {
+        s.execute("note.enter", &json!({ "step": st, "octave": 4 }))
+            .unwrap();
+    }
+    s.execute("input.toggle", &json!({})).unwrap();
+    s.execute(
+        "select.event",
+        &json!({ "part": 0, "staff": 0, "measure": 4, "index": 0 }),
+    )
+    .unwrap();
+    s.execute("note.lyric", &json!({ "text": "1. Mit" })).unwrap();
+    s.execute(
+        "select.event",
+        &json!({ "part": 0, "staff": 0, "measure": 4, "index": 1, "extend": true }),
+    )
+    .unwrap();
+    s.execute("line.add", &json!({ "type": "crescendo" })).unwrap();
+    s.execute(
+        "select.event",
+        &json!({ "part": 0, "staff": 0, "measure": 4, "index": 1 }),
+    )
+    .unwrap();
+    s.execute("note.dynamic", &json!({ "type": "f" })).unwrap();
+    s.execute(
+        "select.event",
+        &json!({ "part": 0, "staff": 0, "measure": 5, "index": 1 }),
+    )
+    .unwrap();
+    s.execute(
+        "note.text",
+        &json!({ "text": "2., 4.: zu Refrain 1 · 5.: zu Refrain 2" }),
+    )
+    .unwrap();
+
+    // Saved and opened again, everything is still there (the metronome keeps its unit).
+    let bytes = s.save_bytes("x.musicxml").unwrap();
+    let mut back = Session::default();
+    back.open_bytes("x.musicxml", &bytes).unwrap();
+    assert_eq!(back.score.measures[3].tempo, s.score.measures[3].tempo);
+    assert_eq!(back.score.measures[0].tempo, s.score.measures[0].tempo);
+    assert_eq!(back.score.measures[2].volta_text, s.score.measures[2].volta_text);
+    assert_eq!(back.score.measure_ticks(0), TPQ / 2);
+
+    let l = s.layout();
+    let items: Vec<&Shape> = l
+        .pages
+        .iter()
+        .flat_map(|p| p.items.iter().map(|i| &i.shape))
+        .collect();
+    // The dotted metronome mark: a dot glyph and "= 70".
+    assert!(
+        items
+            .iter()
+            .any(|sh| matches!(sh, Shape::Glyph { c, .. } if *c == '\u{ECB7}'))
+    );
+    assert!(
+        items
+            .iter()
+            .any(|sh| matches!(sh, Shape::Text { text, .. } if text == "= 70"))
+    );
+    // The verse number stands apart, left of its syllable.
+    let num = items.iter().find_map(|sh| match sh {
+        Shape::Text { text, x, .. } if text == "1." => Some(*x),
+        _ => None,
+    });
+    let syl = items.iter().find_map(|sh| match sh {
+        Shape::Text { text, x, .. } if text == "Mit" => Some(*x),
+        _ => None,
+    });
+    assert!(num.unwrap() < syl.unwrap());
+    // The hairpin stops before the f it leads to.
+    let f_x = s.layout().hits.iter().find_map(|h| match h.target {
+        scoreart_engrave::Target::Dynamic { .. } => Some(h.x0),
+        _ => None,
+    });
+    let hairpin_end = items
+        .iter()
+        .filter_map(|sh| match sh {
+            // Hairpin strokes: long and slightly slanted.
+            Shape::Line {
+                x1,
+                x2,
+                y1,
+                y2,
+                width,
+            } if *width == 0.16
+                && (x2 - x1).abs() > 1.0
+                && (y1 - y2).abs() > 0.05
+                && (y1 - y2).abs() < 1.5 =>
+            {
+                Some(x1.max(*x2))
+            }
+            _ => None,
+        })
+        .fold(f32::MIN, f32::max);
+    assert!(hairpin_end < f_x.unwrap(), "{hairpin_end} < {f_x:?}");
+    // No text runs past the right page margin.
+    let page = &l.pages[0];
+    let right = page.width - s.score.page.margin_right_mm / s.score.page.staff_space_mm + 0.5;
+    for sh in items.iter() {
+        if let Shape::Text {
+            text,
+            x,
+            size,
+            align: scoreart_engrave::Align::Left,
+            ..
+        } = sh
+        {
+            let w = text.chars().count() as f32 * size * 0.45;
+            assert!(x + w <= right + 1.0, "{text} runs off the page");
+        }
+    }
+    // The empty bass staff of the short ending shows one measure rest, not a split one.
+    let rests_in = |m: usize| {
+        l.hits
+            .iter()
+            .filter(|h| matches!(h.target, scoreart_engrave::Target::Rest { ev } if ev.measure == m && ev.staff == 1))
+            .count()
+    };
+    assert_eq!(rests_in(2), 1);
+    // The last system is short: it ends where its music ends.
+    let last = l
+        .staves
+        .iter()
+        .filter(|b| b.page == l.pages.len() - 1)
+        .map(|b| b.x1)
+        .fold(0.0f32, f32::max);
+    assert!(last < page.width * 0.8, "{last}");
+}

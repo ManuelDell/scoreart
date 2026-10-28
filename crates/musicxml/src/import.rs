@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use scoreart_model::marks::{MARKS, XmlGroup};
 use scoreart_model::{
-    Anchor, Arpeggio, Articulation, Barline, Clef, Duration, Dynamic, Event, EventKind, Grace,
+    Anchor, Arpeggio, Articulation, Barline, BeatUnit, Clef, Duration, Dynamic, Event, EventKind, Grace,
     InstrumentChange, Jump, KeySig, MeasureInfo, Meta, Note, NoteHead, NoteValue, PageFormat, Part,
     PartMeasure, PartSound, Pitch, Placement, PlaybackStyle, Score, Spanner, SpannerKind, StaffMeasure, Step,
     TPQ, Tempo, TextSettings, TimeSig, TimeSymbol, Tremolo, Tuplet, Voice, clip, limits,
@@ -963,8 +963,18 @@ fn read_part(
                                         && let Some(bpm) = k.child_num("per-minute")
                                         && let Some(info) = score.measures.get_mut(mi)
                                     {
+                                        let unit = k
+                                            .child_text("beat-unit")
+                                            .and_then(|u| {
+                                                BeatUnit::from_parts(
+                                                    u.trim(),
+                                                    k.child("beat-unit-dot").is_some(),
+                                                )
+                                            })
+                                            .unwrap_or_default();
                                         info.tempo = Some(Tempo {
-                                            bpm: bpm.clamp(10.0, 400.0) as u16,
+                                            bpm: bpm.clamp(10.0, 400.0).round() as u16,
+                                            unit,
                                         });
                                     }
                                 }
@@ -1114,23 +1124,29 @@ fn read_part(
                             }
                         }
                     }
-                    let has_metronome = c.path(&["direction-type", "metronome"]).is_some();
+                    // Any of the direction's types (a tempo word may come first).
+                    let has_metronome = c
+                        .children_named("direction-type")
+                        .any(|dt| dt.child("metronome").is_some());
                     if let Some(s) = c.child("sound")
                         && first_part
                         && let Some(tempo) = s.attr("tempo").and_then(|v| v.parse::<f64>().ok())
                         && tempo.is_finite()
                     {
-                        let bpm = tempo.clamp(10.0, 400.0) as u16;
+                        let bpm = tempo.clamp(10.0, 400.0);
                         // A tempo word that repeats the current tempo doesn't change it.
                         let current = if mi == 0 {
                             None
                         } else {
                             Some(score.tempo_at(mi - 1))
                         };
-                        if (has_metronome || current != Some(bpm))
+                        // A metronome mark already read keeps its beat unit.
+                        let marked = has_metronome && score.measures.get(mi).and_then(|i| i.tempo).is_some();
+                        if !marked
+                            && (has_metronome || current.is_none_or(|c| (c - bpm).abs() > 0.01))
                             && let Some(info) = score.measures.get_mut(mi)
                         {
-                            info.tempo = Some(Tempo { bpm });
+                            info.tempo = Some(Tempo::quarter(bpm.round() as u16));
                         }
                     }
                     // An instrument change: a new MIDI program in the direction's sound, with words
@@ -1179,9 +1195,7 @@ fn read_part(
                         && tempo.is_finite()
                         && let Some(info) = score.measures.get_mut(mi)
                     {
-                        info.tempo = Some(Tempo {
-                            bpm: tempo.clamp(10.0, 400.0) as u16,
-                        });
+                        info.tempo = Some(Tempo::quarter(tempo.clamp(10.0, 400.0).round() as u16));
                     }
                 }
                 "barline" if first_part => {

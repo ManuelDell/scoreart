@@ -174,7 +174,7 @@ pub fn tempo_map(
     while k < played.len() {
         let m = played.get(k).map_or(0, |p| p.0);
         let marked = score.measures.get(m).and_then(|i| i.tempo).is_some();
-        let base = f64::from(score.tempo_at(m).max(1));
+        let base = score.tempo_at(m).max(1.0);
         let word = words(score, m);
         if marked || word == Some(TempoWord::Back) {
             held = None;
@@ -196,7 +196,7 @@ pub fn tempo_map(
                         .measures
                         .get(mj)
                         .and_then(|i| i.tempo)
-                        .map_or(base, |t| f64::from(t.bpm.max(1)));
+                        .map_or(base, |t| t.quarter_bpm());
                     (j, t)
                 }
                 None => {

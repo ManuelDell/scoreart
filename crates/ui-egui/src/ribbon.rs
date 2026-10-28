@@ -1550,6 +1550,21 @@ fn tab_measures(app: &mut ScoreApp, ui: &mut Ui) {
                 json!({}),
             );
         });
+        column(ui, |ui| {
+            let en = can(app, "measure.length").is_ok();
+            if small(
+                ui,
+                Some(Ico::Spacing),
+                t("Length / pickup…"),
+                false,
+                en,
+                t("A pickup (upbeat) or a measure shorter or longer than its time signature"),
+            )
+            .clicked()
+            {
+                panels::open_measure_length(app);
+            }
+        });
     });
     let clefs: Vec<Sym> = Clef::ALL.into_iter().map(Sym::Clef).collect();
     group(ui, t("Clef"), |ui| {
@@ -1622,7 +1637,22 @@ fn tab_measures(app: &mut ScoreApp, ui: &mut Ui) {
         Sym::Volta(3),
     ];
     group(ui, t("Repeats"), |ui| {
-        gallery(app, ui, "reps", &reps, &all_reps, 3)
+        gallery(app, ui, "reps", &reps, &all_reps, 3);
+        column(ui, |ui| {
+            let en = can(app, "measure.volta").is_ok();
+            if small(
+                ui,
+                Some(Ico::Text),
+                t("Volta label…"),
+                false,
+                en,
+                t("The label of the volta, e.g. \"1.+3.\" or \"2.4.5.\" — it is played on those passes"),
+            )
+            .clicked()
+            {
+                text_dialog(app, t("Volta label (e.g. 1.+3.)"), "measure.volta", "text", "");
+            }
+        });
     });
     let jumps: Vec<Sym> = Jump::ALL.into_iter().map(Sym::Jump).collect();
     group(ui, t("Jumps"), |ui| {
@@ -1771,26 +1801,29 @@ fn tab_text(app: &mut ScoreApp, ui: &mut Ui) {
             t("Tempo"),
             false,
             en,
-            t("Tempo (quarter notes per minute)"),
+            t("Tempo (beats per minute)"),
         );
         egui::Popup::menu(&r)
             .id(egui::Id::unique("tempo-popup"))
             .show(|ui| {
-                for bpm in [40, 60, 72, 80, 92, 100, 108, 120, 132, 144, 160, 176] {
-                    if ui.button(format!("♩ = {bpm}")).clicked() {
-                        app.run("measure.tempo", json!({ "bpm": bpm }));
+                let unit = panels::beat_unit_here(app);
+                let presets: &[u16] = if unit == scoreart_model::BeatUnit::DottedQuarter {
+                    &[40, 46, 52, 56, 60, 66, 72, 80, 88, 96, 104, 112]
+                } else {
+                    &[40, 60, 72, 80, 92, 100, 108, 120, 132, 144, 160, 176]
+                };
+                for bpm in presets {
+                    if ui
+                        .button(format!("{} = {bpm}", panels::unit_symbol(unit)))
+                        .clicked()
+                    {
+                        app.run("measure.tempo", json!({ "bpm": bpm, "unit": unit.id() }));
                         ui.close();
                     }
                 }
                 ui.separator();
                 if ui.button(t("Tempo…")).clicked() {
-                    text_dialog(
-                        app,
-                        t("Tempo (quarter notes per minute)"),
-                        "measure.tempo",
-                        "bpm",
-                        "100",
-                    );
+                    panels::open_tempo(app);
                     ui.close();
                 }
             });

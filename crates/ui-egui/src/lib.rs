@@ -190,6 +190,16 @@ pub(crate) enum Dialog {
     },
     /// Adding or editing a text block of the page.
     Block(texts::BlockDialog),
+    /// A metronome mark: beats per minute of a note value.
+    Tempo {
+        bpm: String,
+        unit: scoreart_model::BeatUnit,
+    },
+    /// The length of the selected measures (a pickup, a short ending).
+    MeasureLength {
+        length: String,
+        counted: bool,
+    },
 }
 
 pub struct ScoreApp {

@@ -373,11 +373,10 @@ pub(crate) fn paint_shape(
             let gp = Pos2::new(gx, pos.y - baseline);
             painter.galley(gp, galley.clone(), color);
             if *bold {
-                painter.galley(
-                    gp + Vec2::new((size * zoom * 0.035).clamp(0.4, 2.0), 0.0),
-                    galley,
-                    color,
-                );
+                // Fake bold: the text again, shifted a little (the fonts have no bold face).
+                let d = (size * zoom * 0.045).clamp(0.5, 2.5);
+                painter.galley(gp + Vec2::new(d * 0.5, 0.0), galley.clone(), color);
+                painter.galley(gp + Vec2::new(d, 0.0), galley, color);
             }
         }
     }

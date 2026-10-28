@@ -34,6 +34,10 @@ pub const REST_32ND: char = '\u{E4E8}';
 pub const REST_64TH: char = '\u{E4E9}';
 pub const TUPLET_0: u32 = 0xE880;
 pub const MET_QUARTER_UP: char = '\u{ECA5}';
+pub const MET_HALF_UP: char = '\u{ECA3}';
+pub const MET_EIGHTH_UP: char = '\u{ECA7}';
+/// metAugmentationDot.
+pub const MET_DOT: char = '\u{ECB7}';
 
 /// Engraving defaults (Bravura `engravingDefaults`).
 pub const STAFF_LINE: f32 = 0.13;
