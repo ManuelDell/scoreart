@@ -9,7 +9,7 @@ use scoreart_model::{
     Tremolo, clip, limits,
 };
 
-use super::{CommandSpec, need_i64, need_str, p_i64, p_str};
+use super::{CommandSpec, need_i64, need_str, need_usize, p_i64, p_str};
 use crate::{Error, Selection, Session};
 
 fn has_note(s: &Session) -> std::result::Result<(), String> {
@@ -34,6 +34,34 @@ fn note_targets(s: &Session) -> Vec<(EventRef, Option<usize>)> {
         Some(Selection::Event { ev, note }) if s.range_end.is_none() => vec![(ev, note)],
         _ => s.selected_events().into_iter().map(|e| (e, None)).collect(),
     }
+}
+
+fn has_lines(s: &Session) -> std::result::Result<(), String> {
+    if s.score.spanners.is_empty() {
+        Err("no lines".into())
+    } else {
+        Ok(())
+    }
+}
+
+/// The anchor `n` notes after (or before) `a` in the line's voice.
+fn step_anchor(s: &Session, sp: &Spanner, a: Anchor, n: i64) -> Option<Anchor> {
+    let pos = scoreart_model::edit::Pos {
+        part: sp.part,
+        staff: sp.staff,
+        voice: sp.voice,
+        measure: a.measure,
+        tick: a.tick,
+    };
+    let mut ev = pos.event(&s.score)?;
+    for _ in 0..n.unsigned_abs().min(4096) {
+        ev = if n > 0 {
+            s.score.next_event(ev)?
+        } else {
+            s.score.prev_event(ev)?
+        };
+    }
+    anchor(s, ev)
 }
 
 fn anchor(s: &Session, r: EventRef) -> Option<Anchor> {
@@ -364,6 +392,7 @@ pub fn commands() -> Vec<CommandSpec> {
                     voice: a.voice,
                     start,
                     end,
+                    dy: 0,
                 };
                 if !s.score.spanners.contains(&sp) {
                     s.score.spanners.push(sp);
@@ -395,6 +424,86 @@ pub fn commands() -> Vec<CommandSpec> {
                     !(hit && only.is_none_or(|k| k == sp.kind))
                 });
                 Ok(json!({ "removed": before - s.score.spanners.len() }))
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "line.move",
+            label: "Move line",
+            menu: &[],
+            shortcut: None,
+            params: "index (of the line), dy? (staff spaces from its place, down; sets it), shift? (notes to move both ends by, ±)",
+            enabled: has_lines,
+            run: |s, p| {
+                let i = need_usize(p, "index")?;
+                let sp = *s
+                    .score
+                    .spanners
+                    .get(i)
+                    .ok_or_else(|| Error::Param("no such line".into()))?;
+                let mut moved = sp;
+                if let Some(dy) = p.get("dy").and_then(Value::as_f64).filter(|v| v.is_finite()) {
+                    moved.dy = (dy * 10.0).round().clamp(-400.0, 400.0) as i16;
+                }
+                if let Some(n) = p_i64(p, "shift").filter(|n| *n != 0) {
+                    let (Some(a), Some(b)) =
+                        (step_anchor(s, &sp, sp.start, n), step_anchor(s, &sp, sp.end, n))
+                    else {
+                        return Err(Error::Param("the line cannot move that far".into()));
+                    };
+                    moved.start = a;
+                    moved.end = b;
+                }
+                if let Some(x) = s.score.spanners.get_mut(i) {
+                    *x = moved;
+                }
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "line.end",
+            label: "Move the end of a line",
+            menu: &[],
+            shortcut: None,
+            params: "index (of the line), which: start|end, measure, tick (a note in the line's voice)",
+            enabled: has_lines,
+            run: |s, p| {
+                let i = need_usize(p, "index")?;
+                let which = need_str(p, "which")?;
+                let sp = *s
+                    .score
+                    .spanners
+                    .get(i)
+                    .ok_or_else(|| Error::Param("no such line".into()))?;
+                let at = Anchor {
+                    measure: need_usize(p, "measure")?,
+                    tick: need_i64(p, "tick")?.clamp(0, i64::from(u32::MAX)) as u32,
+                };
+                let pos = scoreart_model::edit::Pos {
+                    part: sp.part,
+                    staff: sp.staff,
+                    voice: sp.voice,
+                    measure: at.measure,
+                    tick: at.tick,
+                };
+                let ev = pos
+                    .event(&s.score)
+                    .ok_or_else(|| Error::Param("no note there".into()))?;
+                let at = anchor(s, ev).ok_or_else(|| Error::Param("no note there".into()))?;
+                let mut moved = sp;
+                match which {
+                    "start" => moved.start = at,
+                    "end" => moved.end = at,
+                    other => return Err(Error::Param(format!("which: start or end, not {other}"))),
+                }
+                if (moved.start.measure, moved.start.tick) > (moved.end.measure, moved.end.tick) {
+                    return Err(Error::Param("a line cannot end before it starts".into()));
+                }
+                if let Some(x) = s.score.spanners.get_mut(i) {
+                    *x = moved;
+                }
+                Ok(Value::Null)
             },
             undoable: true,
         },

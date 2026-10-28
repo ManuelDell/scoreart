@@ -191,6 +191,12 @@ pub enum Target {
     Dynamic {
         ev: EventRef,
     },
+    /// A piece of a line (`score.spanners[index]`); whether it holds the line's start or end.
+    Line {
+        index: usize,
+        first: bool,
+        last: bool,
+    },
     Measure {
         part: usize,
         staff: usize,
@@ -278,8 +284,9 @@ impl Layout {
         let rank = |t: &Target| match t {
             Target::Note { .. } => 0,
             Target::Text { .. } | Target::Dynamic { .. } => 1,
-            Target::Rest { .. } => 2,
-            Target::Measure { .. } => 3,
+            Target::Line { .. } => 2,
+            Target::Rest { .. } => 3,
+            Target::Measure { .. } => 4,
         };
         self.hits
             .iter()
@@ -312,7 +319,10 @@ impl Layout {
         for h in &self.hits {
             let matches = match h.target {
                 Target::Note { ev: e, .. } | Target::Rest { ev: e } => e == ev,
-                Target::Text { .. } | Target::Dynamic { .. } | Target::Measure { .. } => false,
+                Target::Text { .. }
+                | Target::Dynamic { .. }
+                | Target::Line { .. }
+                | Target::Measure { .. } => false,
             };
             if matches {
                 out = Some(match out {

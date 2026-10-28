@@ -341,6 +341,7 @@ fn women_and_flute() -> Session {
             measure: 0,
             tick: TPQ * 2,
         },
+        dy: 0,
     });
     s.score.spanners.push(scoreart_model::Spanner {
         kind: scoreart_model::SpannerKind::Slur,
@@ -349,6 +350,7 @@ fn women_and_flute() -> Session {
         voice: 0,
         start: scoreart_model::Anchor { measure: 0, tick: 0 },
         end: scoreart_model::Anchor { measure: 1, tick: 0 },
+        dy: 0,
     });
     s
 }
@@ -652,4 +654,69 @@ fn the_playback_style_is_kept_in_the_file() {
     assert_eq!(s.score.playback, scoreart_model::PlaybackStyle::default());
     // The default is not written at all.
     assert!(!scoreart_musicxml::to_string(&s.score).contains("scoreart-reverb"));
+}
+
+#[test]
+fn lines_move_up_down_sideways_and_by_their_ends() {
+    let mut s = blank();
+    s.execute("input.toggle", &json!({})).unwrap();
+    for st in ["c", "d", "e", "f", "g", "a", "b", "c"] {
+        s.execute("note.enter", &json!({ "step": st })).unwrap();
+    }
+    s.execute("input.toggle", &json!({})).unwrap();
+    s.execute(
+        "select.event",
+        &json!({ "part": 0, "staff": 0, "voice": 0, "measure": 0, "index": 0 }),
+    )
+    .unwrap();
+    s.execute("select.extend-next", &json!({})).unwrap();
+    s.execute("line.add", &json!({ "type": "crescendo" })).unwrap();
+    let q = scoreart_model::TPQ;
+    let sp = s.score.spanners[0];
+    assert_eq!((sp.start.tick, sp.end.tick), (0, q));
+    // Down by 1.5 staff spaces and two notes later.
+    s.execute("line.move", &json!({ "index": 0, "dy": 1.5, "shift": 2 }))
+        .unwrap();
+    let sp = s.score.spanners[0];
+    assert_eq!(sp.dy, 15);
+    assert_eq!((sp.start.tick, sp.end.tick), (2 * q, 3 * q));
+    // The end onto the next measure's second note.
+    s.execute(
+        "line.end",
+        &json!({ "index": 0, "which": "end", "measure": 1, "tick": q }),
+    )
+    .unwrap();
+    assert_eq!(
+        (s.score.spanners[0].end.measure, s.score.spanners[0].end.tick),
+        (1, q)
+    );
+    // A start after the end is refused.
+    assert!(
+        s.execute(
+            "line.end",
+            &json!({ "index": 0, "which": "start", "measure": 1, "tick": 3 * q })
+        )
+        .is_err()
+    );
+    assert!(
+        s.execute("line.move", &json!({ "index": 0, "shift": 100 }))
+            .is_err()
+    );
+    // Kept in MusicXML.
+    let back = scoreart_musicxml::from_str(&scoreart_musicxml::to_string(&s.score)).unwrap();
+    assert_eq!(back.spanners[0].dy, 15);
+    assert_eq!(back.spanners[0].end, s.score.spanners[0].end);
+    // Undo brings it back.
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.score.spanners[0].dy, 0);
+    // And it is drawn moved, with a box to pick it up.
+    s.execute("edit.redo", &json!({})).unwrap();
+    let layout = s.layout();
+    assert!(
+        layout
+            .hits
+            .iter()
+            .any(|h| matches!(h.target, scoreart_engrave::Target::Line { index: 0, .. }))
+    );
 }

@@ -102,6 +102,15 @@ fn lines_of(score: &Score, part: usize) -> Lines<'_> {
     l
 }
 
+/// A moved line: ` relative-y="…"` (tenths, up) on its start, or nothing.
+fn rel_y(sp: &Spanner) -> String {
+    if sp.dy == 0 {
+        String::new()
+    } else {
+        format!(" relative-y=\"{}\"", -i32::from(sp.dy))
+    }
+}
+
 fn direction(x: &mut String, placement: &str, body: &str, staff: Option<usize>, extra: &str) {
     let staff_el = staff.map(|s| format!("<staff>{s}</staff>")).unwrap_or_default();
     let _ = writeln!(
@@ -115,14 +124,14 @@ fn line_start_direction(x: &mut String, sp: &Spanner, number: usize, staff: Opti
         SpannerKind::Crescendo => direction(
             x,
             "below",
-            &format!("<wedge type=\"crescendo\" number=\"{number}\"/>"),
+            &format!("<wedge type=\"crescendo\" number=\"{number}\"{}/>", rel_y(sp)),
             staff,
             "",
         ),
         SpannerKind::Diminuendo => direction(
             x,
             "below",
-            &format!("<wedge type=\"diminuendo\" number=\"{number}\"/>"),
+            &format!("<wedge type=\"diminuendo\" number=\"{number}\"{}/>", rel_y(sp)),
             staff,
             "",
         ),
@@ -136,12 +145,21 @@ fn line_start_direction(x: &mut String, sp: &Spanner, number: usize, staff: Opti
             direction(
                 x,
                 place,
-                &format!("<octave-shift type=\"{ty}\" size=\"{size}\" number=\"{number}\"/>"),
+                &format!(
+                    "<octave-shift type=\"{ty}\" size=\"{size}\" number=\"{number}\"{}/>",
+                    rel_y(sp)
+                ),
                 staff,
                 "",
             );
         }
-        SpannerKind::Pedal => direction(x, "below", "<pedal type=\"start\" line=\"no\"/>", staff, ""),
+        SpannerKind::Pedal => direction(
+            x,
+            "below",
+            &format!("<pedal type=\"start\" line=\"no\"{}/>", rel_y(sp)),
+            staff,
+            "",
+        ),
         SpannerKind::CrescendoLine
         | SpannerKind::DiminuendoLine
         | SpannerKind::LetRing
@@ -154,7 +172,8 @@ fn line_start_direction(x: &mut String, sp: &Spanner, number: usize, staff: Opti
             };
             let _ = writeln!(
                 x,
-                "      <direction placement=\"{place}\"><direction-type><words>{word}</words></direction-type><direction-type><dashes type=\"start\" number=\"{number}\"/></direction-type>{}</direction>",
+                "      <direction placement=\"{place}\"><direction-type><words>{word}</words></direction-type><direction-type><dashes type=\"start\" number=\"{number}\"{}/></direction-type>{}</direction>",
+                rel_y(sp),
                 staff.map(|s| format!("<staff>{s}</staff>")).unwrap_or_default()
             );
         }
@@ -763,18 +782,20 @@ fn write_event(
         for (sp, num) in starts {
             match sp.kind {
                 SpannerKind::Slur => {
-                    let _ = write!(n, "<slur type=\"start\" number=\"{num}\"/>");
+                    let _ = write!(n, "<slur type=\"start\" number=\"{num}\"{}/>", rel_y(sp));
                 }
                 SpannerKind::Glissando => {
                     let _ = write!(
                         n,
-                        "<glissando type=\"start\" number=\"{num}\" line-type=\"solid\"/>"
+                        "<glissando type=\"start\" number=\"{num}\" line-type=\"solid\"{}/>",
+                        rel_y(sp)
                     );
                 }
                 SpannerKind::WavyGlissando => {
                     let _ = write!(
                         n,
-                        "<glissando type=\"start\" number=\"{num}\" line-type=\"wavy\"/>"
+                        "<glissando type=\"start\" number=\"{num}\" line-type=\"wavy\"{}/>",
+                        rel_y(sp)
                     );
                 }
                 _ => {}
@@ -795,12 +816,17 @@ fn write_event(
             for (sp, num) in starts {
                 match sp.kind {
                     SpannerKind::TrillLine => {
-                        let _ = write!(o, "<trill-mark/><wavy-line type=\"start\" number=\"{num}\"/>");
+                        let _ = write!(
+                            o,
+                            "<trill-mark/><wavy-line type=\"start\" number=\"{num}\"{}/>",
+                            rel_y(sp)
+                        );
                     }
                     SpannerKind::Vibrato => {
                         let _ = write!(
                             o,
-                            "<wavy-line type=\"start\" number=\"{num}\" smufl=\"wiggleVibrato\"/>"
+                            "<wavy-line type=\"start\" number=\"{num}\" smufl=\"wiggleVibrato\"{}/>",
+                            rel_y(sp)
                         );
                     }
                     _ => {}

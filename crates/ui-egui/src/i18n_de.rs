@@ -434,8 +434,10 @@ pub const DE: &[(&str, &str)] = &[
     ("Move grace note down", "Vorschlagsnote nach unten"),
     ("Move grace note up", "Vorschlagsnote nach oben"),
     ("Move instrument", "Instrument verschieben"),
+    ("Move line", "Linie verschieben"),
     ("Move note", "Note verschieben"),
     ("Move text or dynamic", "Text oder Dynamik verschieben"),
+    ("Move the end of a line", "Ende einer Linie verschieben"),
     ("Move to voice", "In Stimme verschieben"),
     ("Move up", "Nach oben"),
     (

@@ -43,14 +43,14 @@ struct Raw {
     onset: u64,
     ticks: u64,
     event: Event,
-    starts: Vec<(Family, String, SpannerKind)>,
+    starts: Vec<(Family, String, SpannerKind, i16)>,
     stops: Vec<(Family, String)>,
 }
 
 /// A line start or stop from a `<direction>` at a time position.
 #[derive(Clone, Debug)]
 enum DirMark {
-    Start { key: String, kind: SpannerKind },
+    Start { key: String, kind: SpannerKind, dy: i16 },
     Stop { key: String },
 }
 
@@ -282,6 +282,14 @@ pub fn program_for_name(name: &str) -> Option<u8> {
     )
 }
 
+/// How far a line was moved: `relative-y` (tenths, up) → tenths of a staff space, down.
+fn line_dy(el: &Element) -> i16 {
+    el.attr("relative-y")
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite())
+        .map_or(0, |v| (-v).round().clamp(-2000.0, 2000.0) as i16)
+}
+
 /// ScoreArt's playback settings, kept as miscellaneous fields.
 fn read_playback(root: &Element) -> PlaybackStyle {
     let mut p = PlaybackStyle::default();
@@ -475,8 +483,8 @@ fn read_part(
     let mut clefs: BTreeMap<usize, Clef> = BTreeMap::new();
     let mut measures: Vec<PartMeasure> = Vec::new();
     // Open lines: (staff, voice, family, number) for note lines; (staff, key) for directions.
-    let mut open_note: HashMap<(usize, usize, Family, String), (SpannerKind, Anchor)> = HashMap::new();
-    let mut open_dir: HashMap<(usize, String), (SpannerKind, usize, Anchor)> = HashMap::new();
+    let mut open_note: HashMap<(usize, usize, Family, String), (SpannerKind, Anchor, i16)> = HashMap::new();
+    let mut open_dir: HashMap<(usize, String), (SpannerKind, usize, Anchor, i16)> = HashMap::new();
     let mut open_ending: Option<(u8, usize)> = None;
     let mut ending_label: Option<String> = None;
     let mut repeat_staves: Vec<bool> = vec![false; limits::MAX_STAVES];
@@ -706,7 +714,7 @@ fn read_part(
                                                         } else {
                                                             SpannerKind::TrillLine
                                                         };
-                                                        starts.push((Family::Trill, num, kind));
+                                                        starts.push((Family::Trill, num, kind, line_dy(o)));
                                                     }
                                                     Some("stop") => stops.push((Family::Trill, num)),
                                                     _ => {}
@@ -733,7 +741,9 @@ fn read_part(
                                 "slur" => {
                                     let num = ch.attr("number").unwrap_or("1").to_string();
                                     match ch.attr("type") {
-                                        Some("start") => starts.push((Family::Slur, num, SpannerKind::Slur)),
+                                        Some("start") => {
+                                            starts.push((Family::Slur, num, SpannerKind::Slur, line_dy(ch)))
+                                        }
                                         Some("stop") => stops.push((Family::Slur, num)),
                                         _ => {}
                                     }
@@ -746,7 +756,7 @@ fn read_part(
                                         SpannerKind::Glissando
                                     };
                                     match ch.attr("type") {
-                                        Some("start") => starts.push((Family::Gliss, num, kind)),
+                                        Some("start") => starts.push((Family::Gliss, num, kind, line_dy(ch))),
                                         Some("stop") => stops.push((Family::Gliss, num)),
                                         _ => {}
                                     }
@@ -756,7 +766,7 @@ fn read_part(
                         }
                     }
                     // A trill line draws its own "tr": don't add the trill mark twice.
-                    if starts.iter().any(|(_, _, k)| *k == SpannerKind::TrillLine) {
+                    if starts.iter().any(|(_, _, k, _)| *k == SpannerKind::TrillLine) {
                         marks.retain(|m| m.id() != "trill");
                     }
                     if is_chord {
@@ -936,6 +946,7 @@ fn read_part(
                                             DirMark::Start {
                                                 key,
                                                 kind: SpannerKind::Crescendo,
+                                                dy: line_dy(k),
                                             },
                                         )),
                                         Some("diminuendo") => dir_marks.push((
@@ -944,6 +955,7 @@ fn read_part(
                                             DirMark::Start {
                                                 key,
                                                 kind: SpannerKind::Diminuendo,
+                                                dy: line_dy(k),
                                             },
                                         )),
                                         Some("stop") => dir_marks.push((staff, t, DirMark::Stop { key })),
@@ -967,6 +979,7 @@ fn read_part(
                                             DirMark::Start {
                                                 key,
                                                 kind: SpannerKind::Ottava(oct),
+                                                dy: line_dy(k),
                                             },
                                         )),
                                         Some("up") => dir_marks.push((
@@ -975,6 +988,7 @@ fn read_part(
                                             DirMark::Start {
                                                 key,
                                                 kind: SpannerKind::Ottava(-oct),
+                                                dy: line_dy(k),
                                             },
                                         )),
                                         Some("stop") => dir_marks.push((staff, t, DirMark::Stop { key })),
@@ -990,6 +1004,7 @@ fn read_part(
                                             DirMark::Start {
                                                 key,
                                                 kind: SpannerKind::Pedal,
+                                                dy: line_dy(k),
                                             },
                                         )),
                                         Some("stop") => dir_marks.push((staff, t, DirMark::Stop { key })),
@@ -1015,7 +1030,15 @@ fn read_part(
                                             };
                                             if let Some(kind) = kind {
                                                 words_here = None;
-                                                dir_marks.push((staff, t, DirMark::Start { key, kind }));
+                                                dir_marks.push((
+                                                    staff,
+                                                    t,
+                                                    DirMark::Start {
+                                                        key,
+                                                        kind,
+                                                        dy: line_dy(k),
+                                                    },
+                                                ));
                                             }
                                         }
                                         Some("stop") => dir_marks.push((staff, t, DirMark::Stop { key })),
@@ -1265,7 +1288,7 @@ fn read_part(
             };
             let here = Anchor { measure: mi, tick };
             for (fam, num) in &r.stops {
-                if let Some((kind, start)) = open_note.remove(&(s, v, *fam, num.clone())) {
+                if let Some((kind, start, dy)) = open_note.remove(&(s, v, *fam, num.clone())) {
                     score.spanners.push(Spanner {
                         kind,
                         part: pi,
@@ -1273,11 +1296,12 @@ fn read_part(
                         voice: v,
                         start,
                         end: here,
+                        dy,
                     });
                 }
             }
-            for (fam, num, kind) in &r.starts {
-                open_note.insert((s, v, *fam, num.clone()), (*kind, here));
+            for (fam, num, kind, dy) in &r.starts {
+                open_note.insert((s, v, *fam, num.clone()), (*kind, here, *dy));
             }
         }
         // Lines from directions, anchored to voice 1 of their staff.
@@ -1291,14 +1315,14 @@ fn read_part(
                 .unwrap_or_default();
             let at32 = at.min(u64::from(u32::MAX)) as u32;
             match mark {
-                DirMark::Start { key, kind } => {
+                DirMark::Start { key, kind, dy } => {
                     let tick = onsets
                         .iter()
                         .copied()
                         .find(|o| *o >= at32)
                         .or(onsets.last().copied())
                         .unwrap_or(0);
-                    open_dir.insert((s, key), (kind, 0, Anchor { measure: mi, tick }));
+                    open_dir.insert((s, key), (kind, 0, Anchor { measure: mi, tick }, dy));
                 }
                 DirMark::Stop { key } => {
                     let tick = onsets
@@ -1308,7 +1332,7 @@ fn read_part(
                         .max()
                         .or(onsets.first().copied())
                         .unwrap_or(0);
-                    if let Some((kind, v, start)) = open_dir.remove(&(s, key)) {
+                    if let Some((kind, v, start, dy)) = open_dir.remove(&(s, key)) {
                         score.spanners.push(Spanner {
                             kind,
                             part: pi,
@@ -1316,6 +1340,7 @@ fn read_part(
                             voice: v,
                             start,
                             end: Anchor { measure: mi, tick },
+                            dy,
                         });
                     }
                 }

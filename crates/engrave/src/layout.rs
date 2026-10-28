@@ -2609,10 +2609,58 @@ fn glyph_run(items: &mut Vec<(usize, Shape)>, page: usize, name: &str, x0: f32, 
     }
 }
 
+/// Moves a shape up or down.
+fn shift_y(sh: &mut Shape, dy: f32) {
+    match sh {
+        Shape::Glyph { y, .. } | Shape::Rect { y, .. } | Shape::Text { y, .. } => *y += dy,
+        Shape::Line { y1, y2, .. } => {
+            *y1 += dy;
+            *y2 += dy;
+        }
+        Shape::Quad { p } | Shape::Curve { p, .. } => p.iter_mut().for_each(|q| q.1 += dy),
+    }
+}
+
+/// A rough box around a shape (x0, y0, x1, y1).
+fn bounds(sh: &Shape) -> Option<(f32, f32, f32, f32)> {
+    let pts = |p: &[(f32, f32)]| {
+        p.iter().fold(None, |b: Option<(f32, f32, f32, f32)>, q| {
+            Some(match b {
+                None => (q.0, q.1, q.0, q.1),
+                Some(o) => (o.0.min(q.0), o.1.min(q.1), o.2.max(q.0), o.3.max(q.1)),
+            })
+        })
+    };
+    match sh {
+        Shape::Glyph { x, y, scale, .. } => {
+            Some((*x - 0.3, y - 2.0 * scale, x + 2.5 * scale, y + 1.0 * scale))
+        }
+        Shape::Line { x1, y1, x2, y2, .. } => pts(&[(*x1, *y1), (*x2, *y2)]),
+        Shape::Rect { x, y, w, h } => Some((*x, *y, x + w, y + h)),
+        Shape::Quad { p } | Shape::Curve { p, .. } => pts(p),
+        Shape::Text {
+            text,
+            x,
+            y,
+            size,
+            align,
+            ..
+        } => {
+            let w = text_width(text, *size);
+            let x0 = match align {
+                Align::Left => *x,
+                Align::Center => x - w / 2.0,
+                Align::Right => x - w,
+            };
+            Some((x0, y - size, x0 + w, *y + 0.3))
+        }
+    }
+}
+
 fn draw_spanners(ctx: &Ctx, out: &mut Layout, last_page: &mut Page, last_index: usize) {
     let score = ctx.score;
     let mut items: Vec<(usize, Shape, EventRef)> = Vec::new();
-    for sp in &score.spanners {
+    for (si, sp) in score.spanners.iter().enumerate() {
         let pos = |a: scoreart_model::Anchor| scoreart_model::edit::Pos {
             part: sp.part,
             staff: sp.staff,
@@ -3004,6 +3052,44 @@ fn draw_spanners(ctx: &Ctx, out: &mut Layout, last_page: &mut Page, last_index: 
                         prev = p;
                     }
                 }
+            }
+        }
+        // Moved by the user.
+        let dy = f32::from(sp.dy) / 10.0;
+        if dy != 0.0 {
+            for (_, sh) in &mut local {
+                shift_y(sh, dy);
+            }
+        }
+        // Where it can be picked up: one box per piece (system).
+        for s in &segs {
+            let mut b: Option<(f32, f32, f32, f32)> = None;
+            for (pg, sh) in &local {
+                let Some((x0, y0, x1, y1)) = bounds(sh).filter(|_| *pg == s.page) else {
+                    continue;
+                };
+                let mx = (x0 + x1) / 2.0;
+                if mx < s.x0 - 3.0 || mx > s.x1 + 3.0 || y1 < s.top - 14.0 || y0 > s.top + 18.0 {
+                    continue;
+                }
+                b = Some(match b {
+                    None => (x0, y0, x1, y1),
+                    Some(o) => (o.0.min(x0), o.1.min(y0), o.2.max(x1), o.3.max(y1)),
+                });
+            }
+            if let Some((x0, y0, x1, y1)) = b {
+                out.hits.push(Hit {
+                    page: s.page,
+                    x0: x0 - 0.3,
+                    y0: y0 - 0.5,
+                    x1: x1 + 0.3,
+                    y1: y1 + 0.5,
+                    target: Target::Line {
+                        index: si,
+                        first: s.first,
+                        last: s.last,
+                    },
+                });
             }
         }
         items.extend(local.into_iter().map(|(p, s)| (p, s, ea)));

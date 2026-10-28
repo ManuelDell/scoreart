@@ -1121,4 +1121,7 @@ pub struct Spanner {
     pub voice: usize,
     pub start: Anchor,
     pub end: Anchor,
+    /// Moved up (negative) or down from its place, in tenths of a staff space.
+    #[serde(default)]
+    pub dy: i16,
 }

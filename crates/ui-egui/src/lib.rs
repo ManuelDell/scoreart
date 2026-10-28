@@ -219,6 +219,8 @@ pub struct ScoreApp {
     pub(crate) note_drag: Option<canvas::NoteDrag>,
     /// A staff text or dynamic being dragged.
     pub(crate) mark_drag: Option<canvas::MarkDrag>,
+    /// A line (hairpin, slur …) being dragged.
+    pub(crate) line_drag: Option<canvas::LineDrag>,
     /// What surrounds the score: ribbon, side panel, both or the focus bar.
     pub surface: ribbon::Surface,
     pub ribbon: ribbon::RibbonState,
@@ -285,6 +287,7 @@ impl ScoreApp {
             midi: Default::default(),
             note_drag: None,
             mark_drag: None,
+            line_drag: None,
             surface,
             ribbon: Default::default(),
         }

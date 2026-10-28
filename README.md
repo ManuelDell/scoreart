@@ -78,8 +78,10 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   notehead shows where it lands.
 - **Two tools, pen and hand** (in the ribbon, the toolbar and the focus bar): with the **pen**
   (`N`) a click writes a note where the ghost note shows; with the **hand** (`Esc`) a click
-  selects and a drag moves — notes, and also **staff texts and dynamics**, which keep their new
-  place in MusicXML (`relative-x`/`relative-y`) and come back with their MuseScore offsets.
+  selects and a drag moves — notes (a preview notehead shows where they land), **staff texts and
+  dynamics**, and **lines** (hairpins, slurs, 8va, pedal, trill and other lines): drag a line up
+  or down or along the notes, or pull one of its ends onto another note. Moved places are kept
+  in MusicXML (`relative-x`/`relative-y`); MuseScore offsets of texts and dynamics are read.
   Double-clicking a staff text edits it. The mouse pointer shows a hand over anything that can
   be picked up.
 - **Side panel** like MuseScore's: a strip of tabs on the left — **Palettes**, **Instruments**,

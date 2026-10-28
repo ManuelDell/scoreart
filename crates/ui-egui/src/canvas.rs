@@ -79,6 +79,136 @@ pub(crate) struct MarkDrag {
     hit: scoreart_engrave::Hit,
 }
 
+/// A line (hairpin, slur, 8va …) picked up with the hand: the whole line, or one end.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LineDrag {
+    index: usize,
+    /// Some(true): the start; Some(false): the end; None: the whole line.
+    end: Option<bool>,
+    page: usize,
+    grab: (f32, f32),
+    delta: (f32, f32),
+    hit: scoreart_engrave::Hit,
+}
+
+/// The piece of line `index` under (x, y) on a page.
+fn line_box(
+    layout: &scoreart_engrave::Layout,
+    page: usize,
+    x: f32,
+    y: f32,
+    index: usize,
+) -> Option<scoreart_engrave::Hit> {
+    layout.hits.iter().copied().find(|h| {
+        h.page == page
+            && matches!(h.target, Target::Line { index: i, .. } if i == index)
+            && x >= h.x0
+            && x <= h.x1
+            && y >= h.y0
+            && y <= h.y1
+    })
+}
+
+/// The note of a line's voice nearest to (x, y): (measure, tick).
+fn note_near(
+    layout: &scoreart_engrave::Layout,
+    page: usize,
+    x: f32,
+    y: f32,
+    sp: &scoreart_model::Spanner,
+) -> Option<(usize, u32)> {
+    // The staff of the line on that system (lines sit above or below it).
+    let sb = layout
+        .staves
+        .iter()
+        .filter(|s| s.page == page && s.part == sp.part && s.staff == sp.staff && x >= s.x0 && x <= s.x1)
+        .min_by(|a, b| (a.top + 2.0 - y).abs().total_cmp(&(b.top + 2.0 - y).abs()))?;
+    Some((sb.measure, sb.tick_near(x)))
+}
+
+/// Puts a dragged line where it was dropped.
+fn drop_line(app: &mut ScoreApp, layout: &scoreart_engrave::Layout, d: LineDrag) {
+    let Some(sp) = app.session.score.spanners.get(d.index).copied() else {
+        return;
+    };
+    let (gx, gy) = d.grab;
+    let x = gx + d.delta.0;
+    match d.end {
+        Some(start) => {
+            if d.delta.0.abs() < 0.3 {
+                return;
+            }
+            if let Some((measure, tick)) = note_near(layout, d.page, x, gy, &sp) {
+                let which = if start { "start" } else { "end" };
+                app.run(
+                    "line.end",
+                    json!({ "index": d.index, "which": which, "measure": measure, "tick": tick }),
+                );
+            }
+        }
+        None => {
+            // Sideways: by as many notes as the pointer moved over.
+            let shift = match (
+                note_near(layout, d.page, gx, gy, &sp),
+                note_near(layout, d.page, x, gy, &sp),
+            ) {
+                (Some(a), Some(b)) if d.delta.0.abs() >= 0.8 => notes_between(&app.session.score, &sp, a, b),
+                _ => 0,
+            };
+            let dy = if d.delta.1.abs() >= 0.15 {
+                Some((f64::from(sp.dy) / 10.0 + f64::from(d.delta.1) * 10.0).round() / 10.0)
+            } else {
+                None
+            };
+            if shift == 0 && dy.is_none() {
+                return;
+            }
+            let mut p = json!({ "index": d.index, "shift": shift });
+            if let Some(dy) = dy {
+                p["dy"] = json!(dy);
+            }
+            app.run("line.move", p);
+        }
+    }
+}
+
+/// How many notes of the line's voice lie from position `a` to `b` (negative: backwards).
+fn notes_between(
+    score: &scoreart_model::Score,
+    sp: &scoreart_model::Spanner,
+    a: (usize, u32),
+    b: (usize, u32),
+) -> i64 {
+    let ev = |m: (usize, u32)| {
+        scoreart_model::edit::Pos {
+            part: sp.part,
+            staff: sp.staff,
+            voice: sp.voice,
+            measure: m.0,
+            tick: m.1,
+        }
+        .event(score)
+    };
+    let (Some(ea), Some(eb)) = (ev(a), ev(b)) else {
+        return 0;
+    };
+    let forward = (b.0, b.1) > (a.0, a.1);
+    let mut cur = ea;
+    for n in 1..=4096i64 {
+        let next = if forward {
+            score.next_event(cur)
+        } else {
+            score.prev_event(cur)
+        };
+        match next {
+            Some(x) if x == eb => return if forward { n } else { -n },
+            Some(x) => cur = x,
+            None => return 0,
+        }
+    }
+    0
+}
+
 /// The hit box of an event's staff text or dynamic.
 fn mark_box(
     layout: &scoreart_engrave::Layout,
@@ -207,8 +337,37 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                                 app.mark_drag = Some(MarkDrag { ev, text, page: pi, grab: (sx, sy), delta: (0.0, 0.0), hit });
                             }
                         }
+                        Some(Target::Line { index, first, last }) => {
+                            if let Some(hit) = line_box(&layout, pi, sx, sy, index) {
+                                // Near an end of the line: that end moves; elsewhere the line.
+                                let grip = 1.5;
+                                let end = if first && sx - hit.x0 < grip {
+                                    Some(true)
+                                } else if last && hit.x1 - sx < grip {
+                                    Some(false)
+                                } else {
+                                    None
+                                };
+                                app.line_drag = Some(LineDrag {
+                                    index,
+                                    end,
+                                    page: pi,
+                                    grab: (sx, sy),
+                                    delta: (0.0, 0.0),
+                                    hit,
+                                });
+                            }
+                        }
                         _ => {}
                     }
+                }
+                if let Some(d) = app.line_drag.as_mut()
+                    && d.page == pi
+                    && resp.dragged()
+                    && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
+                {
+                    let (sx, sy) = ((pos.x - origin.x) / zoom, (pos.y - origin.y) / zoom);
+                    d.delta = (sx - d.grab.0, sy - d.grab.1);
                 }
                 if let Some(d) = app.mark_drag.as_mut()
                     && d.page == pi
@@ -230,21 +389,6 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         (sb.part, sb.staff, sb.measure, drop_tick(sb, sx, step, len), sb.diatonic_at(sy))
                     });
                 }
-                // Where the dragged note would land.
-                if let Some(d) = app.note_drag
-                    && let Some((part, staff, measure, tick, dia)) = d.target
-                    && let Some(sb) = layout.staff_box(part, staff, measure).filter(|s| s.page == pi)
-                {
-                    let x = sb.x_at(tick);
-                    let yy = sb.top + (sb.clef.top_line() - dia) as f32 * 0.5;
-                    glyph::paint(
-                        &painter,
-                        scoreart_engrave::glyphs::HEAD_BLACK,
-                        map(x, yy),
-                        4.0 * zoom,
-                        tk.accent.linear_multiply(0.7),
-                    );
-                }
                 if !prect.intersects(clip) {
                     continue;
                 }
@@ -253,12 +397,23 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     && let Some((hp, hx, hy)) = hover
                     && hp == pi
                 {
+                    let target = layout.hit(pi, hx, hy);
                     let movable = matches!(
-                        layout.hit(pi, hx, hy),
-                        Some(Target::Note { .. } | Target::Text { .. } | Target::Dynamic { .. })
+                        target,
+                        Some(Target::Note { .. } | Target::Text { .. } | Target::Dynamic { .. } | Target::Line { .. })
                     );
-                    if app.mark_drag.is_some() || app.note_drag.is_some() {
+                    // At the end of a line: the end can be pulled sideways.
+                    let at_end = match target {
+                        Some(Target::Line { index, first, last }) => line_box(&layout, pi, hx, hy, index)
+                            .is_some_and(|h| (first && hx - h.x0 < 1.5) || (last && h.x1 - hx < 1.5)),
+                        _ => false,
+                    };
+                    if app.line_drag.is_some_and(|d| d.end.is_some()) {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    } else if app.mark_drag.is_some() || app.note_drag.is_some() || app.line_drag.is_some() {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    } else if at_end {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                     } else if movable {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                     }
@@ -393,6 +548,41 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         }
                     }
                 }
+                // Where the dragged note would land.
+                if let Some(d) = app.note_drag
+                    && let Some((part, staff, measure, tick, dia)) = d.target
+                    && let Some(sb) = layout.staff_box(part, staff, measure).filter(|s| s.page == pi)
+                {
+                    let x = sb.x_at(tick);
+                    let yy = sb.top + (sb.clef.top_line() - dia) as f32 * 0.5;
+                    glyph::paint(
+                        &painter,
+                        scoreart_engrave::glyphs::HEAD_BLACK,
+                        map(x, yy),
+                        4.0 * zoom,
+                        tk.accent,
+                    );
+                }
+                // Where a dragged line would go.
+                if let Some(d) = app.line_drag.filter(|d| d.page == pi) {
+                    let h = d.hit;
+                    match d.end {
+                        None => {
+                            let r = Rect::from_min_max(
+                                map(h.x0 + d.delta.0, h.y0 + d.delta.1),
+                                map(h.x1 + d.delta.0, h.y1 + d.delta.1),
+                            );
+                            painter.rect_filled(r, 3.0, tk.accent.linear_multiply(0.12));
+                            painter.rect_stroke(r, 3.0, Stroke::new(1.2, tk.accent), egui::StrokeKind::Outside);
+                        }
+                        Some(start) => {
+                            let x = if start { h.x0 } else { h.x1 } + d.delta.0;
+                            let a = map(x, h.y0 - 1.0);
+                            let b = map(x, h.y1 + 1.0);
+                            painter.line_segment([a, b], Stroke::new(2.0, tk.accent));
+                        }
+                    }
+                }
                 // Where a dragged text or dynamic would go.
                 if let Some(d) = app.mark_drag.filter(|d| d.page == pi) {
                     let h = d.hit;
@@ -455,6 +645,11 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
         && let Some(d) = app.mark_drag.take()
     {
         drop_mark(app, &layout, d);
+    }
+    if resp_drag_stopped(ui)
+        && let Some(d) = app.line_drag.take()
+    {
+        drop_line(app, &layout, d);
     }
 
     if let Some((page, x, y, shift, _cmd)) = click {
@@ -594,6 +789,13 @@ fn handle_click(
             "select.event",
             &json!({ "part": ev.part, "staff": ev.staff, "voice": ev.voice, "measure": ev.measure, "index": ev.index, "note": note, "extend": shift }),
         ),
+        Some(Target::Line { index, .. }) => match s.score.spanners.get(index).copied() {
+            Some(sp) => s.execute(
+                "select.event",
+                &json!({ "part": sp.part, "staff": sp.staff, "voice": sp.voice, "measure": sp.start.measure, "index": scoreart_model::edit::Pos { part: sp.part, staff: sp.staff, voice: sp.voice, measure: sp.start.measure, tick: sp.start.tick }.event(&s.score).map_or(0, |e| e.index) }),
+            ),
+            None => Ok(serde_json::Value::Null),
+        },
         Some(Target::Text { ev } | Target::Dynamic { ev }) => s.execute(
             "select.event",
             &json!({ "part": ev.part, "staff": ev.staff, "voice": ev.voice, "measure": ev.measure, "index": ev.index }),
