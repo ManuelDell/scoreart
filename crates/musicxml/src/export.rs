@@ -102,6 +102,15 @@ fn lines_of(score: &Score, part: usize) -> Lines<'_> {
     l
 }
 
+/// A hairpin opened wider or narrower: ` spread="…"` (tenths), on its open end.
+fn spread(sp: &Spanner) -> String {
+    if sp.spread == 0 {
+        String::new()
+    } else {
+        format!(" spread=\"{}\"", sp.spread)
+    }
+}
+
 /// A moved line: ` relative-y="…"` (tenths, up) on its start, or nothing.
 fn rel_y(sp: &Spanner) -> String {
     if sp.dy == 0 {
@@ -131,7 +140,11 @@ fn line_start_direction(x: &mut String, sp: &Spanner, number: usize, staff: Opti
         SpannerKind::Diminuendo => direction(
             x,
             "below",
-            &format!("<wedge type=\"diminuendo\" number=\"{number}\"{}/>", rel_y(sp)),
+            &format!(
+                "<wedge type=\"diminuendo\" number=\"{number}\"{}{}/>",
+                rel_y(sp),
+                spread(sp)
+            ),
             staff,
             "",
         ),
@@ -186,7 +199,14 @@ fn line_stop_direction(x: &mut String, sp: &Spanner, number: usize, staff: Optio
         SpannerKind::Crescendo | SpannerKind::Diminuendo => direction(
             x,
             "below",
-            &format!("<wedge type=\"stop\" number=\"{number}\"/>"),
+            &format!(
+                "<wedge type=\"stop\" number=\"{number}\"{}/>",
+                if sp.kind == SpannerKind::Crescendo {
+                    spread(sp)
+                } else {
+                    String::new()
+                }
+            ),
             staff,
             "",
         ),

@@ -393,6 +393,7 @@ pub fn commands() -> Vec<CommandSpec> {
                     start,
                     end,
                     dy: 0,
+                    spread: 0,
                 };
                 if !s.score.spanners.contains(&sp) {
                     s.score.spanners.push(sp);
@@ -503,6 +504,37 @@ pub fn commands() -> Vec<CommandSpec> {
                 if let Some(x) = s.score.spanners.get_mut(i) {
                     *x = moved;
                 }
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "line.spread",
+            label: "Hairpin opening",
+            menu: &[],
+            shortcut: None,
+            params: "index (of a hairpin), spread (staff spaces, 0.3…6; 0 = standard)",
+            enabled: has_lines,
+            run: |s, p| {
+                let i = need_usize(p, "index")?;
+                let v = p
+                    .get("spread")
+                    .and_then(Value::as_f64)
+                    .filter(|v| v.is_finite())
+                    .ok_or_else(|| Error::Param("spread: a number".into()))?;
+                let sp = s
+                    .score
+                    .spanners
+                    .get_mut(i)
+                    .ok_or_else(|| Error::Param("no such line".into()))?;
+                if !matches!(sp.kind, SpannerKind::Crescendo | SpannerKind::Diminuendo) {
+                    return Err(Error::Param("only hairpins open".into()));
+                }
+                sp.spread = if v <= 0.0 {
+                    0
+                } else {
+                    (v * 10.0).round().clamp(3.0, 60.0) as u8
+                };
                 Ok(Value::Null)
             },
             undoable: true,

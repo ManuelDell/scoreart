@@ -872,6 +872,7 @@ mod tests {
                 tick: b.1,
             },
             dy: 0,
+            spread: 0,
         });
     }
 

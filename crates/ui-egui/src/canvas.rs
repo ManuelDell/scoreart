@@ -85,10 +85,29 @@ pub(crate) struct LineDrag {
     index: usize,
     /// Some(true): the start; Some(false): the end; None: the whole line.
     end: Option<bool>,
+    /// The end grabbed is a hairpin's open end: pulled up or down it opens or closes.
+    open: bool,
     page: usize,
     grab: (f32, f32),
     delta: (f32, f32),
     hit: scoreart_engrave::Hit,
+}
+
+impl LineDrag {
+    /// Pulling a hairpin's open end more up or down than sideways: changing its opening.
+    fn spreading(&self) -> bool {
+        self.open && self.delta.1.abs() > self.delta.0.abs()
+    }
+}
+
+/// Which end of line `index` is a hairpin's open end: Some(false) the end of a crescendo,
+/// Some(true) the start of a diminuendo; None for other lines.
+fn open_end(score: &scoreart_model::Score, index: usize) -> Option<bool> {
+    match score.spanners.get(index).map(|s| s.kind) {
+        Some(scoreart_model::SpannerKind::Crescendo) => Some(false),
+        Some(scoreart_model::SpannerKind::Diminuendo) => Some(true),
+        _ => None,
+    }
 }
 
 /// The piece of line `index` under (x, y) on a page.
@@ -134,6 +153,15 @@ fn drop_line(app: &mut ScoreApp, layout: &scoreart_engrave::Layout, d: LineDrag)
     let (gx, gy) = d.grab;
     let x = gx + d.delta.0;
     match d.end {
+        Some(_) if d.spreading() => {
+            let mid = (d.hit.y0 + d.hit.y1) / 2.0;
+            let half = (gy + d.delta.1 - mid).abs();
+            let spread = (f64::from(half) * 2.0 * 10.0).round() / 10.0;
+            app.run(
+                "line.spread",
+                json!({ "index": d.index, "spread": spread.max(0.3) }),
+            );
+        }
         Some(start) => {
             if d.delta.0.abs() < 0.3 {
                 return;
@@ -348,9 +376,11 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                                 } else {
                                     None
                                 };
+                                let open = open_end(&app.session.score, index) == end && end.is_some();
                                 app.line_drag = Some(LineDrag {
                                     index,
                                     end,
+                                    open,
                                     page: pi,
                                     grab: (sx, sy),
                                     delta: (0.0, 0.0),
@@ -403,15 +433,30 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         Some(Target::Note { .. } | Target::Text { .. } | Target::Dynamic { .. } | Target::Line { .. })
                     );
                     // At the end of a line: the end can be pulled sideways.
-                    let at_end = match target {
-                        Some(Target::Line { index, first, last }) => line_box(&layout, pi, hx, hy, index)
-                            .is_some_and(|h| (first && hx - h.x0 < 1.5) || (last && h.x1 - hx < 1.5)),
-                        _ => false,
+                    // Which end is under the pointer: Some(true) start, Some(false) end.
+                    let end_here = match target {
+                        Some(Target::Line { index, first, last }) => line_box(&layout, pi, hx, hy, index).and_then(|h| {
+                            if first && hx - h.x0 < 1.5 {
+                                Some((index, true))
+                            } else if last && h.x1 - hx < 1.5 {
+                                Some((index, false))
+                            } else {
+                                None
+                            }
+                        }),
+                        _ => None,
                     };
-                    if app.line_drag.is_some_and(|d| d.end.is_some()) {
+                    let at_end = end_here.is_some();
+                    let at_open = end_here.is_some_and(|(i, e)| open_end(&app.session.score, i) == Some(e));
+                    if app.line_drag.is_some_and(|d| d.spreading()) {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                    } else if app.line_drag.is_some_and(|d| d.end.is_some()) {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                     } else if app.mark_drag.is_some() || app.note_drag.is_some() || app.line_drag.is_some() {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    } else if at_open {
+                        // Sideways: the end moves; up or down: the hairpin opens or closes.
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
                     } else if at_end {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                     } else if movable {
@@ -574,6 +619,19 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                             );
                             painter.rect_filled(r, 3.0, tk.accent.linear_multiply(0.12));
                             painter.rect_stroke(r, 3.0, Stroke::new(1.2, tk.accent), egui::StrokeKind::Outside);
+                        }
+                        Some(start) if d.spreading() => {
+                            // The new opening at the open end.
+                            let x = if start { h.x0 } else { h.x1 };
+                            let mid = (h.y0 + h.y1) / 2.0;
+                            let half = (d.grab.1 + d.delta.1 - mid).abs().max(0.15);
+                            let tip = if start { h.x1 } else { h.x0 };
+                            for sign in [-1.0, 1.0] {
+                                painter.line_segment(
+                                    [map(tip, mid), map(x, mid + sign * half)],
+                                    Stroke::new(2.0, tk.accent),
+                                );
+                            }
                         }
                         Some(start) => {
                             let x = if start { h.x0 } else { h.x1 } + d.delta.0;

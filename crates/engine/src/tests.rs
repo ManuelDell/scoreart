@@ -342,6 +342,7 @@ fn women_and_flute() -> Session {
             tick: TPQ * 2,
         },
         dy: 0,
+        spread: 0,
     });
     s.score.spanners.push(scoreart_model::Spanner {
         kind: scoreart_model::SpannerKind::Slur,
@@ -351,6 +352,7 @@ fn women_and_flute() -> Session {
         start: scoreart_model::Anchor { measure: 0, tick: 0 },
         end: scoreart_model::Anchor { measure: 1, tick: 0 },
         dy: 0,
+        spread: 0,
     });
     s
 }
@@ -702,16 +704,27 @@ fn lines_move_up_down_sideways_and_by_their_ends() {
         s.execute("line.move", &json!({ "index": 0, "shift": 100 }))
             .is_err()
     );
+    // Opened wider.
+    s.execute("line.spread", &json!({ "index": 0, "spread": 2.4 }))
+        .unwrap();
+    assert_eq!(s.score.spanners[0].spread, 24);
     // Kept in MusicXML.
     let back = scoreart_musicxml::from_str(&scoreart_musicxml::to_string(&s.score)).unwrap();
     assert_eq!(back.spanners[0].dy, 15);
+    assert_eq!(back.spanners[0].spread, 24);
     assert_eq!(back.spanners[0].end, s.score.spanners[0].end);
     // Undo brings it back.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.score.spanners[0].spread, 0);
     s.execute("edit.undo", &json!({})).unwrap();
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(s.score.spanners[0].dy, 0);
     // And it is drawn moved, with a box to pick it up.
     s.execute("edit.redo", &json!({})).unwrap();
+    assert!(
+        s.execute("line.spread", &json!({ "index": 0, "spread": "wide" }))
+            .is_err()
+    );
     let layout = s.layout();
     assert!(
         layout

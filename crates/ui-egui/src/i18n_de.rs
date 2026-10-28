@@ -293,6 +293,7 @@ pub const DE: &[(&str, &str)] = &[
     ("Grace note", "Vorschlagsnote"),
     ("Grace notes", "Vorschlagsnoten"),
     ("Guitar", "Gitarre"),
+    ("Hairpin opening", "Öffnung der Gabel"),
     ("Half note", "Halbe Note"),
     ("Half open", "Halb offen"),
     ("Hand", "Hand"),

@@ -1124,4 +1124,7 @@ pub struct Spanner {
     /// Moved up (negative) or down from its place, in tenths of a staff space.
     #[serde(default)]
     pub dy: i16,
+    /// A hairpin's opening, in tenths of a staff space (0 = the standard 1.2 spaces).
+    #[serde(default)]
+    pub spread: u8,
 }

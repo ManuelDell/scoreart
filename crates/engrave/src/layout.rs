@@ -2771,6 +2771,13 @@ fn draw_spanners(ctx: &Ctx, out: &mut Layout, last_page: &mut Page, last_index: 
                         (true, f, l) => (if f { 0.0 } else { 0.3 }, if l { 0.6 } else { 0.45 }),
                         (false, f, l) => (if f { 0.6 } else { 0.45 }, if l { 0.0 } else { 0.3 }),
                     };
+                    // Opened wider or narrower by the user.
+                    let k = if sp.spread > 0 {
+                        f32::from(sp.spread) / 12.0
+                    } else {
+                        1.0
+                    };
+                    let (o0, o1) = (o0 * k, o1 * k);
                     local.push((
                         s.page,
                         Shape::Line {

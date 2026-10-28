@@ -50,8 +50,16 @@ struct Raw {
 /// A line start or stop from a `<direction>` at a time position.
 #[derive(Clone, Debug)]
 enum DirMark {
-    Start { key: String, kind: SpannerKind, dy: i16 },
-    Stop { key: String },
+    Start {
+        key: String,
+        kind: SpannerKind,
+        dy: i16,
+        spread: u8,
+    },
+    Stop {
+        key: String,
+        spread: u8,
+    },
 }
 
 pub fn read(root: &Element) -> Result<Score, Error> {
@@ -282,6 +290,14 @@ pub fn program_for_name(name: &str) -> Option<u8> {
     )
 }
 
+/// A wedge's opening (`spread`, tenths), 0 when none is written.
+fn wedge_spread(el: &Element) -> u8 {
+    el.attr("spread")
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .map_or(0, |v| v.round().clamp(1.0, 255.0) as u8)
+}
+
 /// How far a line was moved: `relative-y` (tenths, up) → tenths of a staff space, down.
 fn line_dy(el: &Element) -> i16 {
     el.attr("relative-y")
@@ -484,7 +500,7 @@ fn read_part(
     let mut measures: Vec<PartMeasure> = Vec::new();
     // Open lines: (staff, voice, family, number) for note lines; (staff, key) for directions.
     let mut open_note: HashMap<(usize, usize, Family, String), (SpannerKind, Anchor, i16)> = HashMap::new();
-    let mut open_dir: HashMap<(usize, String), (SpannerKind, usize, Anchor, i16)> = HashMap::new();
+    let mut open_dir: HashMap<(usize, String), (SpannerKind, usize, Anchor, i16, u8)> = HashMap::new();
     let mut open_ending: Option<(u8, usize)> = None;
     let mut ending_label: Option<String> = None;
     let mut repeat_staves: Vec<bool> = vec![false; limits::MAX_STAVES];
@@ -947,6 +963,7 @@ fn read_part(
                                                 key,
                                                 kind: SpannerKind::Crescendo,
                                                 dy: line_dy(k),
+                                                spread: wedge_spread(k),
                                             },
                                         )),
                                         Some("diminuendo") => dir_marks.push((
@@ -956,9 +973,17 @@ fn read_part(
                                                 key,
                                                 kind: SpannerKind::Diminuendo,
                                                 dy: line_dy(k),
+                                                spread: wedge_spread(k),
                                             },
                                         )),
-                                        Some("stop") => dir_marks.push((staff, t, DirMark::Stop { key })),
+                                        Some("stop") => dir_marks.push((
+                                            staff,
+                                            t,
+                                            DirMark::Stop {
+                                                key,
+                                                spread: wedge_spread(k),
+                                            },
+                                        )),
                                         _ => {}
                                     }
                                 }
@@ -980,6 +1005,7 @@ fn read_part(
                                                 key,
                                                 kind: SpannerKind::Ottava(oct),
                                                 dy: line_dy(k),
+                                                spread: wedge_spread(k),
                                             },
                                         )),
                                         Some("up") => dir_marks.push((
@@ -989,9 +1015,17 @@ fn read_part(
                                                 key,
                                                 kind: SpannerKind::Ottava(-oct),
                                                 dy: line_dy(k),
+                                                spread: wedge_spread(k),
                                             },
                                         )),
-                                        Some("stop") => dir_marks.push((staff, t, DirMark::Stop { key })),
+                                        Some("stop") => dir_marks.push((
+                                            staff,
+                                            t,
+                                            DirMark::Stop {
+                                                key,
+                                                spread: wedge_spread(k),
+                                            },
+                                        )),
                                         _ => {}
                                     }
                                 }
@@ -1005,9 +1039,17 @@ fn read_part(
                                                 key,
                                                 kind: SpannerKind::Pedal,
                                                 dy: line_dy(k),
+                                                spread: wedge_spread(k),
                                             },
                                         )),
-                                        Some("stop") => dir_marks.push((staff, t, DirMark::Stop { key })),
+                                        Some("stop") => dir_marks.push((
+                                            staff,
+                                            t,
+                                            DirMark::Stop {
+                                                key,
+                                                spread: wedge_spread(k),
+                                            },
+                                        )),
                                         _ => {}
                                     }
                                 }
@@ -1037,11 +1079,19 @@ fn read_part(
                                                         key,
                                                         kind,
                                                         dy: line_dy(k),
+                                                        spread: wedge_spread(k),
                                                     },
                                                 ));
                                             }
                                         }
-                                        Some("stop") => dir_marks.push((staff, t, DirMark::Stop { key })),
+                                        Some("stop") => dir_marks.push((
+                                            staff,
+                                            t,
+                                            DirMark::Stop {
+                                                key,
+                                                spread: wedge_spread(k),
+                                            },
+                                        )),
                                         _ => {}
                                     }
                                 }
@@ -1297,6 +1347,7 @@ fn read_part(
                         start,
                         end: here,
                         dy,
+                        spread: 0,
                     });
                 }
             }
@@ -1315,16 +1366,24 @@ fn read_part(
                 .unwrap_or_default();
             let at32 = at.min(u64::from(u32::MAX)) as u32;
             match mark {
-                DirMark::Start { key, kind, dy } => {
+                DirMark::Start {
+                    key,
+                    kind,
+                    dy,
+                    spread,
+                } => {
                     let tick = onsets
                         .iter()
                         .copied()
                         .find(|o| *o >= at32)
                         .or(onsets.last().copied())
                         .unwrap_or(0);
-                    open_dir.insert((s, key), (kind, 0, Anchor { measure: mi, tick }, dy));
+                    open_dir.insert((s, key), (kind, 0, Anchor { measure: mi, tick }, dy, spread));
                 }
-                DirMark::Stop { key } => {
+                DirMark::Stop {
+                    key,
+                    spread: stop_spread,
+                } => {
                     let tick = onsets
                         .iter()
                         .copied()
@@ -1332,7 +1391,7 @@ fn read_part(
                         .max()
                         .or(onsets.first().copied())
                         .unwrap_or(0);
-                    if let Some((kind, v, start, dy)) = open_dir.remove(&(s, key)) {
+                    if let Some((kind, v, start, dy, spread)) = open_dir.remove(&(s, key)) {
                         score.spanners.push(Spanner {
                             kind,
                             part: pi,
@@ -1341,6 +1400,7 @@ fn read_part(
                             start,
                             end: Anchor { measure: mi, tick },
                             dy,
+                            spread: spread.max(stop_spread),
                         });
                     }
                 }

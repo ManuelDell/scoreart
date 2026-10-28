@@ -1340,6 +1340,7 @@ mod tests {
                 tick: TPQ * 3,
             },
             dy: 0,
+            spread: 0,
         });
         s.playback.reverb = 0;
         let seq = scoreart_midi::sequence(&s);

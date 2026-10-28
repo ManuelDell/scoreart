@@ -1066,6 +1066,7 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                 tick: et,
             },
             dy: 0,
+            spread: 0,
         });
     }
     // MuseScore keeps notes under an octave line at their written position; ScoreArt keeps the
