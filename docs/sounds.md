@@ -37,19 +37,24 @@ GeneralUser GS. For every library it shows:
 
 Downloading works like this:
 
-1. You pick **one instrument** (e.g. "SViolinVib"); only its `.sfz`, includes and samples are
-   fetched, not the whole multi-GB library.
-2. **Download…** opens the licence once more in full. **Accept and download** stays disabled until
-   you tick "I have read the licence … and accept its terms".
-3. Files come directly from the publisher's public repository (raw.githubusercontent.com),
+1. You tick **the instruments you want** (e.g. "SViolinVib"; *Select all* ticks everything not
+   loaded yet, also within a search), or use **Download the whole library**. Only the chosen
+   instruments' `.sfz`, includes and samples are fetched.
+2. **Download selected…** (or *whole library…*) opens the licence once more in full. **Accept
+   and download** stays disabled until you tick "I have read the licence … and accept its
+   terms". One acceptance covers the batch; each instrument still gets its own line in the
+   notice (step 5).
+3. The instruments are downloaded one after the other. The window shows "instrument k of n" and
+   the current file count; **Cancel** stops the current one and drops the rest of the batch.
+4. Files come directly from the publisher's public repository (raw.githubusercontent.com),
    never from a ScoreArt server.
-4. Next to the files ScoreArt saves the library's own licence file and
+5. Next to the files ScoreArt saves the library's own licence file and
    `SCOREART-LICENCE-NOTICE.txt`. The notice holds the licence summary and one line per
    acceptance (instrument, licence, date and time in UTC).
-5. Where files go:
+6. Where files go:
    - Desktop and CLI: `~/.local/share/ScoreArt/Sounds/<library>` on Linux, `%APPDATA%\ScoreArt\Sounds` on Windows, `~/Library/Application Support/ScoreArt/Sounds` on macOS. The library is loaded and remembered.
    - Browser: memory, for the current session only.
-6. **GeneralUser GS**: its author asks that nobody links directly to his download files, so
+7. **GeneralUser GS**: its author asks that nobody links directly to his download files, so
    ScoreArt only opens his website. Download the `.sf2` there and load it yourself.
 
 Command line: `scoreart-cli sounds list [LIBRARY]`, `scoreart-cli sounds licence LIBRARY`,

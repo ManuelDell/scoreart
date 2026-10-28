@@ -207,6 +207,8 @@ pub struct ScoreApp {
     pub(crate) mixer: mixer::Mixer,
     /// The "Free sound libraries" window, when open.
     pub(crate) catalog: Option<catalog::CatalogState>,
+    /// Library instruments waiting to be downloaded.
+    pub(crate) downloads: catalog::DownloadQueue,
     /// The "Instruments and sounds" window and a pending instrument change.
     pub(crate) instruments: instruments::InstrumentsState,
     /// The page settings being edited, while the dialog is open.
@@ -277,6 +279,7 @@ impl ScoreApp {
             show_mixer: false,
             mixer: mixer::Mixer::default(),
             catalog: None,
+            downloads: Default::default(),
             instruments: Default::default(),
             page_settings: None,
             midi: Default::default(),
@@ -396,6 +399,7 @@ impl ScoreApp {
                 canvas::show(self, ui);
             });
         panels::dialogs(self, &ctx);
+        catalog::pump(self, &ctx);
         catalog::window(self, &ctx);
         instruments::dialogs(self, &ctx);
         page::dialog(self, &ctx);

@@ -628,7 +628,14 @@ pub fn status_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 } else {
                     s.status.clone()
                 };
-                ui.label(crate::i18n::tr(&msg));
+                // One line, cut short; the whole message on hover.
+                let full = crate::i18n::tr(&msg);
+                let line = full.split_whitespace().collect::<Vec<_>>().join(" ");
+                let right = 330.0_f32.min(ui.available_width() / 2.0);
+                ui.scope(|ui| {
+                    ui.set_max_width((ui.available_width() - right).max(40.0));
+                    ui.add(egui::Label::new(line).truncate()).on_hover_text(full);
+                });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
                         RichText::new(format!("{}{}", s.file_name, if s.dirty { " •" } else { "" }))

@@ -137,9 +137,11 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   Salamander Grand Piano, GeneralUser GS. **Every instrument is its own track** with its own
   sound (library and preset), volume, pan, mute, solo and level meter; the choice is saved in
   the score. **Audio per instrument** export writes one WAV per instrument (stems).
-  **Free sound libraries** can be fetched from inside ScoreArt instrument by instrument, each
-  only after its licence is shown in full and explicitly accepted (licence and acceptance are
-  saved with the files). See
+  **Free sound libraries** can be fetched from inside ScoreArt: tick several instruments, or
+  fetch the **whole library with one click** (everything not loaded yet). The licence is
+  shown in full and must be explicitly accepted once for the batch; the instruments are then
+  downloaded one after the other with progress ("instrument 3 of 75") and can be cancelled
+  (licence and acceptance are saved with the files). See
   [docs/sounds.md](docs/sounds.md) for the libraries, their licences and how they compare with
   Muse Sounds.
 

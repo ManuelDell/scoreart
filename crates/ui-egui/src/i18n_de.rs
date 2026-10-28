@@ -226,10 +226,16 @@ pub const DE: &[(&str, &str)] = &[
     ("Down mordent", "Mordent von unten"),
     ("Down prall", "Pralltriller von unten"),
     ("Download \"{}\"…", "„{}“ herunterladen…"),
+    ("Download selected ({})…", "Auswahl herunterladen ({})…"),
+    (
+        "Download the whole library ({} instruments)…",
+        "Ganze Bibliothek herunterladen ({} Instrumente)…",
+    ),
     (
         "Downloading is not available here; use the source links and \"Load sounds…\".",
         "Herunterladen ist hier nicht möglich; nutze die Quell-Links und „Klänge laden…“.",
     ),
+    ("Downloading {} ({} of {}) …", "Lade {} herunter ({} von {}) …"),
     ("Downloading {} …", "Lade {} herunter …"),
     ("Duration", "Notenwert"),
     ("Dynamic", "Dynamik"),
@@ -244,6 +250,10 @@ pub const DE: &[(&str, &str)] = &[
     (
         "Every key enters its note; controllers do nothing.",
         "Jede Taste gibt ihre Note ein; Regler tun nichts.",
+    ),
+    (
+        "Everything not loaded yet · {}",
+        "Alles, was noch nicht geladen ist · {}",
     ),
     ("Examples", "Beispiele"),
     ("Export", "Exportieren"),
@@ -322,6 +332,7 @@ pub const DE: &[(&str, &str)] = &[
         "Instrument volume and pan",
         "Lautstärke und Panorama des Instruments",
     ),
+    ("Instrument {} of {}", "Instrument {} von {}"),
     ("Instruments", "Instrumente"),
     ("Instruments ({})", "Instrumente ({})"),
     ("Instruments and sounds", "Instrumente und Klänge"),
@@ -626,7 +637,9 @@ pub const DE: &[(&str, &str)] = &[
     ),
     ("Select all", "Alles auswählen"),
     ("Select all    Ctrl+A", "Alles auswählen    Strg+A"),
+    ("Select all found", "Alle Treffer auswählen"),
     ("Select measure", "Takt auswählen"),
+    ("Select none", "Auswahl aufheben"),
     ("Select note or rest", "Note oder Pause auswählen"),
     (
         "Select notes or measures, then click. Shift+click or Shift+→ selects a range.",
@@ -724,6 +737,10 @@ pub const DE: &[(&str, &str)] = &[
         "Dies ist eine Zusammenfassung, keine Rechtsberatung. Verbindlich ist nur der Lizenztext.",
     ),
     ("Thumb position", "Daumenaufsatz"),
+    (
+        "Ticks every instrument that is not loaded yet",
+        "Hakt jedes Instrument an, das noch nicht geladen ist",
+    ),
     ("Tie", "Haltebogen"),
     ("Tie (T)", "Haltebogen (T)"),
     ("Tight", "Eng"),
@@ -818,6 +835,10 @@ pub const DE: &[(&str, &str)] = &[
     (
         "You are about to download \"{}\" ({}).",
         "Du lädst gleich „{}“ ({}) herunter.",
+    ),
+    (
+        "You are about to download {} instruments of {}, one after the other.",
+        "Du lädst gleich {} Instrumente aus {} herunter, eines nach dem anderen.",
     ),
     (
         "Your administrator has turned off downloads from the internet; only instruments kept on the server can be loaded.",

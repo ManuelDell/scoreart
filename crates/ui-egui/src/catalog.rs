@@ -21,10 +21,43 @@ pub struct DownloadStatus {
 pub struct CatalogState {
     library: usize,
     filter: String,
-    instrument: Option<&'static str>,
-    /// The licence confirmation is open for this instrument.
-    confirm: Option<&'static str>,
+    /// The ticked instruments of the open library.
+    chosen: std::collections::BTreeSet<&'static str>,
+    /// The licence confirmation is open for these instruments.
+    confirm: Option<Vec<&'static str>>,
     accepted: bool,
+}
+
+/// Instruments waiting to be downloaded, one after the other.
+#[derive(Default)]
+pub struct DownloadQueue {
+    pending: std::collections::VecDeque<(&'static Library, &'static str)>,
+    /// How many the current batch has in all.
+    total: usize,
+}
+
+/// Starts the next queued download when the host is free; keeps the frames coming meanwhile.
+pub fn pump(app: &mut ScoreApp, ctx: &egui::Context) {
+    let busy = app.host.download_status().is_some();
+    if !busy {
+        if let Some((lib, inst)) = app.downloads.pending.pop_front() {
+            app.host.download_sounds(lib, inst);
+            let n = app.downloads.total - app.downloads.pending.len();
+            app.session.status = if app.downloads.total > 1 {
+                tf(
+                    "Downloading {} ({} of {}) …",
+                    &[&catalog::instrument_name(inst), &n, &app.downloads.total],
+                )
+            } else {
+                tf("Downloading {} …", &[&catalog::instrument_name(inst)])
+            };
+        } else {
+            app.downloads.total = 0;
+        }
+    }
+    if busy || !app.downloads.pending.is_empty() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+    }
 }
 
 /// Whether `instrument` of `lib` is already loaded.
@@ -128,7 +161,16 @@ pub fn window(app: &mut ScoreApp, ctx: &egui::Context) {
                 } else {
                     0.0
                 };
+                let total = app.downloads.total;
+                let batch = if total > 1 {
+                    tf("Instrument {} of {}", &[&(total - app.downloads.pending.len()), &total])
+                } else {
+                    String::new()
+                };
                 ui.horizontal(|ui| {
+                    if !batch.is_empty() {
+                        ui.label(batch);
+                    }
                     ui.add(
                         egui::ProgressBar::new(frac)
                             .desired_width(380.0)
@@ -144,6 +186,7 @@ pub fn window(app: &mut ScoreApp, ctx: &egui::Context) {
                             )),
                     );
                     if ui.button(t("Cancel")).clicked() {
+                        app.downloads.pending.clear();
                         app.host.cancel_download();
                     }
                 });
@@ -158,7 +201,7 @@ pub fn window(app: &mut ScoreApp, ctx: &egui::Context) {
                         let text = format!("{}\n{}", l.name, t(short_licence(l)));
                         if ui.selectable_label(st.library == i, text).clicked() {
                             st.library = i;
-                            st.instrument = None;
+                            st.chosen.clear();
                             st.confirm = None;
                             st.filter.clear();
                         }
@@ -177,10 +220,11 @@ pub fn window(app: &mut ScoreApp, ctx: &egui::Context) {
                     ui.label(RichText::new(lib.publisher).color(tk.text_dim));
                     ui.label(t(lib.description));
                     ui.label(tf("Size: {}", &[&t(lib.size)]));
-                    licence_box(ui, lib, &tk);
-                    ui.add_space(6.0);
+                    ui.add_space(4.0);
                     match lib.source {
                         Source::Website { url } => {
+                            licence_box(ui, lib, &tk);
+                            ui.add_space(6.0);
                             ui.add(egui::Hyperlink::from_label_and_url(t("Open the publisher's website to download"), url).open_in_new_tab(true));
                             ui.label(
                                 RichText::new(t("After downloading, load the file with Mixer → Load sounds…")).color(tk.text_dim),
@@ -192,14 +236,17 @@ pub fn window(app: &mut ScoreApp, ctx: &egui::Context) {
                                 ui.add(egui::Hyperlink::from_label_and_url(page, page).open_in_new_tab(true));
                             });
                             instruments(app, ui, lib, &mut st, &tk, status.is_some());
+                            ui.add_space(6.0);
+                            // Shown again in full before anything is downloaded.
+                            licence_box(ui, lib, &tk);
                         }
                     }
                     });
                     });
             });
         });
-    if let (Some(inst), Some(lib)) = (st.confirm, libs.get(st.library)) {
-        confirm(app, ctx, lib, inst, &mut st, &tk);
+    if let (Some(insts), Some(lib)) = (st.confirm.clone(), libs.get(st.library)) {
+        confirm(app, ctx, lib, &insts, &mut st, &tk);
     }
     if open {
         app.catalog = Some(st);
@@ -222,6 +269,13 @@ fn instruments(
     tk: &Tokens,
     busy: bool,
 ) {
+    // What a download would actually fetch: obtainable and not loaded yet.
+    let missing: Vec<&'static str> = lib
+        .instruments
+        .iter()
+        .copied()
+        .filter(|i| obtainable(app, lib, i) && !installed(app, lib, i))
+        .collect();
     ui.horizontal(|ui| {
         ui.label(RichText::new(tf("Instruments ({})", &[&lib.instruments.len()])).strong());
         if lib.instruments.len() > 8 {
@@ -233,16 +287,68 @@ fn instruments(
         }
     });
     let f = st.filter.to_lowercase();
+    let shown: Vec<&'static str> = lib
+        .instruments
+        .iter()
+        .copied()
+        .filter(|i| f.is_empty() || i.to_lowercase().contains(&f))
+        .collect();
+    ui.horizontal(|ui| {
+        let label = if f.is_empty() {
+            t("Select all")
+        } else {
+            t("Select all found")
+        };
+        if ui
+            .button(label)
+            .on_hover_text(t("Ticks every instrument that is not loaded yet"))
+            .clicked()
+        {
+            st.chosen
+                .extend(shown.iter().copied().filter(|i| missing.contains(i)));
+        }
+        if ui
+            .add_enabled(!st.chosen.is_empty(), egui::Button::new(t("Select none")))
+            .clicked()
+        {
+            st.chosen.clear();
+        }
+    });
+    let chosen: Vec<&'static str> = lib
+        .instruments
+        .iter()
+        .copied()
+        .filter(|i| st.chosen.contains(i) && obtainable(app, lib, i))
+        .collect();
+    ui.horizontal_wrapped(|ui| {
+        let label = tf("Download selected ({})…", &[&chosen.len()]);
+        if ui
+            .add_enabled(!chosen.is_empty() && !busy, egui::Button::new(label))
+            .clicked()
+        {
+            st.confirm = Some(chosen.clone());
+            st.accepted = false;
+        }
+        let label = tf("Download the whole library ({} instruments)…", &[&missing.len()]);
+        if ui
+            .add_enabled(
+                !missing.is_empty() && !busy,
+                egui::Button::new(RichText::new(label).strong()),
+            )
+            .on_hover_text(tf("Everything not loaded yet · {}", &[&t(lib.size)]))
+            .clicked()
+        {
+            st.confirm = Some(missing.clone());
+            st.accepted = false;
+        }
+    });
+    ui.add_space(2.0);
     egui::ScrollArea::vertical()
         .id_salt("catalog-instruments")
-        .max_height(170.0)
+        .max_height(200.0)
         .show(ui, |ui| {
             ui.set_min_width(320.0);
-            for inst in lib
-                .instruments
-                .iter()
-                .filter(|i| f.is_empty() || i.to_lowercase().contains(&f))
-            {
+            for inst in &shown {
                 let done = installed(app, lib, inst);
                 let mut label = if done {
                     format!("✓ {}", catalog::instrument_name(inst))
@@ -252,33 +358,29 @@ fn instruments(
                 if on_server(app, lib, inst) {
                     label.push_str(t(" (on the server)"));
                 }
-                let r = ui.selectable_label(st.instrument == Some(*inst), label);
+                let mut on = st.chosen.contains(inst);
+                let r = ui.checkbox(&mut on, label);
                 let r = if inst.contains('/') {
                     r.on_hover_text(*inst)
                 } else {
                     r
                 };
-                if r.clicked() {
-                    st.instrument = Some(inst);
+                if r.changed() {
+                    if on {
+                        st.chosen.insert(inst);
+                    } else {
+                        st.chosen.remove(inst);
+                    }
                 }
             }
         });
-    ui.add_space(4.0);
-    if let Some(inst) = st.instrument {
-        let can = obtainable(app, lib, inst) && !busy;
-        let label = tf("Download \"{}\"…", &[&catalog::instrument_name(inst)]);
-        if ui.add_enabled(can, egui::Button::new(label)).clicked() {
-            st.confirm = Some(inst);
-            st.accepted = false;
-        }
-        if installed(app, lib, inst) {
-            ui.label(
-                RichText::new(t(
-                    "Already loaded — downloading again only fetches missing files.",
-                ))
-                .color(tk.text_dim),
-            );
-        }
+    if chosen.iter().any(|i| installed(app, lib, i)) {
+        ui.label(
+            RichText::new(t(
+                "Already loaded — downloading again only fetches missing files.",
+            ))
+            .color(tk.text_dim),
+        );
     }
 }
 
@@ -301,7 +403,7 @@ fn confirm(
     app: &mut ScoreApp,
     ctx: &egui::Context,
     lib: &'static Library,
-    inst: &'static str,
+    insts: &[&'static str],
     st: &mut CatalogState,
     tk: &Tokens,
 ) {
@@ -309,10 +411,16 @@ fn confirm(
     egui::Modal::new(egui::Id::unique("licence-confirm")).show(ctx, |ui| {
         ui.set_width(560.0);
         ui.heading(tf("Licence of {}", &[&lib.name]));
-        ui.label(tf(
-            "You are about to download \"{}\" ({}).",
-            &[&catalog::instrument_name(inst), &lib.name],
-        ));
+        match insts {
+            [one] => ui.label(tf(
+                "You are about to download \"{}\" ({}).",
+                &[&catalog::instrument_name(one), &lib.name],
+            )),
+            _ => ui.label(tf(
+                "You are about to download {} instruments of {}, one after the other.",
+                &[&insts.len(), &lib.name],
+            )),
+        };
         egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
             licence_box(ui, lib, tk);
         });
@@ -334,8 +442,10 @@ fn confirm(
                 .add_enabled(st.accepted, egui::Button::new(t("Accept and download")))
                 .clicked()
             {
-                app.host.download_sounds(lib, inst);
-                app.session.status = tf("Downloading {} …", &[&catalog::instrument_name(inst)]);
+                app.downloads.pending.extend(insts.iter().map(|i| (lib, *i)));
+                app.downloads.total = app.downloads.pending.len();
+                st.chosen.clear();
+                pump(app, ctx);
                 close = true;
             }
             if ui.button(t("Cancel")).clicked() {
