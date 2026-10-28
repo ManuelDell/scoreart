@@ -128,15 +128,30 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
 - **Web build** with a `?host=parent` `postMessage` bridge (`scoreart:ready/open/save/dirty`) so
   a same-origin page — for example a Nextcloud app — can open and save scores in it.
 - **Playback** with ScoreArt's own built-in synthesizer (no soundfont needed): `Space` plays
-  from the selection with a moving playhead, notes sound while you enter them, repeats are
-  followed, dynamics, accents, hairpins, grace notes, arpeggios, pedal and
-  one-measure repeats are heard. Desktop audio via cpal, Web Audio in the
-  browser; **WAV** export.
+  from the selection with a moving playhead, notes sound while you enter them. **Everything
+  printed is heard**:
+  - repeats with first/second/third endings, D.C., D.S., al Fine, al Coda;
+  - fermatas, breath marks and caesuras;
+  - accel., rit., allargando and a tempo as gradual tempo changes;
+  - swing;
+  - trills, mordents, turns and other ornaments, tremolos and glissandos;
+  - octave lines, pedal and let ring;
+  - hairpins as real swells, also on held notes.
+
+  Each instrument family plays its own way: slurred notes bind, staccato is shorter for bows
+  and winds than for keys. Desktop audio via cpal, Web Audio in the browser; **WAV** export.
+  How it works: [docs/playback.md](docs/playback.md).
 - **Sample playback and a mixer** (`F10`): load free sample libraries — **SoundFont** (`.sf2`)
   and **SFZ** (`.sfz` with WAV/FLAC samples, also as a folder or zip), e.g. VSCO 2 CE (CC0),
   Salamander Grand Piano, GeneralUser GS. **Every instrument is its own track** with its own
   sound (library and preset), volume, pan, mute, solo and level meter; the choice is saved in
   the score. **Audio per instrument** export writes one WAV per instrument (stems).
+
+  **The notation picks the samples**: with a library like VSCO 2 CE, staccato notes play its
+  spiccato or staccato sound, "pizz." its pizzicato, tremolo strokes its tremolo, "con sord."
+  its muted sound. Every sound is measured once and brought to a common loudness. A room
+  (reverb) and a subtle human touch are added; both can be set in the mixer and are saved with
+  the score.
   **Free sound libraries** can be fetched from inside ScoreArt: tick several instruments, or
   fetch the **whole library with one click** (everything not loaded yet). The licence is
   shown in full and must be explicitly accepted once for the batch; the instruments are then
@@ -149,7 +164,7 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
 - **CLI** for conversion and for driving every command headlessly (agents, scripts).
 
 Not yet: PDF export, tuplet input, multi-measure rests, part extraction, transposing
-instruments, percussion and tablature, two-note tremolos, ornament playback — see [ROADMAP.md](ROADMAP.md).
+instruments, percussion and tablature, two-note tremolos — see [ROADMAP.md](ROADMAP.md).
 
 ## Build and run
 

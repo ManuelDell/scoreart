@@ -7,8 +7,8 @@ use scoreart_model::marks::{MARKS, XmlGroup};
 use scoreart_model::{
     Anchor, Arpeggio, Articulation, Barline, Clef, Duration, Dynamic, Event, EventKind, Grace,
     InstrumentChange, Jump, KeySig, MeasureInfo, Meta, Note, NoteHead, NoteValue, PageFormat, Part,
-    PartMeasure, PartSound, Pitch, Placement, Score, Spanner, SpannerKind, StaffMeasure, Step, TPQ, Tempo,
-    TimeSig, TimeSymbol, Tremolo, Tuplet, Voice, clip, limits,
+    PartMeasure, PartSound, Pitch, Placement, PlaybackStyle, Score, Spanner, SpannerKind, StaffMeasure, Step,
+    TPQ, Tempo, TimeSig, TimeSymbol, Tremolo, Tuplet, Voice, clip, limits,
 };
 
 use crate::Error;
@@ -62,6 +62,7 @@ pub fn read(root: &Element) -> Result<Score, Error> {
     }
     let mut score = Score {
         meta: read_meta(root),
+        playback: read_playback(root),
         ..Score::default()
     };
 
@@ -206,6 +207,25 @@ fn read_defaults(d: &Element) -> PageFormat {
         r(v);
     }
     f.clamped()
+}
+
+/// ScoreArt's playback settings, kept as miscellaneous fields.
+fn read_playback(root: &Element) -> PlaybackStyle {
+    let mut p = PlaybackStyle::default();
+    if let Some(misc) = root.path(&["identification", "miscellaneous"]) {
+        for f in misc.children_named("miscellaneous-field") {
+            match f.attr("name") {
+                Some("scoreart-reverb") => {
+                    if let Ok(v) = f.text.trim().parse::<u8>() {
+                        p.reverb = v.min(100);
+                    }
+                }
+                Some("scoreart-humanize") => p.humanize = f.text.trim() != "no",
+                _ => {}
+            }
+        }
+    }
+    p
 }
 
 fn read_meta(root: &Element) -> Meta {

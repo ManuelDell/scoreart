@@ -21,12 +21,17 @@
 - Catalogue of free libraries (VSCO 2 CE, VCSL, Salamander, GeneralUser GS): per-instrument
   download from the publishers' sources after explicit licence acceptance, with the licence and
   an acceptance record stored next to the files; desktop, browser and `scoreart-cli sounds`.
-  Next for playback: articulation keyswitches driven by the notation, swing, metronome, loop,
-  ritardando, reverb send, SFZ filters/LFOs, loading libraries by URL in the browser.
+- Performance playback (docs/playback.md): everything printed is heard (endings, D.C./D.S./
+  Coda/Fine, fermatas, breaths, accel./rit., swing, ornaments, tremolos, glissandos, 8va);
+  family articulation profiles and slurs; techniques from the notation select library samples
+  (staccato, pizz., trem., con sord.); hairpins as swells; level balancing of every sound; room
+  reverb; human touch.
+  Next for playback: SFZ keyswitch instruments, metronome, loop, SFZ filters/LFOs, loading
+  libraries by URL in the browser.
 - The full catalogue of notation marks (articulations, fermatas, breaths, ornaments, techniques,
   slides, 30 dynamics, all lines incl. slurs/hairpins/8va/pedal/trill/glissando, grace notes,
   tremolos, arpeggios, noteheads, voltas, jumps, rehearsal marks, chord symbols, fingerings,
-  texts) — engraved, editable, round-tripped through MusicXML, mostly played back.
+  texts) — engraved, editable, round-tripped through MusicXML, played back.
 - Note input and editing with undo/redo; palettes; properties; desktop, CLI and web apps;
   `?host=parent` bridge for embedding.
 

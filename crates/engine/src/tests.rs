@@ -633,3 +633,19 @@ fn a_loud_tutti_is_turned_down_not_squashed() {
         pcm.len()
     );
 }
+
+#[test]
+fn the_playback_style_is_kept_in_the_file() {
+    let mut s = blank();
+    let r = s
+        .execute("score.playback", &json!({ "reverb": 60, "humanize": false }))
+        .unwrap();
+    assert_eq!(r, json!({ "reverb": 60, "humanize": false }));
+    let back = scoreart_musicxml::from_str(&scoreart_musicxml::to_string(&s.score)).unwrap();
+    assert_eq!(back.playback.reverb, 60);
+    assert!(!back.playback.humanize);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.score.playback, scoreart_model::PlaybackStyle::default());
+    // The default is not written at all.
+    assert!(!scoreart_musicxml::to_string(&s.score).contains("scoreart-reverb"));
+}

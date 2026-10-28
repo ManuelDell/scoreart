@@ -260,3 +260,31 @@ pub fn resolve(banks: &[Arc<SoundBank>], sound: &PartSound, program: u8) -> (Res
         ),
     }
 }
+
+/// The sound for a variant of a part's sound (pizzicato, tremolo, muted, short), if the
+/// library has one: a matching SFZ instrument by name, or the General MIDI program in a
+/// SoundFont or the built-in sounds.
+pub fn resolve_variant(
+    banks: &[Arc<SoundBank>],
+    sound: &PartSound,
+    program: u8,
+    v: crate::variants::Variant,
+) -> Option<Resolved> {
+    let gm = crate::variants::gm_program(program, v);
+    if sound.library.is_empty() || sound.library == PartSound::BUILT_IN {
+        return gm.map(|q| resolve(banks, sound, q).0);
+    }
+    let b = banks.iter().find(|b| b.name == sound.library)?;
+    if b.is_soundfont() {
+        let q = gm?;
+        b.presets()
+            .iter()
+            .any(|p| p.bank == 0 && p.program == q)
+            .then(|| b.resolve_in("", q).ok())
+            .flatten()
+    } else {
+        let names: Vec<String> = b.presets().into_iter().map(|p| p.name).collect();
+        let name = crate::variants::preset_for(&names, &sound.preset, v)?;
+        b.resolve_in(&name, program).ok()
+    }
+}

@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use scoreart_model::marks::XmlGroup;
 use scoreart_model::{
     Accidental, Arpeggio, Barline, Clef, Event, EventKind, Jump, MeasureInfo, PageFormat, Pitch, Placement,
-    Score, Spanner, SpannerKind, TPQ, TimeSymbol, Tremolo,
+    PlaybackStyle, Score, Spanner, SpannerKind, TPQ, TimeSymbol, Tremolo,
 };
 
 use crate::dom::esc;
@@ -319,6 +319,14 @@ pub fn write(score: &Score) -> String {
         "    <encoding><software>ScoreArt {}</software><supports element=\"accidental\" type=\"no\"/><supports element=\"stem\" type=\"no\"/></encoding>",
         env!("CARGO_PKG_VERSION")
     );
+    if score.playback != PlaybackStyle::default() {
+        let _ = writeln!(
+            x,
+            "    <miscellaneous><miscellaneous-field name=\"scoreart-reverb\">{}</miscellaneous-field><miscellaneous-field name=\"scoreart-humanize\">{}</miscellaneous-field></miscellaneous>",
+            score.playback.reverb,
+            if score.playback.humanize { "yes" } else { "no" }
+        );
+    }
     x.push_str("  </identification>\n");
     write_defaults(&mut x, &score.page);
     x.push_str("  <part-list>\n");

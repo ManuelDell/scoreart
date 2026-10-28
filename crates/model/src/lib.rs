@@ -679,6 +679,28 @@ pub struct Score {
     /// Page size, margins and spacing.
     #[serde(default)]
     pub page: PageFormat,
+    /// How the score is played back.
+    #[serde(default)]
+    pub playback: PlaybackStyle,
+}
+
+/// How a score is played back (not printed): the room and a human touch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PlaybackStyle {
+    /// Room (reverb), 0 (dry) … 100.
+    pub reverb: u8,
+    /// Small, natural variations in timing and loudness.
+    pub humanize: bool,
+}
+
+impl Default for PlaybackStyle {
+    fn default() -> Self {
+        PlaybackStyle {
+            reverb: 25,
+            humanize: true,
+        }
+    }
 }
 
 /// Page size, margins and spacing of the printed score.

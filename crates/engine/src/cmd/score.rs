@@ -619,6 +619,24 @@ pub fn commands() -> Vec<CommandSpec> {
             undoable: true,
         },
         CommandSpec {
+            id: "score.playback",
+            label: "Playback style",
+            menu: &[],
+            shortcut: None,
+            params: "reverb? 0…100 (the room), humanize? true|false (small natural variations)",
+            enabled: always,
+            run: |s, p| {
+                if let Some(v) = p_i64(p, "reverb") {
+                    s.score.playback.reverb = v.clamp(0, 100) as u8;
+                }
+                if let Some(v) = p.get("humanize").and_then(Value::as_bool) {
+                    s.score.playback.humanize = v;
+                }
+                Ok(json!({ "reverb": s.score.playback.reverb, "humanize": s.score.playback.humanize }))
+            },
+            undoable: true,
+        },
+        CommandSpec {
             id: "sound.list",
             label: "List sound libraries",
             menu: &[],

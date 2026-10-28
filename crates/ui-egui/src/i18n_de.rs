@@ -306,6 +306,7 @@ pub const DE: &[(&str, &str)] = &[
     ("Help", "Hilfe"),
     ("Hide the ribbon    Ctrl+F1", "Ribbon ausblenden    Strg+F1"),
     ("Home", "Start"),
+    ("Human touch", "Menschliches Spiel"),
     (
         "I have read the licence ({}) and accept its terms for the files I download.",
         "Ich habe die Lizenz ({}) gelesen und akzeptiere ihre Bedingungen für die Dateien, die ich herunterlade.",
@@ -550,6 +551,7 @@ pub const DE: &[(&str, &str)] = &[
     ),
     ("Play notes while editing", "Noten beim Bearbeiten anspielen"),
     ("Playback", "Wiedergabe"),
+    ("Playback style", "Wiedergabestil"),
     ("Playback: {}", "Wiedergabe: {}"),
     (
         "Played keys enter notes in note input (N); keys pressed together make a chord. Outside note input they only sound.",
@@ -608,8 +610,13 @@ pub const DE: &[(&str, &str)] = &[
         "Rest · {} · Measure {} · Beat {} · {} · Voice {}",
         "Pause · {} · Takt {} · Schlag {} · {} · Stimme {}",
     ),
+    (
+        "Reverb: how much of the hall is heard (0 = dry)",
+        "Hall: wie viel vom Raum zu hören ist (0 = trocken)",
+    ),
     ("Ribbon", "Ribbon"),
     ("Right", "Rechts"),
+    ("Room", "Raum"),
     ("SVG, first page (.svg)", "SVG, erste Seite (.svg)"),
     ("Save", "Speichern"),
     ("Save    Ctrl+S", "Speichern    Strg+S"),
@@ -668,6 +675,10 @@ pub const DE: &[(&str, &str)] = &[
     ("Slides", "Gleiter"),
     ("Slur", "Bogen"),
     ("Slurs & hairpins", "Bögen & Gabeln"),
+    (
+        "Small, natural variations in timing and loudness (from the next start)",
+        "Kleine, natürliche Schwankungen in Timing und Lautstärke (ab dem nächsten Start)",
+    ),
     ("Snap pizzicato", "Bartók-Pizzicato"),
     ("Soft accent", "Weicher Akzent"),
     ("Solo", "Solo"),

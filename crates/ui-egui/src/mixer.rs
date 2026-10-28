@@ -44,6 +44,7 @@ impl Mixer {
                 self.controls.set_volume(i, f32::from(p.sound.volume) / 100.0);
                 self.controls.set_pan(i, f32::from(p.sound.pan) / 100.0);
             }
+            self.controls.set_reverb(f32::from(score.playback.reverb) / 100.0);
             self.synced = revision;
         }
         self.meters.resize(score.parts.len(), 0.0);
@@ -137,6 +138,36 @@ pub fn panel(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         .clicked()
                 {
                     app.host.request_sounds(true);
+                }
+            });
+            // How the whole score is played.
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(t("Room")).color(tk.text_dim))
+                    .on_hover_text(t("Reverb: how much of the hall is heard (0 = dry)"));
+                let controls = app.mixer.controls.clone();
+                let mut room = (controls.reverb() * 100.0).round();
+                ui.spacing_mut().slider_width = 140.0;
+                let r = ui.add(
+                    egui::Slider::new(&mut room, 0.0..=100.0)
+                        .suffix(" %")
+                        .fixed_decimals(0),
+                );
+                if r.changed() {
+                    controls.set_reverb(room / 100.0);
+                }
+                if r.drag_stopped() || (r.changed() && !r.dragged()) {
+                    app.run("score.playback", json!({ "reverb": room as i64 }));
+                }
+                ui.separator();
+                let mut human = app.session.score.playback.humanize;
+                if ui
+                    .checkbox(&mut human, t("Human touch"))
+                    .on_hover_text(t(
+                        "Small, natural variations in timing and loudness (from the next start)",
+                    ))
+                    .changed()
+                {
+                    app.run("score.playback", json!({ "humanize": human }));
                 }
             });
             ui.add_space(6.0);

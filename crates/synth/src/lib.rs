@@ -19,19 +19,22 @@ mod builtin;
 pub mod catalog;
 mod catalog_index;
 pub mod files;
+pub mod reverb;
 pub mod sfz;
+pub mod variants;
 pub mod wav;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-pub use bank::{PresetInfo, Resolved, SoundBank, resolve};
+pub use bank::{PresetInfo, Resolved, SoundBank, resolve, resolve_variant};
 use builtin::Builtin;
 pub use builtin::Family;
-use scoreart_midi::Sequence;
+use scoreart_midi::{PlayNote, Sequence};
 use scoreart_model::Score;
 use sfz::SfzPlayer;
+use variants::Variant;
 
 /// Frames rendered per step; events are placed on the exact frame inside it.
 const BLOCK: usize = 64;
@@ -68,6 +71,8 @@ impl TrackControl {
 #[derive(Debug, Default)]
 pub struct MixControls {
     tracks: Vec<TrackControl>,
+    /// The room, 0 (dry) … 1.
+    reverb: AtomicU32,
 }
 
 impl MixControls {
@@ -79,12 +84,23 @@ impl MixControls {
                 .iter()
                 .map(|p| TrackControl::new(f32::from(p.sound.volume) / 100.0, f32::from(p.sound.pan) / 100.0))
                 .collect(),
+            reverb: AtomicU32::new((f32::from(score.playback.reverb.min(100)) / 100.0).to_bits()),
         }
+    }
+
+    /// 0 (dry) … 1.
+    pub fn set_reverb(&self, v: f32) {
+        self.reverb.store(v.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn reverb(&self) -> f32 {
+        f32::from_bits(self.reverb.load(Ordering::Relaxed))
     }
 
     fn uniform(n: usize) -> MixControls {
         MixControls {
             tracks: (0..n).map(|_| TrackControl::new(0.8, 0.0)).collect(),
+            reverb: AtomicU32::new(0f32.to_bits()),
         }
     }
 
@@ -298,14 +314,42 @@ impl Source {
     }
 }
 
-/// A note-on (velocity > 0) or note-off at a time in seconds.
+/// A note-on (velocity > 0) or note-off at a time in seconds, for one of the track's sounds.
 #[derive(Clone, Copy, Debug)]
 struct TrackEvent {
     at: f64,
     key: u8,
     vel: u8,
-    /// After an instrument change: the program that plays it (None = the part's own sound).
-    program: Option<u8>,
+    /// Index into the track's sounds (0 = the part's own).
+    src: usize,
+}
+
+/// A hairpin in seconds: the loudness goes from level `v0` to `v1`.
+#[derive(Clone, Copy, Debug)]
+struct Envelope {
+    from: f64,
+    to: f64,
+    v0: f32,
+    v1: f32,
+}
+
+impl Envelope {
+    /// Gain relative to the level the swell starts from (sounds grow with velocity squared).
+    fn gain(&self, t: f64) -> f32 {
+        if t < self.from || t >= self.to {
+            return 1.0;
+        }
+        let f = ((t - self.from) / (self.to - self.from).max(1e-6)) as f32;
+        let v = self.v0 + (self.v1 - self.v0) * f;
+        let r = curve(v) / curve(self.v0).max(1.0);
+        r * r
+    }
+}
+
+/// The velocity a sound gets for a written one: softer dynamics a little louder, so that
+/// pp is quiet but still heard and ff not much louder than f (as players balance).
+fn curve(v: f32) -> f32 {
+    127.0 * (v.clamp(1.0, 127.0) / 127.0).powf(0.75)
 }
 
 struct Track {
@@ -313,26 +357,33 @@ struct Track {
     part: usize,
     events: Vec<TrackEvent>,
     next: usize,
-    source: Source,
-    /// Sounds of instruments changed to inside the part, by MIDI program.
-    extra: Vec<(u8, Source)>,
+    /// The part's own sound first, then instrument changes and technique variants; each with
+    /// the gain that brings it to a common loudness.
+    sources: Vec<(Source, f32)>,
+    swells: Vec<Envelope>,
     l: Vec<f32>,
     r: Vec<f32>,
+    scratch: (Vec<f32>, Vec<f32>),
 }
 
 impl Track {
-    fn new(part: usize, mut events: Vec<TrackEvent>, source: Source) -> Track {
+    fn new(part: usize, mut events: Vec<TrackEvent>, sources: Vec<(Source, f32)>) -> Track {
         // Note-offs before note-ons at the same moment (repeated notes).
         events.sort_by(|a, b| a.at.total_cmp(&b.at).then((a.vel > 0).cmp(&(b.vel > 0))));
         Track {
             part,
             events,
             next: 0,
-            source,
-            extra: Vec::new(),
+            sources,
+            swells: Vec::new(),
             l: vec![0.0; BLOCK],
             r: vec![0.0; BLOCK],
+            scratch: (vec![0.0; BLOCK], vec![0.0; BLOCK]),
         }
+    }
+
+    fn sampled(&self) -> bool {
+        self.sources.iter().any(|(s, _)| s.sampled())
     }
 
     /// Renders `n` frames starting at frame `start` into the track buffers.
@@ -347,20 +398,12 @@ impl Track {
                     break;
                 }
                 self.next += 1;
-                let src = match e
-                    .program
-                    .and_then(|p| self.extra.iter().position(|(q, _)| *q == p))
-                {
-                    Some(i) => match self.extra.get_mut(i) {
-                        Some((_, s)) => s,
-                        None => &mut self.source,
-                    },
-                    None => &mut self.source,
-                };
-                if e.vel > 0 {
-                    src.note_on(e.key, e.vel);
-                } else {
-                    src.note_off(e.key);
+                if let Some((src, _)) = self.sources.get_mut(e.src) {
+                    if e.vel > 0 {
+                        src.note_on(e.key, e.vel);
+                    } else {
+                        src.note_off(e.key);
+                    }
                 }
             }
             let until = self
@@ -369,12 +412,42 @@ impl Track {
                 .map(|e| ((e.at * rate).ceil() as u64).saturating_sub(start) as usize)
                 .unwrap_or(n)
                 .clamp(done + 1, n);
-            let (l, r) = (&mut self.l[done..until], &mut self.r[done..until]);
-            self.source.render(l, r);
-            for (_, s) in &mut self.extra {
-                s.render(l, r);
+            for (src, gain) in &mut self.sources {
+                let (sl, sr) = (
+                    &mut self.scratch.0[..until - done],
+                    &mut self.scratch.1[..until - done],
+                );
+                sl.iter_mut().for_each(|v| *v = 0.0);
+                sr.iter_mut().for_each(|v| *v = 0.0);
+                src.render(sl, sr);
+                for i in 0..sl.len() {
+                    if let (Some(a), Some(b), Some(x), Some(y)) = (
+                        self.l.get_mut(done + i),
+                        self.r.get_mut(done + i),
+                        sl.get(i),
+                        sr.get(i),
+                    ) {
+                        *a += x * *gain;
+                        *b += y * *gain;
+                    }
+                }
             }
             done = until;
+        }
+        // Hairpins: the loudness moves also within held notes.
+        if !self.swells.is_empty() {
+            for i in 0..n {
+                let t = (start + i as u64) as f64 / rate;
+                let g: f32 = self.swells.iter().map(|s| s.gain(t)).product();
+                if (g - 1.0).abs() > 1e-6 {
+                    if let Some(v) = self.l.get_mut(i) {
+                        *v *= g;
+                    }
+                    if let Some(v) = self.r.get_mut(i) {
+                        *v *= g;
+                    }
+                }
+            }
         }
     }
 }
@@ -387,67 +460,186 @@ pub struct Synth {
     frames: u64,
     end: f64,
     pub volume: f32,
+    /// The room (its amount follows the mix controls).
+    reverb: reverb::Reverb,
 }
 
-fn track_events(seq: &Sequence, from: u64, part: Option<usize>, own: u8) -> Vec<TrackEvent> {
+/// A small, repeatable "random" number in -1…1 for a note (the same every time it plays).
+fn jitter(a: u64, b: u64, c: u64) -> f64 {
+    let mut x = a
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add(b.wrapping_mul(0xBF58_476D_1CE4_E5B9))
+        .wrapping_add(c.wrapping_mul(0x94D0_49BB_1331_11EB));
+    x ^= x >> 31;
+    x = x.wrapping_mul(0xD6E8_FEB8_6659_FD93);
+    x ^= x >> 32;
+    (x % 2001) as f64 / 1000.0 - 1.0
+}
+
+/// How a part's notes map to its sounds: the sound index for a note, and whether a tremolo
+/// is held (the sound has real tremolo) rather than played as repeated notes.
+type Choose<'a> = &'a dyn Fn(&PlayNote) -> (usize, bool);
+
+fn track_events(seq: &Sequence, from: u64, part: usize, choose: Choose, humanize: bool) -> Vec<TrackEvent> {
     let t0 = seq.seconds_at(from);
     let mut out = Vec::new();
-    for n in seq
-        .notes
-        .iter()
-        .filter(|n| n.start >= from && part.is_none_or(|p| n.part == p))
-    {
-        let start = seq.seconds_at(n.start) - t0;
-        let end = (seq.seconds_at(n.start + n.ticks) - t0).max(start + 0.03);
-        let program = (n.program != own).then_some(n.program);
-        out.push(TrackEvent {
-            at: start,
-            key: n.key.min(127),
-            vel: n.velocity.clamp(1, 127),
-            program,
-        });
-        out.push(TrackEvent {
-            at: end,
-            key: n.key.min(127),
-            vel: 0,
-            program,
-        });
+    for n in seq.notes.iter().filter(|n| n.start >= from && n.part == part) {
+        let (src, hold) = choose(n);
+        let strokes = if hold { vec![*n] } else { n.strokes() };
+        for s in strokes {
+            let mut start = seq.seconds_at(s.start) - t0;
+            let mut end = (seq.seconds_at(s.start + s.ticks) - t0).max(start + 0.03);
+            let mut vel = f64::from(s.velocity);
+            if humanize && !s.tech.ornament {
+                // A shared nudge for everything starting together, a little more per note.
+                let shift = jitter(part as u64, s.start, 0) * 0.007
+                    + jitter(part as u64, s.start, u64::from(s.key)) * 0.003;
+                start = (start + shift).max(0.0);
+                end = (end + shift).max(start + 0.03);
+                vel += jitter(part as u64, s.start, u64::from(s.key) + 128) * 3.0;
+            }
+            let vel = curve(vel as f32).round().clamp(1.0, 127.0) as u8;
+            let key = s.key.min(127);
+            out.push(TrackEvent {
+                at: start,
+                key,
+                vel,
+                src,
+            });
+            out.push(TrackEvent {
+                at: end,
+                key,
+                vel: 0,
+                src,
+            });
+        }
     }
     out
 }
 
-/// The programs of instrument changes in a track's events, in order of first use.
-fn changed_programs(events: &[TrackEvent]) -> Vec<u8> {
-    let mut v: Vec<u8> = Vec::new();
-    for p in events.iter().filter_map(|e| e.program) {
-        if !v.contains(&p) && v.len() < 16 {
-            v.push(p);
+/// The hairpins of a part, in seconds from `from`.
+fn envelopes(seq: &Sequence, from: u64, part: usize) -> Vec<Envelope> {
+    let t0 = seq.seconds_at(from);
+    seq.swells
+        .iter()
+        .filter(|s| s.part == part && s.to > from && s.v0 != s.v1)
+        .map(|s| Envelope {
+            from: seq.seconds_at(s.from) - t0,
+            to: seq.seconds_at(s.to) - t0,
+            v0: f32::from(s.v0),
+            v1: f32::from(s.v1),
+        })
+        .collect()
+}
+
+/// How loud a sound plays a mezzo-forte note: the loudest 50 ms (RMS) of its first 0.8 s, so
+/// that a slow bow stroke and a quickly dying pluck are both measured at their full sound.
+fn loudness(r: &Resolved, key: u8, rate: u32) -> f32 {
+    let mut s = Source::new(r, rate);
+    s.note_on(key, curve(80.0) as u8);
+    let window = (rate as usize / 20).max(BLOCK);
+    let frames = rate as usize * 8 / 10;
+    let (mut l, mut rr) = (vec![0.0f32; BLOCK], vec![0.0f32; BLOCK]);
+    let (mut best, mut sum, mut count) = (0.0f64, 0.0f64, 0usize);
+    let mut done = 0usize;
+    while done < frames {
+        l.iter_mut().for_each(|v| *v = 0.0);
+        rr.iter_mut().for_each(|v| *v = 0.0);
+        s.render(&mut l, &mut rr);
+        sum += l
+            .iter()
+            .chain(rr.iter())
+            .map(|v| f64::from(*v) * f64::from(*v))
+            .sum::<f64>();
+        count += 2 * BLOCK;
+        if count >= 2 * window {
+            best = best.max(sum / count as f64);
+            sum = 0.0;
+            count = 0;
         }
+        done += BLOCK;
     }
-    v
+    best.sqrt() as f32
+}
+
+/// The gain that makes a sampled sound as loud as the built-in sound of its family; built-in
+/// sounds are left as they are. A sound that is silent at `key` (out of its range) keeps 1.
+fn balance(r: &Resolved, program: u8, key: u8, rate: u32) -> f32 {
+    // Measured once per sound, key and rate: starting playback stays quick.
+    type Cache = std::sync::Mutex<std::collections::HashMap<(usize, u16, u8, u8, u8, u32), f32>>;
+    static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
+    let id = match r {
+        Resolved::Builtin(_) => return 1.0,
+        Resolved::Sf2 { font, bank, program } => (Arc::as_ptr(font) as usize, *bank, *program),
+        // The name too, so a later instrument at the same address is not mistaken for it.
+        Resolved::Sfz(inst) => (
+            Arc::as_ptr(inst) as usize
+                ^ inst
+                    .name
+                    .bytes()
+                    .fold(0usize, |h, b| h.wrapping_mul(31).wrapping_add(usize::from(b))),
+            0,
+            0,
+        ),
+    };
+    let k = (id.0, id.1, id.2, program, key, rate);
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(g) = cache.lock().ok().and_then(|c| c.get(&k).copied()) {
+        return g;
+    }
+    let g = measure_balance(r, program, key, rate);
+    if let Ok(mut c) = cache.lock() {
+        if c.len() > 4096 {
+            c.clear();
+        }
+        c.insert(k, g);
+    }
+    g
+}
+
+fn measure_balance(r: &Resolved, program: u8, key: u8, rate: u32) -> f32 {
+    let target = loudness(&Resolved::Builtin(Family::of_program(program)), key, rate);
+    let have = loudness(r, key, rate);
+    if have < 1e-5 || target < 1e-6 {
+        return 1.0;
+    }
+    (target / have).clamp(1.0 / 8.0, 4.0)
+}
+
+/// The middle key of a part's notes (for measuring its sounds where it plays).
+fn middle_key(seq: &Sequence, part: usize) -> u8 {
+    let mut keys: Vec<u8> = seq
+        .notes
+        .iter()
+        .filter(|n| n.part == part)
+        .map(|n| n.key)
+        .collect();
+    keys.sort_unstable();
+    keys.get(keys.len() / 2).copied().unwrap_or(60)
 }
 
 impl Synth {
     fn assemble(tracks: Vec<Track>, controls: Arc<MixControls>, rate: u32, music_end: f64) -> Synth {
-        let tail = if tracks
-            .iter()
-            .any(|t| t.source.sampled() || t.extra.iter().any(|(_, s)| s.sampled()))
-        {
+        let reverb = controls.reverb();
+        let tail: f64 = if tracks.iter().any(Track::sampled) {
             2.5
         } else {
             0.8
         };
+        let tail = if reverb > 0.0 { tail.max(2.0) } else { tail };
         let last = tracks
             .iter()
             .flat_map(|t| t.events.iter().map(|e| e.at))
             .fold(0.0, f64::max);
+        let rate = rate.clamp(8000, 192_000) as f32;
         Synth {
             tracks,
             controls,
-            rate: rate.clamp(8000, 192_000) as f32,
+            rate,
             frames: 0,
             end: music_end.max(last) + tail,
             volume: 1.0,
+            reverb: reverb::Reverb::new(rate, reverb),
         }
     }
 
@@ -462,15 +654,20 @@ impl Synth {
                 if parts > 1 {
                     controls.set_pan(p, (p as f32 / (parts - 1) as f32 - 0.5) * 0.7);
                 }
-                let mut t = Track::new(
-                    p,
-                    track_events(seq, from, Some(p), program),
-                    Source::Builtin(Builtin::new(Family::of_program(program), rate)),
-                );
-                for q in changed_programs(&t.events) {
-                    t.extra
-                        .push((q, Source::Builtin(Builtin::new(Family::of_program(q), rate))));
+                let mut programs: Vec<u8> = vec![program];
+                for n in seq.notes.iter().filter(|n| n.part == p) {
+                    if !programs.contains(&n.program) && programs.len() < 17 {
+                        programs.push(n.program);
+                    }
                 }
+                let choose =
+                    |n: &PlayNote| (programs.iter().position(|q| *q == n.program).unwrap_or(0), false);
+                let sources = programs
+                    .iter()
+                    .map(|q| (Source::Builtin(Builtin::new(Family::of_program(*q), rate)), 1.0))
+                    .collect();
+                let mut t = Track::new(p, track_events(seq, from, p, &choose, false), sources);
+                t.swells = envelopes(seq, from, p);
                 t
             })
             .collect();
@@ -482,6 +679,10 @@ impl Synth {
     /// Pass the UI's `controls` to change the mix while playing (they must have one entry per
     /// part); otherwise the score's volumes and pans are used. Also returns problems found
     /// (a library not loaded …); those parts fall back to automatic sounds.
+    ///
+    /// Notes marked pizzicato, tremolo, muted or short play the library's matching sound when
+    /// it has one; every sound is brought to a common loudness; the score's playback style
+    /// adds the room and a human touch.
     pub fn for_score(
         score: &Score,
         seq: &Sequence,
@@ -493,21 +694,26 @@ impl Synth {
         let controls = controls
             .filter(|c| c.len() == score.parts.len())
             .unwrap_or_else(|| Arc::new(MixControls::from_score(score)));
+        let style = score.playback;
         let mut warnings = Vec::new();
         let tracks = score
             .parts
             .iter()
             .enumerate()
             .map(|(pi, p)| {
-                let (resolved, warning) = resolve(banks, &p.sound, p.program);
+                let (own, warning) = resolve(banks, &p.sound, p.program);
                 if let Some(w) = warning {
                     warnings.push(w);
                 }
-                let mut t = Track::new(
-                    pi,
-                    track_events(seq, from, Some(pi), p.program),
-                    Source::new(&resolved, rate),
-                );
+                let key = middle_key(seq, pi);
+                // Which sound each kind of note plays: (instrument change, variant) → index.
+                #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+                enum Want {
+                    Program(u8),
+                    Variant(Variant),
+                }
+                let mut wants: Vec<(Want, usize)> = Vec::new();
+                let mut sounds: Vec<Resolved> = vec![own.clone()];
                 // Instruments changed to inside the part sound automatically (or built-in when
                 // the part is set to the built-in sound).
                 let fallback = if p.sound.library == scoreart_model::PartSound::BUILT_IN {
@@ -515,10 +721,48 @@ impl Synth {
                 } else {
                     scoreart_model::PartSound::default()
                 };
-                for q in changed_programs(&t.events) {
-                    let (r, _) = resolve(banks, &fallback, q);
-                    t.extra.push((q, Source::new(&r, rate)));
+                for n in seq.notes.iter().filter(|n| n.part == pi) {
+                    let want = if n.program != p.program {
+                        Want::Program(n.program)
+                    } else {
+                        match Variant::of(n.tech) {
+                            Variant::Own => continue,
+                            v => Want::Variant(v),
+                        }
+                    };
+                    if wants.iter().any(|(w, _)| *w == want) || sounds.len() >= 24 {
+                        continue;
+                    }
+                    let r = match want {
+                        Want::Program(q) => Some(resolve(banks, &fallback, q).0),
+                        Want::Variant(v) => bank::resolve_variant(banks, &p.sound, p.program, v),
+                    };
+                    match r {
+                        Some(r) => {
+                            sounds.push(r);
+                            wants.push((want, sounds.len() - 1));
+                        }
+                        // No such sound: the part's own plays it.
+                        None => wants.push((want, 0)),
+                    }
                 }
+                let own_program = p.program;
+                let choose = |n: &PlayNote| -> (usize, bool) {
+                    let want = if n.program != own_program {
+                        Want::Program(n.program)
+                    } else {
+                        Want::Variant(Variant::of(n.tech))
+                    };
+                    let i = wants.iter().find(|(w, _)| *w == want).map_or(0, |(_, i)| *i);
+                    let held = i > 0 && want == Want::Variant(Variant::Tremolo);
+                    (i, held)
+                };
+                let sources: Vec<(Source, f32)> = sounds
+                    .iter()
+                    .map(|r| (Source::new(r, rate), balance(r, p.program, key, rate)))
+                    .collect();
+                let mut t = Track::new(pi, track_events(seq, from, pi, &choose, style.humanize), sources);
+                t.swells = envelopes(seq, from, pi);
                 t
             })
             .collect();
@@ -541,20 +785,20 @@ impl Synth {
                         at: 0.0,
                         key: (*k).min(127),
                         vel: 80,
-                        program: None,
+                        src: 0,
                     },
                     TrackEvent {
                         at: 0.45,
                         key: (*k).min(127),
                         vel: 0,
-                        program: None,
+                        src: 0,
                     },
                 ]
             })
             .collect();
         let controls = Arc::new(MixControls::uniform(1));
         let mut s = Synth::assemble(
-            vec![Track::new(0, events, Source::new(sound, rate))],
+            vec![Track::new(0, events, vec![(Source::new(sound, rate), 1.0)])],
             controls,
             rate,
             0.45,
@@ -624,6 +868,8 @@ impl Synth {
                 }
                 self.controls.add_peak(t.part, peak * g);
             }
+            self.reverb.mix = self.controls.reverb();
+            self.reverb.process(chunk);
             // Gentle limiter (live), or just the master gain (files).
             for v in chunk.iter_mut() {
                 *v = if limit { (*v * g).tanh() } else { *v * g };
@@ -649,14 +895,25 @@ impl Synth {
             .iter()
             .map(|t| (t.part, Vec::with_capacity(total as usize * 2)))
             .collect();
+        // Each stem its own room: the room is linear, so the stems still add up to the mix.
+        let mut rooms: Vec<reverb::Reverb> = self
+            .tracks
+            .iter()
+            .map(|_| reverb::Reverb::new(self.rate, self.controls.reverb()))
+            .collect();
         while self.frames < total {
             let n = ((total - self.frames) as usize).min(BLOCK);
-            for (t, (_, buf)) in self.tracks.iter_mut().zip(out.iter_mut()) {
+            for (out_i, (t, (_, buf))) in self.tracks.iter_mut().zip(out.iter_mut()).enumerate() {
                 t.render(self.frames, n, rate);
                 let (gl, gr) = self.controls.gains(t.part);
+                let at = buf.len();
                 for i in 0..n {
-                    buf.push(t.l[i] * gl * g);
-                    buf.push(t.r[i] * gr * g);
+                    buf.push(t.l[i] * gl);
+                    buf.push(t.r[i] * gr);
+                }
+                if let (Some(room), Some(chunk)) = (rooms.get_mut(out_i), buf.get_mut(at..)) {
+                    room.process(chunk);
+                    chunk.iter_mut().for_each(|v| *v *= g);
                 }
             }
             self.frames += n as u64;
@@ -783,8 +1040,8 @@ mod tests {
         let banks = vec![Arc::new(bank)];
         let (mut syn, warnings) = Synth::for_score(&s, &seq, 0, 44_100, &banks, None);
         assert!(warnings.is_empty(), "{warnings:?}");
-        assert!(matches!(syn.tracks[0].source, Source::Sfz(_)));
-        assert!(matches!(syn.tracks[1].source, Source::Builtin(_)));
+        assert!(matches!(syn.tracks[0].sources[0].0, Source::Sfz(_)));
+        assert!(matches!(syn.tracks[1].sources[0].0, Source::Builtin(_)));
         let stems = syn.render_stems(10.0);
         assert_eq!(stems.len(), 2);
         let energy = |b: &[f32], ch: usize| b.iter().skip(ch).step_by(2).map(|v| v * v).sum::<f32>();
@@ -826,7 +1083,7 @@ mod tests {
         let seq = scoreart_midi::sequence(&s);
         let (syn, warnings) = Synth::for_score(&s, &seq, 0, 44_100, &[], None);
         assert_eq!(warnings.len(), 1);
-        assert!(matches!(syn.tracks[0].source, Source::Builtin(_)));
+        assert!(matches!(syn.tracks[0].sources[0].0, Source::Builtin(_)));
     }
 
     #[test]
@@ -853,5 +1110,116 @@ mod tests {
         let seq = scoreart_midi::sequence(&s);
         let syn = Synth::new(&seq, u64::from(TPQ) * 8, 48_000);
         assert!(syn.duration() > 0.0);
+    }
+
+    /// A library with a sustained and a pizzicato violin.
+    fn variants_zip() -> Vec<u8> {
+        use std::io::Write;
+        // Same peak; the pizzicato dies away at once, so it sounds much quieter.
+        let tone = |decay: f32| -> Vec<u8> {
+            let t: Vec<i16> = (0..8000)
+                .map(|i| ((i as f32 * 0.06).sin() * 16000.0 * (-(i as f32) / decay).exp()) as i16)
+                .collect();
+            crate::wav::tests::wav16(&t, 1, 44_100, None)
+        };
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut z = zip::ZipWriter::new(&mut buf);
+            let o = zip::write::SimpleFileOptions::default();
+            for (name, wav) in [("ViolinSus", "loud"), ("ViolinPizz", "soft")] {
+                z.start_file(format!("Lib/{name}.sfz"), o).unwrap();
+                z.write_all(format!("<region> sample={wav}.wav pitch_keycenter=69").as_bytes())
+                    .unwrap();
+            }
+            z.start_file("Lib/loud.wav", o).unwrap();
+            z.write_all(&tone(1e9)).unwrap();
+            z.start_file("Lib/soft.wav", o).unwrap();
+            z.write_all(&tone(600.0)).unwrap();
+            z.finish().unwrap();
+        }
+        buf.into_inner()
+    }
+
+    #[test]
+    fn pizzicato_plays_the_pizzicato_sound_at_the_same_loudness() {
+        let mut s = two_parts();
+        s.parts[0].sound.library = "Lib".into();
+        s.parts[0].sound.preset = "Lib/ViolinSus".into();
+        s.playback.humanize = false;
+        // A second note, marked pizz.
+        let kind = EventKind::Chord(vec![Note::new(Pitch::new(Step::A, 0, 4))]);
+        s.overwrite(
+            Pos {
+                tick: TPQ * 2,
+                ..Pos::default()
+            },
+            kind,
+            Duration::new(NoteValue::Half, 0),
+        )
+        .unwrap();
+        let r = scoreart_model::edit::EventRef {
+            part: 0,
+            staff: 0,
+            voice: 0,
+            measure: 0,
+            index: 1,
+        };
+        s.event_mut(r).unwrap().text = Some("pizz.".into());
+        let bank = SoundBank::from_bytes("Lib.zip", variants_zip()).unwrap();
+        let seq = scoreart_midi::sequence(&s);
+        let (syn, _) = Synth::for_score(&s, &seq, 0, 44_100, &[Arc::new(bank)], None);
+        let t = &syn.tracks[0];
+        assert_eq!(t.sources.len(), 2, "the own sound and the pizzicato");
+        let ons: Vec<usize> = t.events.iter().filter(|e| e.vel > 0).map(|e| e.src).collect();
+        assert_eq!(ons, [0, 1]);
+        // The quieter pizzicato samples are brought up to the same loudness.
+        let (g0, g1) = (t.sources[0].1, t.sources[1].1);
+        assert!(g1 > g0 * 1.5, "{g0} {g1}");
+    }
+
+    #[test]
+    fn a_hairpin_swells_a_held_note() {
+        let flute = instrument("flute").unwrap();
+        let mut s = Score::new("T", &[flute], TimeSig::default(), KeySig::default(), 1);
+        let kind = EventKind::Chord(vec![Note::new(Pitch::new(Step::A, 0, 4))]);
+        s.overwrite(Pos::default(), kind, Duration::new(NoteValue::Whole, 0))
+            .unwrap();
+        s.spanners.push(scoreart_model::Spanner {
+            kind: scoreart_model::SpannerKind::Crescendo,
+            part: 0,
+            staff: 0,
+            voice: 0,
+            start: scoreart_model::Anchor { measure: 0, tick: 0 },
+            end: scoreart_model::Anchor {
+                measure: 0,
+                tick: TPQ * 3,
+            },
+        });
+        s.playback.reverb = 0;
+        let seq = scoreart_midi::sequence(&s);
+        assert_eq!(seq.notes.len(), 1);
+        let (mut syn, _) = Synth::for_score(&s, &seq, 0, 44_100, &[], None);
+        let mut buf = vec![0.0f32; 2 * 44_100 * 2];
+        syn.render_linear(&mut buf);
+        let rms = |a: usize, b: usize| {
+            (buf[a * 2..b * 2].iter().map(|v| v * v).sum::<f32>() / (b - a) as f32).sqrt()
+        };
+        // 100 bpm: the swell runs from 0 to 1.8 s.
+        assert!(
+            rms(66_150, 75_000) > 1.3 * rms(8_000, 17_000),
+            "louder towards the end"
+        );
+    }
+
+    #[test]
+    fn humanizing_is_small_and_repeatable() {
+        let mut s = two_parts();
+        s.playback.humanize = true;
+        let seq = scoreart_midi::sequence(&s);
+        let a = Synth::for_score(&s, &seq, 0, 44_100, &[], None).0;
+        let b = Synth::for_score(&s, &seq, 0, 44_100, &[], None).0;
+        let at = |x: &Synth| x.tracks[0].events.iter().map(|e| e.at).collect::<Vec<_>>();
+        assert_eq!(at(&a), at(&b), "the same every time");
+        assert!(a.tracks[0].events.iter().all(|e| e.at < 0.011 || e.vel == 0));
     }
 }

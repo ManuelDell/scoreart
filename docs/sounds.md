@@ -151,16 +151,24 @@ Not supported yet:
 
 [`docs/examples/mountain-king-vsco.mxl`](examples/mountain-king-vsco.mxl) is Grieg's "In the Hall
 of the Mountain King" (public domain) arranged for 15 parts: woodwinds, brass, timpani and
-strings. It starts with pizzicato cellos and bassoon, adds a section each time round and ends in
-an accelerating tutti. Every part names its VSCO 2 CE preset (for example `ViolinEnsSpic`,
-`CelloEnsPizz`, `FHornSus`), so the score plays with the right sounds as soon as the library is
-loaded.
+strings. It starts with pizzicato cellos and bassoon, adds a section each time round, swells
+towards the end of every round, speeds up (accel.) and ends with an allargando and a held,
+rolled final chord.
 
-Fetch the 14 instruments it uses (about 250 MB) and render it:
+It is written as an ordinary score: every part uses the library's normal sustained sound
+(`ViolinEnsSusVib`, `CelloEnsSusVib`, `TrumpetSus` …) and the notation says the rest: staccato
+dots, "pizz." and "arco", tremolo strokes, hairpins, a fermata. ScoreArt picks the matching
+samples itself (`ViolinEnsSpic`, `CelloEnsPizz`, `ViolinEnsTrem` …; see
+[playback.md](playback.md)).
+
+Fetch the instruments it uses (about 750 MB; or tick *Download the whole library*) and render
+it:
 
 ```
-for i in FluteStac OboeStac ClarinetStac BassoonStac FHornSus TrumpetStac TromboneStac \
-         TubaStac Timpani ViolinEnsSpic ViolinEnsTrem ViolaEnsSpic CelloEnsPizz ContrabassPizz; do
+for i in FluteSusVib FluteStac OboeSusVib OboeStac ClarinetSus ClarinetStac BassoonSus \
+         BassoonStac FHornSus TrumpetSus TrumpetStac TromboneSus TromboneStac TubaSus TubaStac \
+         Timpani ViolinEnsSusVib ViolinEnsSpic ViolinEnsTrem ViolaEnsSusVib ViolaEnsSpic \
+         CelloEnsSusVib CelloEnsSpic CelloEnsPizz ContrabassSusVB ContrabassSpic ContrabassPizz; do
   scoreart-cli sounds install "VSCO 2 CE" $i.sfz --accept-licence
 done
 scoreart-cli convert docs/examples/mountain-king-vsco.mxl mountain-king.wav \
