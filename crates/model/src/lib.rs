@@ -286,6 +286,9 @@ pub struct Event {
     /// Where the staff text was moved to.
     #[serde(default)]
     pub text_place: Option<Placement>,
+    /// How far the dynamic was moved from its place under the staff.
+    #[serde(default)]
+    pub dynamic_place: Option<Placement>,
 }
 
 /// Most lyric verses kept per note.
@@ -338,6 +341,7 @@ impl Event {
             chord_symbol: None,
             text: None,
             text_place: None,
+            dynamic_place: None,
         }
     }
 

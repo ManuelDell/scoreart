@@ -183,6 +183,14 @@ pub enum Target {
     Rest {
         ev: EventRef,
     },
+    /// The staff text of an event.
+    Text {
+        ev: EventRef,
+    },
+    /// The dynamic of an event.
+    Dynamic {
+        ev: EventRef,
+    },
     Measure {
         part: usize,
         staff: usize,
@@ -269,8 +277,9 @@ impl Layout {
         let inside = |h: &&Hit| h.page == page && x >= h.x0 && x <= h.x1 && y >= h.y0 && y <= h.y1;
         let rank = |t: &Target| match t {
             Target::Note { .. } => 0,
-            Target::Rest { .. } => 1,
-            Target::Measure { .. } => 2,
+            Target::Text { .. } | Target::Dynamic { .. } => 1,
+            Target::Rest { .. } => 2,
+            Target::Measure { .. } => 3,
         };
         self.hits
             .iter()
@@ -303,7 +312,7 @@ impl Layout {
         for h in &self.hits {
             let matches = match h.target {
                 Target::Note { ev: e, .. } | Target::Rest { ev: e } => e == ev,
-                Target::Measure { .. } => false,
+                Target::Text { .. } | Target::Dynamic { .. } | Target::Measure { .. } => false,
             };
             if matches {
                 out = Some(match out {

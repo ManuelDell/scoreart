@@ -509,6 +509,9 @@ pub fn commands() -> Vec<CommandSpec> {
                 for ev in selected_events(s).into_iter().take(1) {
                     if let Some(e) = s.score.event_mut(ev) {
                         e.dynamic = d;
+                        if d.is_none() {
+                            e.dynamic_place = None;
+                        }
                     }
                 }
                 Ok(Value::Null)

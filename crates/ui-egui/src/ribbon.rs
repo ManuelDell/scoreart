@@ -1031,14 +1031,26 @@ fn tab_home(app: &mut ScoreApp, ui: &mut Ui) {
         if big(
             ui,
             Ico::Pen,
-            t("Note input"),
+            t("Pen"),
             input.active,
             true,
-            &crate::i18n::keys(t("Note input (N)")),
+            &crate::i18n::keys(t("Pen: click to write notes (N)")),
         )
         .clicked()
         {
-            app.run("input.toggle", json!({}));
+            app.set_pen(true);
+        }
+        if big(
+            ui,
+            Ico::Hand,
+            t("Hand"),
+            !input.active,
+            true,
+            &crate::i18n::keys(t("Hand: select, edit and drag notes and marks (Esc)")),
+        )
+        .clicked()
+        {
+            app.set_pen(false);
         }
         column(ui, |ui| {
             if small(
@@ -2243,12 +2255,24 @@ pub fn focus_bar(app: &mut ScoreApp, ctx: &egui::Context) {
                             32.0,
                             input.active,
                             true,
-                            &crate::i18n::keys(t("Note input (N)")),
+                            &crate::i18n::keys(t("Pen: click to write notes (N)")),
                             |p, r, c| icons::paint(p, r.shrink(7.0), Ico::Pen, c),
                         )
                         .clicked()
                         {
-                            app.run("input.toggle", json!({}));
+                            app.set_pen(true);
+                        }
+                        if cell(
+                            ui,
+                            32.0,
+                            !input.active,
+                            true,
+                            &crate::i18n::keys(t("Hand: select, edit and drag notes and marks (Esc)")),
+                            |p, r, c| icons::paint(p, r.shrink(6.0), Ico::Hand, c),
+                        )
+                        .clicked()
+                        {
+                            app.set_pen(false);
                         }
                         ui.separator();
                         for v in [

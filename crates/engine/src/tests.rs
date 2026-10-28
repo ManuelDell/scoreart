@@ -530,3 +530,45 @@ fn dragging_notes_moves_them_and_changes_pitch() {
     s.execute("edit.undo", &json!({})).unwrap();
     assert!(!s.score.voice(0, 0, 0, 0).unwrap().events[0].is_rest());
 }
+
+#[test]
+fn texts_and_dynamics_move_and_keep_their_place() {
+    let mut s = blank();
+    s.execute("input.toggle", &json!({})).unwrap();
+    s.execute("note.enter", &json!({ "step": "c" })).unwrap();
+    s.execute("input.toggle", &json!({})).unwrap();
+    s.execute(
+        "select.event",
+        &json!({ "part": 0, "staff": 0, "voice": 0, "measure": 0, "index": 0 }),
+    )
+    .unwrap();
+    s.execute("note.dynamic", &json!({ "type": "mf" })).unwrap();
+    s.execute("note.text", &json!({ "text": "dolce" })).unwrap();
+    s.execute("note.place", &json!({ "kind": "dynamic", "dx": 1.5, "dy": -0.5 }))
+        .unwrap();
+    s.execute("note.place", &json!({ "kind": "text", "dx": -1.0, "dy": -2.0 }))
+        .unwrap();
+    let e = s.score.voice(0, 0, 0, 0).unwrap().events[0].clone();
+    assert_eq!(e.dynamic_place.map(|p| (p.dx, p.dy)), Some((15, -5)));
+    assert_eq!(e.text_place.map(|p| (p.dx, p.dy)), Some((-10, -20)));
+    // Saved and opened again: the places stay.
+    let back = scoreart_musicxml::from_str(&scoreart_musicxml::to_string(&s.score)).unwrap();
+    let b = &back.voice(0, 0, 0, 0).unwrap().events[0];
+    assert_eq!(b.dynamic_place, e.dynamic_place);
+    assert_eq!(b.text_place, e.text_place);
+    // Reset puts the dynamic back; undo moves it again.
+    s.execute("note.place", &json!({ "kind": "dynamic", "reset": true }))
+        .unwrap();
+    assert!(
+        s.score.voice(0, 0, 0, 0).unwrap().events[0]
+            .dynamic_place
+            .is_none()
+    );
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(
+        s.score.voice(0, 0, 0, 0).unwrap().events[0]
+            .dynamic_place
+            .is_some()
+    );
+    assert!(s.execute("note.place", &json!({ "kind": "lyric" })).is_err());
+}

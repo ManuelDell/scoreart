@@ -16,6 +16,7 @@ pub enum Ico {
     Delete,
     SelectAll,
     Pen,
+    Hand,
     Keys,
     Play,
     Stop,
@@ -208,6 +209,27 @@ pub fn paint(p: &Painter, rect: Rect, ico: Ico, color: Color32) {
             p.line_segment([at(17.0, 4.0), at(6.5, 14.5)], Stroke::new(4.0 * s, color));
             fill(&[(4.8, 12.6), (8.4, 16.2), (3.0, 19.0)]);
             line(&[(3.0, 21.0), (21.0, 21.0)]);
+        }
+        Ico::Hand => {
+            // An open hand: four fingers, the thumb and the palm, filled.
+            let finger = |x: f32, top: f32, bottom: f32| {
+                p.line_segment([at(x, top), at(x, bottom)], Stroke::new(3.0 * s, color));
+                p.circle_filled(at(x, top), 1.5 * s, color);
+            };
+            finger(8.5, 6.5, 13.0);
+            finger(11.5, 4.0, 13.0);
+            finger(14.5, 4.5, 13.0);
+            finger(17.5, 7.0, 13.0);
+            p.line_segment([at(8.0, 16.5), at(4.2, 11.8)], Stroke::new(3.0 * s, color));
+            p.circle_filled(at(4.2, 11.8), 1.5 * s, color);
+            fill(&[
+                (7.0, 12.0),
+                (19.0, 12.0),
+                (19.0, 17.0),
+                (16.5, 21.0),
+                (9.5, 21.0),
+                (7.0, 17.0),
+            ]);
         }
         Ico::Keys => {
             rect_s(2.5, 5.0, 19.0, 14.0);

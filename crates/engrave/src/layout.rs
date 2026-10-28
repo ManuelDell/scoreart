@@ -2094,18 +2094,21 @@ fn out_staff_box(
         let chord_row = chord_row.min(d.top - 3.0);
         for (gg, e) in geos.iter().zip(v.events.iter()) {
             if let Some(dy) = e.dynamic {
-                let mut x = gg.x - 0.2;
+                let place = e.dynamic_place.unwrap_or_default();
+                let x0 = gg.x - 0.2 + place.dx_sp();
+                let mut x = x0;
                 let low = anchors
                     .get(&gg.ev)
                     .map(|a| a.bottom.max(if a.up { a.bottom } else { a.stem_end }))
                     .unwrap_or(d.top);
-                let y = (d.top + 4.0 + 3.0).max(low + 2.6);
+                let y = (d.top + 4.0 + 3.0).max(low + 2.6) + place.dy_sp();
                 for ch in dy.id().chars() {
                     if let Some((c, w)) = g::dynamic_letter(ch) {
                         o.glyph(c, x, y, Some(gg.ev));
                         x += w - 0.1;
                     }
                 }
+                o.hit(x0 - 0.2, y - 1.6, x + 0.3, y + 0.5, Target::Dynamic { ev: gg.ev });
             }
             if let Some(cs) = &e.chord_symbol {
                 // All chord symbols of the measure sit on one line.
@@ -2143,6 +2146,14 @@ fn out_staff_box(
                     None => y,
                 } + place.dy_sp();
                 let text_x = gg.x + place.dx_sp();
+                let w = t.chars().count() as f32 * 1.9 * 0.5;
+                o.hit(
+                    text_x - 0.2,
+                    y - 1.6,
+                    text_x + w + 0.2,
+                    y + 0.5,
+                    Target::Text { ev: gg.ev },
+                );
                 o.push(
                     Shape::Text {
                         text: t.clone(),

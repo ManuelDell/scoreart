@@ -677,10 +677,17 @@ fn write_event(
     stops: &[(&Spanner, usize)],
 ) {
     if let Some(d) = e.dynamic {
+        let rel = e
+            .dynamic_place
+            .map(|p| format!(" relative-x=\"{}\" relative-y=\"{}\"", p.dx, -p.dy))
+            .unwrap_or_default();
         let body = if STANDARD_DYNAMICS.contains(&d.id()) {
-            format!("<dynamics><{}/></dynamics>", d.id())
+            format!("<dynamics{rel}><{}/></dynamics>", d.id())
         } else {
-            format!("<dynamics><other-dynamics>{}</other-dynamics></dynamics>", d.id())
+            format!(
+                "<dynamics{rel}><other-dynamics>{}</other-dynamics></dynamics>",
+                d.id()
+            )
         };
         direction(x, "below", &body, staff, "");
     }

@@ -215,6 +215,8 @@ pub struct ScoreApp {
     pub(crate) midi: midi::MidiUi,
     /// A note being dragged on the score.
     pub(crate) note_drag: Option<canvas::NoteDrag>,
+    /// A staff text or dynamic being dragged.
+    pub(crate) mark_drag: Option<canvas::MarkDrag>,
     /// What surrounds the score: ribbon, side panel, both or the focus bar.
     pub surface: ribbon::Surface,
     pub ribbon: ribbon::RibbonState,
@@ -226,6 +228,13 @@ impl ScoreApp {
         i18n::set_lang(l);
         self.host.save_setting("language", l.code());
         self.fields = panels::Fields::default();
+    }
+
+    /// Picks the pen (clicks write notes) or the hand (clicks select, drags move).
+    pub fn set_pen(&mut self, pen: bool) {
+        if self.session.input.active != pen {
+            self.run("input.toggle", json!({}));
+        }
     }
 
     /// Opens the "MIDI input" window.
@@ -272,6 +281,7 @@ impl ScoreApp {
             page_settings: None,
             midi: Default::default(),
             note_drag: None,
+            mark_drag: None,
             surface,
             ribbon: Default::default(),
         }

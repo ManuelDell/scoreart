@@ -331,6 +331,7 @@ pub(crate) enum Icon {
     Play,
     Stop,
     Pen,
+    Hand,
     Tie,
     Undo,
     Redo,
@@ -362,6 +363,12 @@ fn paint_icon(p: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
                 Stroke::NONE,
             ));
         }
+        Icon::Hand => crate::icons::paint(
+            p,
+            Rect::from_center_size(c, Vec2::splat(18.0)),
+            crate::icons::Ico::Hand,
+            color,
+        ),
         Icon::Tie => {
             let pts: Vec<Pos2> = (0..=16)
                 .map(|i| {
@@ -438,10 +445,26 @@ pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     app.toggle_playback();
                 }
                 ui.separator();
-                // Note input toggle: a pen.
-                if glyph_button(ui, GlyphLabel::Icon(Icon::Pen), input.active, t("Note input (N)")).clicked()
+                // The tools: the pen writes notes, the hand selects and moves.
+                if glyph_button(
+                    ui,
+                    GlyphLabel::Icon(Icon::Pen),
+                    input.active,
+                    t("Pen: click to write notes (N)"),
+                )
+                .clicked()
                 {
-                    app.run("input.toggle", json!({}));
+                    app.set_pen(true);
+                }
+                if glyph_button(
+                    ui,
+                    GlyphLabel::Icon(Icon::Hand),
+                    !input.active,
+                    t("Hand: select, edit and drag notes and marks (Esc)"),
+                )
+                .clicked()
+                {
+                    app.set_pen(false);
                 }
                 ui.separator();
                 for v in [

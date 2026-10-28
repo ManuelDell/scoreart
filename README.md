@@ -76,6 +76,12 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   the pitch step by step along the staff, sideways (or into another measure or staff) moves the
   note to that beat — a rest takes its old place, its marks and lyrics go along; a preview
   notehead shows where it lands.
+- **Two tools, pen and hand** (in the ribbon, the toolbar and the focus bar): with the **pen**
+  (`N`) a click writes a note where the ghost note shows; with the **hand** (`Esc`) a click
+  selects and a drag moves — notes, and also **staff texts and dynamics**, which keep their new
+  place in MusicXML (`relative-x`/`relative-y`) and come back with their MuseScore offsets.
+  Double-clicking a staff text edits it. The mouse pointer shows a hand over anything that can
+  be picked up.
 - **Side panel** like MuseScore's: a strip of tabs on the left — **Palettes**, **Instruments**,
   **Properties**, **Sounds** — switches what the panel shows; clicking the open tab folds it away.
 - **Editing**: selection of notes, rests, note ranges (`Shift+click`, `Shift+→`) and measure ranges; palettes for every mark above; add/insert/delete measures; add,

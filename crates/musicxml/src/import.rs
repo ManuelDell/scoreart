@@ -396,7 +396,7 @@ fn read_part(
         }
         let mut raws: Vec<Raw> = Vec::new();
         let mut clef_changes: BTreeMap<usize, Clef> = BTreeMap::new();
-        let mut pending_dyn: Vec<(usize, u64, Dynamic)> = Vec::new();
+        let mut pending_dyn: Vec<(usize, u64, Dynamic, Option<Placement>)> = Vec::new();
         let mut pending_text: Vec<(usize, u64, String, bool)> = Vec::new(); // (staff, t, text, is_chord_symbol)
         let mut instrument_change: Option<InstrumentChange> = None;
         // Moved staff texts: (staff, time, placement).
@@ -777,6 +777,8 @@ fn read_part(
                         for k in &dt.children {
                             match k.name.as_str() {
                                 "dynamics" => {
+                                    let moved = placement_attrs(&Element::default(), k)
+                                        .map(|p| Placement { below: false, ..p });
                                     for d in &k.children {
                                         let id = if d.name == "other-dynamics" {
                                             d.text.trim().to_string()
@@ -784,7 +786,7 @@ fn read_part(
                                             d.name.clone()
                                         };
                                         if let Some(dy) = Dynamic::from_id(&id) {
-                                            pending_dyn.push((staff, t, dy));
+                                            pending_dyn.push((staff, t, dy, moved));
                                         }
                                     }
                                 }
@@ -1068,11 +1070,13 @@ fn read_part(
                         .map(|(i, _)| i)
                 })
         };
-        for (staff, at, dy) in pending_dyn {
+        for (staff, at, dy, moved) in pending_dyn {
             if let Some(i) = target(&mut raws, staff, at)
                 && let Some(r) = raws.get_mut(i)
+                && r.event.dynamic.is_none()
             {
-                r.event.dynamic.get_or_insert(dy);
+                r.event.dynamic = Some(dy);
+                r.event.dynamic_place = moved;
             }
         }
         for (staff, at, p) in pending_place {

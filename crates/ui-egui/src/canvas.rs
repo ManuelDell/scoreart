@@ -66,6 +66,32 @@ pub(crate) struct NoteDrag {
     target: Option<(usize, usize, usize, u32, i32)>,
 }
 
+/// A staff text or dynamic picked up with the hand: where it was grabbed and how far the
+/// pointer has moved since (staff spaces).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct MarkDrag {
+    ev: scoreart_model::edit::EventRef,
+    text: bool,
+    page: usize,
+    grab: (f32, f32),
+    delta: (f32, f32),
+    /// Its box when picked up.
+    hit: scoreart_engrave::Hit,
+}
+
+/// The hit box of an event's staff text or dynamic.
+fn mark_box(
+    layout: &scoreart_engrave::Layout,
+    ev: scoreart_model::edit::EventRef,
+    text: bool,
+) -> Option<scoreart_engrave::Hit> {
+    layout.hits.iter().copied().find(|h| match h.target {
+        Target::Text { ev: e } => text && e == ev,
+        Target::Dynamic { ev: e } => !text && e == ev,
+        _ => false,
+    })
+}
+
 /// The tick under `x` in a staff box: an existing note column or a multiple of `step`,
 /// whichever lies nearest.
 fn drop_tick(sb: &scoreart_engrave::StaffBox, x: f32, step: u32, len: u32) -> u32 {
@@ -109,6 +135,7 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
     let mut scroll_target: Option<Rect> = None;
     let mut click: Option<(usize, f32, f32, bool, bool)> = None;
     let mut hover: Option<(usize, f32, f32)> = None;
+    let mut double: Option<(usize, f32, f32)> = None;
 
     egui::ScrollArea::both()
         .auto_shrink(false)
@@ -144,6 +171,12 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         mods.command,
                     ));
                 }
+                if let Some(pos) = resp.interact_pointer_pos()
+                    && resp.double_clicked()
+                    && prect.contains(pos)
+                {
+                    double = Some((pi, (pos.x - origin.x) / zoom, (pos.y - origin.y) / zoom));
+                }
                 if let Some(pos) = resp.hover_pos()
                     && prect.contains(pos)
                 {
@@ -156,13 +189,34 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     && prect.contains(pos)
                 {
                     let (sx, sy) = ((pos.x - origin.x) / zoom, (pos.y - origin.y) / zoom);
-                    if let Some(Target::Note { ev, note }) = layout.hit(pi, sx, sy) {
-                        let _ = app.session.execute(
-                            "select.event",
-                            &json!({ "part": ev.part, "staff": ev.staff, "voice": ev.voice, "measure": ev.measure, "index": ev.index, "note": note }),
-                        );
-                        app.note_drag = Some(NoteDrag { ev, y0: sy, target: None });
+                    match layout.hit(pi, sx, sy) {
+                        Some(Target::Note { ev, note }) => {
+                            let _ = app.session.execute(
+                                "select.event",
+                                &json!({ "part": ev.part, "staff": ev.staff, "voice": ev.voice, "measure": ev.measure, "index": ev.index, "note": note }),
+                            );
+                            app.note_drag = Some(NoteDrag { ev, y0: sy, target: None });
+                        }
+                        Some(Target::Text { ev }) | Some(Target::Dynamic { ev }) => {
+                            let text = matches!(layout.hit(pi, sx, sy), Some(Target::Text { .. }));
+                            let _ = app.session.execute(
+                                "select.event",
+                                &json!({ "part": ev.part, "staff": ev.staff, "voice": ev.voice, "measure": ev.measure, "index": ev.index }),
+                            );
+                            if let Some(hit) = mark_box(&layout, ev, text) {
+                                app.mark_drag = Some(MarkDrag { ev, text, page: pi, grab: (sx, sy), delta: (0.0, 0.0), hit });
+                            }
+                        }
+                        _ => {}
                     }
+                }
+                if let Some(d) = app.mark_drag.as_mut()
+                    && d.page == pi
+                    && resp.dragged()
+                    && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
+                {
+                    let (sx, sy) = ((pos.x - origin.x) / zoom, (pos.y - origin.y) / zoom);
+                    d.delta = (sx - d.grab.0, sy - d.grab.1);
                 }
                 if let Some(d) = app.note_drag.as_mut()
                     && resp.dragged()
@@ -193,6 +247,23 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 }
                 if !prect.intersects(clip) {
                     continue;
+                }
+                // Hand cursor over things that can be picked up.
+                if !input.active
+                    && let Some((hp, hx, hy)) = hover
+                    && hp == pi
+                {
+                    let movable = matches!(
+                        layout.hit(pi, hx, hy),
+                        Some(Target::Note { .. } | Target::Text { .. } | Target::Dynamic { .. })
+                    );
+                    if app.mark_drag.is_some() || app.note_drag.is_some() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    } else if movable {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                    }
+                } else if input.active && hover.is_some_and(|h| h.0 == pi) {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
                 }
                 painter.rect_filled(prect.translate(Vec2::new(2.0, 3.0)), 2.0, tk.page_shadow);
                 painter.rect_filled(prect, 0.0, Color32::WHITE);
@@ -322,6 +393,13 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         }
                     }
                 }
+                // Where a dragged text or dynamic would go.
+                if let Some(d) = app.mark_drag.filter(|d| d.page == pi) {
+                    let h = d.hit;
+                    let r = Rect::from_min_max(map(h.x0 + d.delta.0, h.y0 + d.delta.1), map(h.x1 + d.delta.0, h.y1 + d.delta.1));
+                    painter.rect_filled(r, 3.0, tk.accent.linear_multiply(0.12));
+                    painter.rect_stroke(r, 3.0, Stroke::new(1.2, tk.accent), egui::StrokeKind::Outside);
+                }
                 // Note-input cursor.
                 if input.active
                     && let Some(sb) = layout
@@ -373,9 +451,32 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
     {
         drop_note(app, &layout, d);
     }
+    if resp_drag_stopped(ui)
+        && let Some(d) = app.mark_drag.take()
+    {
+        drop_mark(app, &layout, d);
+    }
 
     if let Some((page, x, y, shift, _cmd)) = click {
         handle_click(app, &layout, page, x, y, shift);
+    }
+    // Double-clicking a staff text edits it.
+    if let Some((page, x, y)) = double
+        && !app.session.input.active
+        && let Some(Target::Text { ev }) = layout.hit(page, x, y)
+    {
+        let value = app
+            .session
+            .score
+            .event(ev)
+            .and_then(|e| e.text.clone())
+            .unwrap_or_default();
+        app.dialog = Some(crate::Dialog::Text {
+            title: crate::i18n::t("Staff text"),
+            command: "note.text",
+            key: "text",
+            value,
+        });
     }
 }
 
@@ -413,6 +514,35 @@ fn drop_note(app: &mut ScoreApp, layout: &scoreart_engrave::Layout, d: NoteDrag)
             json!({ "part": part, "staff": staff, "measure": measure, "tick": tick, "steps": steps }),
         );
     }
+}
+
+/// Moves a staff text or dynamic by the distance it was dragged.
+fn drop_mark(app: &mut ScoreApp, layout: &scoreart_engrave::Layout, d: MarkDrag) {
+    if d.delta.0.hypot(d.delta.1) < 0.15 {
+        return;
+    }
+    let Some(e) = app.session.score.event(d.ev) else {
+        return;
+    };
+    let round = |v: f32| (f64::from(v) * 10.0).round() / 10.0;
+    let (dx, dy) = if d.text {
+        // A moved text is measured from just above (or below) the staff.
+        let place = e.text_place.unwrap_or_default();
+        let Some(sb) = layout.staff_box(d.ev.part, d.ev.staff, d.ev.measure) else {
+            return;
+        };
+        let base = if place.below { sb.top + 7.0 } else { sb.top - 1.5 };
+        let baseline = d.hit.y1 - 0.5;
+        (place.dx_sp() + d.delta.0, baseline + d.delta.1 - base)
+    } else {
+        let place = e.dynamic_place.unwrap_or_default();
+        (place.dx_sp() + d.delta.0, place.dy_sp() + d.delta.1)
+    };
+    let kind = if d.text { "text" } else { "dynamic" };
+    app.run(
+        "note.place",
+        json!({ "kind": kind, "dx": round(dx), "dy": round(dy) }),
+    );
 }
 
 /// Snap grid for dropped notes when the note is longer: a quarter.
@@ -463,6 +593,10 @@ fn handle_click(
         Some(Target::Note { ev, note }) => s.execute(
             "select.event",
             &json!({ "part": ev.part, "staff": ev.staff, "voice": ev.voice, "measure": ev.measure, "index": ev.index, "note": note, "extend": shift }),
+        ),
+        Some(Target::Text { ev } | Target::Dynamic { ev }) => s.execute(
+            "select.event",
+            &json!({ "part": ev.part, "staff": ev.staff, "voice": ev.voice, "measure": ev.measure, "index": ev.index }),
         ),
         Some(Target::Rest { ev }) => s.execute(
             "select.event",

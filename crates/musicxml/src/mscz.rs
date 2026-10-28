@@ -466,6 +466,7 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                 let mut tuplet: Option<Tuplet> = None;
                 let mut tuplets_by_id: HashMap<String, Tuplet> = HashMap::new();
                 let mut pending_dyn: Option<Dynamic> = None;
+                let mut pending_dyn_place: Option<Placement> = None;
                 let mut pending_marks: Vec<Articulation> = Vec::new();
                 let mut pending_text: Option<String> = None;
                 let mut pending_place: Option<Placement> = None;
@@ -600,7 +601,13 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                             }
                         }
                         "Harmony" => pending_chord = harmony_text(c),
-                        "Dynamic" => pending_dyn = c.child_text("subtype").and_then(Dynamic::from_id),
+                        "Dynamic" => {
+                            pending_dyn = c.child_text("subtype").and_then(Dynamic::from_id);
+                            // Only a real move; which side of the staff is ours to choose.
+                            pending_dyn_place = placement_of(c)
+                                .filter(|p| p.dx != 0 || p.dy != 0)
+                                .map(|p| Placement { below: false, ..p });
+                        }
                         "Fermata" => {
                             if let Some(a) = c
                                 .child_text("subtype")
@@ -945,7 +952,10 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
                                     e.articulations.push(m);
                                 }
                             }
-                            e.dynamic = pending_dyn.take().or(e.dynamic);
+                            if let Some(d) = pending_dyn.take() {
+                                e.dynamic = Some(d);
+                                e.dynamic_place = pending_dyn_place.take();
+                            }
                             e.text = pending_text.take();
                             e.text_place = pending_place.take();
                             e.chord_symbol = pending_chord.take();

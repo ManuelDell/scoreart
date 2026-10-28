@@ -285,6 +285,11 @@ pub const DE: &[(&str, &str)] = &[
     ("Guitar", "Gitarre"),
     ("Half note", "Halbe Note"),
     ("Half open", "Halb offen"),
+    ("Hand", "Hand"),
+    (
+        "Hand: select, edit and drag notes and marks (Esc)",
+        "Hand: Noten und Zeichen auswählen, bearbeiten und verschieben (Esc)",
+    ),
     ("Harmonic", "Flageolett"),
     ("Haydn ornament", "Haydn-Verzierung"),
     ("Hear notes", "Noten hören"),
@@ -418,6 +423,7 @@ pub const DE: &[(&str, &str)] = &[
     ("Move grace note up", "Vorschlagsnote nach oben"),
     ("Move instrument", "Instrument verschieben"),
     ("Move note", "Note verschieben"),
+    ("Move text or dynamic", "Text oder Dynamik verschieben"),
     ("Move to voice", "In Stimme verschieben"),
     ("Move up", "Nach oben"),
     (
@@ -514,6 +520,11 @@ pub const DE: &[(&str, &str)] = &[
     ("Paper size", "Papierformat"),
     ("Parentheses (ghost note)", "Klammern (Geisternote)"),
     ("Pedal", "Pedal"),
+    ("Pen", "Stift"),
+    (
+        "Pen: click to write notes (N)",
+        "Stift: Klicken schreibt Noten (N)",
+    ),
     ("Percussion clef", "Schlagzeugschlüssel"),
     ("Piano", "Klavier"),
     ("Pitch", "Tonhöhe"),

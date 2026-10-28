@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 
 use scoreart_model::edit::EventRef;
 use scoreart_model::{
-    Anchor, Arpeggio, Grace, Jump, NoteHead, NoteValue, Pitch, Spanner, SpannerKind, Step, Tremolo, clip,
-    limits,
+    Anchor, Arpeggio, Grace, Jump, NoteHead, NoteValue, Pitch, Placement, Spanner, SpannerKind, Step,
+    Tremolo, clip, limits,
 };
 
 use super::{CommandSpec, need_i64, need_str, p_i64, p_str};
@@ -293,6 +293,42 @@ pub fn commands() -> Vec<CommandSpec> {
                     && let Some(e) = s.score.event_mut(ev)
                 {
                     e.text = if t.is_empty() { None } else { Some(clip(&t)) };
+                }
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "note.place",
+            label: "Move text or dynamic",
+            menu: &["Format"],
+            shortcut: None,
+            params: "kind: text|dynamic, dx and dy (staff spaces; a text from just above the staff, a dynamic from its own place), reset: true puts it back",
+            enabled: has_selection,
+            run: |s, p| {
+                let kind = need_str(p, "kind")?;
+                let reset = p.get("reset").and_then(Value::as_bool).unwrap_or(false);
+                let num = |k: &str| {
+                    p.get(k)
+                        .and_then(Value::as_f64)
+                        .filter(|v| v.is_finite())
+                        .unwrap_or(0.0)
+                };
+                let Some((ev, _)) = note_targets(s).first().copied() else {
+                    return Ok(Value::Null);
+                };
+                let Some(e) = s.score.event_mut(ev) else {
+                    return Ok(Value::Null);
+                };
+                match kind {
+                    "text" => {
+                        let below = e.text_place.is_some_and(|p| p.below);
+                        e.text_place = (!reset).then(|| Placement::from_sp(num("dx"), num("dy"), below));
+                    }
+                    "dynamic" => {
+                        e.dynamic_place = (!reset).then(|| Placement::from_sp(num("dx"), num("dy"), false));
+                    }
+                    other => return Err(Error::Param(format!("unknown kind {other}"))),
                 }
                 Ok(Value::Null)
             },
