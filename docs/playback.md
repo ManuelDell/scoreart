@@ -13,6 +13,7 @@ implementation is its own):
 5. **Everything printed is heard.**
 6. **Balanced sound out of the box.**
 7. **A human touch.**
+8. **Every note lives**: it grows into its sound, rounds and lets go, like a spoken syllable.
 
 ## 1 and 4: marks and techniques reach the sound
 
@@ -90,3 +91,36 @@ little more per note) and vary a few velocity steps. The variation is the same e
 piece is played. *Mixer → Human touch* turns it off.
 
 Room and human touch are saved in the score (MusicXML `<miscellaneous-field>`s).
+
+## 8: the life of a note
+
+A played note is not a box: it grows into its sound, rounds a little and lets go, like a
+spoken syllable. Research on performance says the same:
+- articulation is the ratio of sounding length to the time to the next note, staccato about
+  0.4–0.6 (Bresin & Battel; the KTH performance rules);
+- note amplitudes "hardly ever have sustained plateaux" (Clynes);
+- players move the peak of a note earlier with a steep attack or later with a slow one to shape
+  expression (studies of clarinettists by Schubert and colleagues).
+
+ScoreArt gives every note of bowed strings, winds and voices a loudness curve on top of its
+samples (`crates/synth/src/shape.rs`):
+
+| Note | start | growing into the tone | arch | end |
+|---|---|---|---|---|
+| plain | 55 % | 35 ms (winds), 60 ms (bows), 70 ms (voices); louder is quicker | peaks at about a third, 1 dB deep | tapers to 65 % over the last 0.15 s |
+| staccato | 40 % | 10 ms | early peak, falls steeply | down to 35 % over its second half |
+| accent | 60 % | 8 ms, with a push of +30 % that falls back in about 0.1 s | early peak | as plain |
+| legato (under a slur) | 75 % | 1.5 × slower | peaks in the middle | carries on into the next note |
+| long (over 1.2 s) | | | a slow, wider arch (messa di voce) | tapers over up to 0.25 s |
+
+A note leaning towards a higher next note peaks a little later, one falling to a lower note a
+little earlier. Keys, plucked strings and percussion keep their natural shape.
+
+- **SFZ and built-in sounds**: every voice follows its note's curve.
+- **SoundFonts**: notes are spread over the MIDI channels so that each note's curve can be sent
+  as its channel's expression.
+
+Parts without a General MIDI program in the file (or with "piano" for a part whose name clearly
+says otherwise, as older files were saved) take it from their name, in English or German:
+"Violins I", "Violoncello", "Kontrabass", "Horn in F", "Pauken" …
+

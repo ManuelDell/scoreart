@@ -21,6 +21,7 @@ mod catalog_index;
 pub mod files;
 pub mod reverb;
 pub mod sfz;
+pub mod shape;
 pub mod variants;
 pub mod wav;
 
@@ -34,6 +35,7 @@ pub use builtin::Family;
 use scoreart_midi::{PlayNote, Sequence};
 use scoreart_model::Score;
 use sfz::SfzPlayer;
+use shape::Shape;
 use variants::Variant;
 
 /// Frames rendered per step; events are placed on the exact frame inside it.
@@ -194,11 +196,50 @@ impl MixControls {
     }
 }
 
+/// A SoundFont channel and the note it plays.
+struct Chan {
+    channel: i32,
+    key: Option<u8>,
+    shape: Option<Shape>,
+    /// Seconds since its last note started.
+    age: f32,
+    /// The expression last sent (14 bits).
+    sent: i32,
+}
+
+impl Chan {
+    fn new(channel: i32) -> Chan {
+        Chan {
+            channel,
+            key: None,
+            shape: None,
+            age: 1e6,
+            sent: 16_383,
+        }
+    }
+
+    /// Sends the shape's level as expression (CC 11 + 43); the synthesizer squares it.
+    fn express(&mut self, synth: &mut rustysynth::Synthesizer) {
+        let g = self.shape.map_or(1.0, |s| s.gain(self.age)).clamp(0.0, 1.0);
+        let v = (g.sqrt() * 16_383.0).round() as i32;
+        if v != self.sent {
+            self.sent = v;
+            let ch = self.channel;
+            let _ = catch_unwind(AssertUnwindSafe(|| {
+                synth.process_midi_message(ch, 0xB0, 11, v >> 7);
+                synth.process_midi_message(ch, 0xB0, 43, v & 0x7F);
+            }));
+        }
+    }
+}
+
 enum Source {
     Builtin(Builtin),
     Sf2 {
         synth: Box<rustysynth::Synthesizer>,
-        channel: i32,
+        /// The channels notes are spread over, so that each can be shaped on its own.
+        chans: Vec<Chan>,
+        rate: f32,
         scratch: (Vec<f32>, Vec<f32>),
         dead: bool,
     },
@@ -216,14 +257,22 @@ impl Source {
                 match made {
                     Ok(Ok(mut synth)) => {
                         synth.set_master_volume(1.0);
-                        let channel = if *bank == 128 { 9 } else { 0 };
+                        // Percussion lives on channel 10; melodic sounds use all the others.
+                        let channels: Vec<i32> = if *bank == 128 {
+                            vec![9]
+                        } else {
+                            (0..16).filter(|c| *c != 9).collect()
+                        };
                         let _ = catch_unwind(AssertUnwindSafe(|| {
-                            synth.process_midi_message(channel, 0xB0, 0, i32::from(*bank).min(127));
-                            synth.process_midi_message(channel, 0xC0, i32::from(*program), 0);
+                            for &c in &channels {
+                                synth.process_midi_message(c, 0xB0, 0, i32::from(*bank).min(127));
+                                synth.process_midi_message(c, 0xC0, i32::from(*program), 0);
+                            }
                         }));
                         Source::Sf2 {
                             synth: Box::new(synth),
-                            channel,
+                            chans: channels.into_iter().map(Chan::new).collect(),
+                            rate: rate.max(1000) as f32,
                             scratch: (vec![0.0; BLOCK], vec![0.0; BLOCK]),
                             dead: false,
                         }
@@ -236,20 +285,43 @@ impl Source {
     }
 
     fn note_on(&mut self, key: u8, vel: u8) {
+        self.note_on_shaped(key, vel, None);
+    }
+
+    fn note_on_shaped(&mut self, key: u8, vel: u8, shape: Option<Shape>) {
         match self {
-            Source::Builtin(b) => b.note_on(key, vel),
+            Source::Builtin(b) => b.note_on_shaped(key, vel, shape),
             Source::Sf2 {
-                synth, channel, dead, ..
+                synth, chans, dead, ..
             } => {
-                if !*dead {
-                    let ch = *channel;
-                    *dead = catch_unwind(AssertUnwindSafe(|| {
-                        synth.note_on(ch, i32::from(key), i32::from(vel))
-                    }))
-                    .is_err();
+                if *dead {
+                    return;
                 }
+                // A free channel (the one idle longest), else the oldest note's.
+                let Some(i) = (0..chans.len()).max_by(|a, b| {
+                    let (x, y) = (&chans[*a], &chans[*b]);
+                    (x.key.is_none(), x.age)
+                        .partial_cmp(&(y.key.is_none(), y.age))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                }) else {
+                    return;
+                };
+                let Some(c) = chans.get_mut(i) else { return };
+                if let Some(old) = c.key.take() {
+                    let ch = c.channel;
+                    let _ = catch_unwind(AssertUnwindSafe(|| synth.note_off(ch, i32::from(old))));
+                }
+                c.key = Some(key);
+                c.shape = shape;
+                c.age = 0.0;
+                c.express(synth);
+                let ch = c.channel;
+                *dead = catch_unwind(AssertUnwindSafe(|| {
+                    synth.note_on(ch, i32::from(key), i32::from(vel))
+                }))
+                .is_err();
             }
-            Source::Sfz(p) => p.note_on(key, vel),
+            Source::Sfz(p) => p.note_on_shaped(key, vel, shape),
         }
     }
 
@@ -257,10 +329,14 @@ impl Source {
         match self {
             Source::Builtin(b) => b.note_off(key),
             Source::Sf2 {
-                synth, channel, dead, ..
+                synth, chans, dead, ..
             } => {
-                if !*dead {
-                    let ch = *channel;
+                if *dead {
+                    return;
+                }
+                if let Some(c) = chans.iter_mut().find(|c| c.key == Some(key)) {
+                    c.key = None;
+                    let ch = c.channel;
                     *dead = catch_unwind(AssertUnwindSafe(|| synth.note_off(ch, i32::from(key)))).is_err();
                 }
             }
@@ -273,12 +349,23 @@ impl Source {
         match self {
             Source::Builtin(b) => b.render(l, r),
             Source::Sf2 {
-                synth, scratch, dead, ..
+                synth,
+                scratch,
+                dead,
+                chans,
+                rate,
             } => {
                 if *dead {
                     return;
                 }
                 let n = l.len().min(scratch.0.len());
+                // Each note's shape, as the expression of its channel.
+                for c in chans.iter_mut() {
+                    c.age += n as f32 / *rate;
+                    if c.shape.is_some() {
+                        c.express(synth);
+                    }
+                }
                 let (sl, sr) = (&mut scratch.0[..n], &mut scratch.1[..n]);
                 *dead = catch_unwind(AssertUnwindSafe(|| synth.render(sl, sr))).is_err();
                 if !*dead {
@@ -322,6 +409,8 @@ struct TrackEvent {
     vel: u8,
     /// Index into the track's sounds (0 = the part's own).
     src: usize,
+    /// How the note grows and lets go (note-ons only).
+    shape: Option<Shape>,
 }
 
 /// A hairpin in seconds: the loudness goes from level `v0` to `v1`.
@@ -400,7 +489,7 @@ impl Track {
                 self.next += 1;
                 if let Some((src, _)) = self.sources.get_mut(e.src) {
                     if e.vel > 0 {
-                        src.note_on(e.key, e.vel);
+                        src.note_on_shaped(e.key, e.vel, e.shape);
                     } else {
                         src.note_off(e.key);
                     }
@@ -483,7 +572,21 @@ type Choose<'a> = &'a dyn Fn(&PlayNote) -> (usize, bool);
 fn track_events(seq: &Sequence, from: u64, part: usize, choose: Choose, humanize: bool) -> Vec<TrackEvent> {
     let t0 = seq.seconds_at(from);
     let mut out = Vec::new();
-    for n in seq.notes.iter().filter(|n| n.start >= from && n.part == part) {
+    let notes: Vec<&PlayNote> = seq
+        .notes
+        .iter()
+        .filter(|n| n.start >= from && n.part == part)
+        .collect();
+    for (i, n) in notes.iter().enumerate() {
+        let n = *n;
+        // The next note of the line (soon after this one ends): which way the line goes.
+        let step = notes
+            .iter()
+            .skip(i + 1)
+            .find(|m| m.start > n.start)
+            .filter(|m| m.start <= n.start + n.ticks + u64::from(scoreart_model::TPQ))
+            .map_or(0, |m| i32::from(m.key) - i32::from(n.key));
+        let family = scoreart_midi::Family::of_program(n.program);
         let (src, hold) = choose(n);
         let strokes = if hold { vec![*n] } else { n.strokes() };
         for s in strokes {
@@ -500,17 +603,20 @@ fn track_events(seq: &Sequence, from: u64, part: usize, choose: Choose, humanize
             }
             let vel = curve(vel as f32).round().clamp(1.0, 127.0) as u8;
             let key = s.key.min(127);
+            let shape = Shape::for_note(family, s.tech, vel, (end - start) as f32, step);
             out.push(TrackEvent {
                 at: start,
                 key,
                 vel,
                 src,
+                shape,
             });
             out.push(TrackEvent {
                 at: end,
                 key,
                 vel: 0,
                 src,
+                shape: None,
             });
         }
     }
@@ -564,7 +670,17 @@ fn loudness(r: &Resolved, key: u8, rate: u32) -> f32 {
 
 /// The gain that makes a sampled sound as loud as the built-in sound of its family; built-in
 /// sounds are left as they are. A sound that is silent at `key` (out of its range) keeps 1.
-fn balance(r: &Resolved, program: u8, key: u8, rate: u32) -> f32 {
+fn balance(r: &Resolved, program: u8, keys: [u8; 3], rate: u32) -> f32 {
+    // The average (in decibels) over the keys, so one odd sample does not decide.
+    let db: f32 = keys
+        .iter()
+        .map(|k| balance_at(r, program, *k, rate).log10())
+        .sum::<f32>()
+        / 3.0;
+    10f32.powf(db)
+}
+
+fn balance_at(r: &Resolved, program: u8, key: u8, rate: u32) -> f32 {
     // Measured once per sound, key and rate: starting playback stays quick.
     type Cache = std::sync::Mutex<std::collections::HashMap<(usize, u16, u8, u8, u8, u32), f32>>;
     static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
@@ -606,8 +722,9 @@ fn measure_balance(r: &Resolved, program: u8, key: u8, rate: u32) -> f32 {
     (target / have).clamp(1.0 / 8.0, 4.0)
 }
 
-/// The middle key of a part's notes (for measuring its sounds where it plays).
-fn middle_key(seq: &Sequence, part: usize) -> u8 {
+/// Three keys across a part's range (lower quarter, middle, upper quarter), to measure its
+/// sounds where it plays.
+fn range_keys(seq: &Sequence, part: usize) -> [u8; 3] {
     let mut keys: Vec<u8> = seq
         .notes
         .iter()
@@ -615,7 +732,8 @@ fn middle_key(seq: &Sequence, part: usize) -> u8 {
         .map(|n| n.key)
         .collect();
     keys.sort_unstable();
-    keys.get(keys.len() / 2).copied().unwrap_or(60)
+    let at = |f: usize| keys.get(keys.len() * f / 4).copied().unwrap_or(60);
+    [at(1), at(2), at(3)]
 }
 
 impl Synth {
@@ -705,7 +823,7 @@ impl Synth {
                 if let Some(w) = warning {
                     warnings.push(w);
                 }
-                let key = middle_key(seq, pi);
+                let keys = range_keys(seq, pi);
                 // Which sound each kind of note plays: (instrument change, variant) → index.
                 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
                 enum Want {
@@ -759,7 +877,7 @@ impl Synth {
                 };
                 let sources: Vec<(Source, f32)> = sounds
                     .iter()
-                    .map(|r| (Source::new(r, rate), balance(r, p.program, key, rate)))
+                    .map(|r| (Source::new(r, rate), balance(r, p.program, keys, rate)))
                     .collect();
                 let mut t = Track::new(pi, track_events(seq, from, pi, &choose, style.humanize), sources);
                 t.swells = envelopes(seq, from, pi);
@@ -786,12 +904,14 @@ impl Synth {
                         key: (*k).min(127),
                         vel: 80,
                         src: 0,
+                        shape: None,
                     },
                     TrackEvent {
                         at: 0.45,
                         key: (*k).min(127),
                         vel: 0,
                         src: 0,
+                        shape: None,
                     },
                 ]
             })
@@ -1221,5 +1341,28 @@ mod tests {
         let at = |x: &Synth| x.tracks[0].events.iter().map(|e| e.at).collect::<Vec<_>>();
         assert_eq!(at(&a), at(&b), "the same every time");
         assert!(a.tracks[0].events.iter().all(|e| e.at < 0.011 || e.vel == 0));
+    }
+
+    #[test]
+    fn a_sampled_note_grows_and_lets_go() {
+        // One half note on a sustained (looped) violin sample: no reverb, no human touch.
+        let mut s = two_parts();
+        s.parts[0].sound.library = "Lib".into();
+        s.parts[1].sound.volume = 0;
+        s.playback.reverb = 0;
+        s.playback.humanize = false;
+        let bank = SoundBank::from_bytes("Lib.zip", sfz_zip()).unwrap();
+        let seq = scoreart_midi::sequence(&s);
+        let (mut syn, _) = Synth::for_score(&s, &seq, 0, 44_100, &[Arc::new(bank)], None);
+        let mut buf = vec![0.0f32; 2 * 44_100 * 2];
+        syn.render_linear(&mut buf);
+        let rms = |a: f32, b: f32| {
+            let (a, b) = ((a * 44_100.0) as usize, (b * 44_100.0) as usize);
+            (buf[a * 2..b * 2].iter().map(|v| v * v).sum::<f32>() / (b - a) as f32).sqrt()
+        };
+        // 100 bpm: the half note lasts 1.2 s and sounds about 1.1 s.
+        let (start, middle, end) = (rms(0.0, 0.02), rms(0.3, 0.5), rms(1.0, 1.07));
+        assert!(start < 0.8 * middle, "a soft start ({start} / {middle})");
+        assert!(end < 0.85 * middle, "lets go at the end ({end} / {middle})");
     }
 }

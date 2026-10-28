@@ -815,6 +815,8 @@ struct Voice {
     off_by: Option<i64>,
     one_shot: bool,
     sustain_loop: bool,
+    /// How the note grows and lets go (see [`crate::shape`]).
+    shape: Option<crate::shape::Shape>,
 }
 
 /// Plays one [`SfzInstrument`].
@@ -829,6 +831,8 @@ pub struct SfzPlayer {
     rng: u32,
     time: f64,
     switch: Option<u8>,
+    /// The shape for the voices the next note-on starts.
+    shape: Option<crate::shape::Shape>,
 }
 
 impl SfzPlayer {
@@ -843,6 +847,7 @@ impl SfzPlayer {
             seq: [0; 128],
             rng: 0x9E37_79B9,
             time: 0.0,
+            shape: None,
         }
     }
 
@@ -987,11 +992,27 @@ impl SfzPlayer {
                 off_by: r.off_by,
                 one_shot: r.loop_mode == LoopMode::OneShot || trigger == Trigger::Release,
                 sustain_loop: r.loop_mode == LoopMode::Sustain,
+                shape: if trigger == Trigger::Release {
+                    None
+                } else {
+                    self.shape
+                },
             });
         }
     }
 
     pub fn note_on(&mut self, key: u8, vel: u8) {
+        self.note_on_shaped(key, vel, None);
+    }
+
+    /// A note-on whose voices follow `shape` over the note's life.
+    pub fn note_on_shaped(&mut self, key: u8, vel: u8, shape: Option<crate::shape::Shape>) {
+        self.shape = shape;
+        self.play(key, vel);
+        self.shape = None;
+    }
+
+    fn play(&mut self, key: u8, vel: u8) {
         let key = key.min(127);
         let vel = vel.clamp(1, 127);
         if let Some((lo, hi)) = self.inst.sw_range
@@ -1071,9 +1092,10 @@ impl SfzPlayer {
                 let (d_l, d_r) = s.frame(i0 + 2);
                 let out_l = hermite(a_l, b_l, c_l, d_l, frac);
                 let out_r = hermite(a_r, b_r, c_r, d_r, frac);
+                let shaped = v.shape.map_or(1.0, |sh| sh.gain(v.age));
                 if let (Some(lo), Some(ro)) = (l.get_mut(i), r.get_mut(i)) {
-                    *lo += out_l * v.gain_l * v.level;
-                    *ro += out_r * v.gain_r * v.level;
+                    *lo += out_l * v.gain_l * v.level * shaped;
+                    *ro += out_r * v.gain_r * v.level * shaped;
                 }
                 v.pos += v.step;
                 let keep_looping = v.looping && !(v.sustain_loop && v.released);

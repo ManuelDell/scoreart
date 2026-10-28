@@ -112,3 +112,31 @@ fn hostile_input_does_not_panic() {
     }
     let _ = from_bytes(b"PK\x03\x04garbage");
 }
+
+#[test]
+fn parts_without_a_program_get_one_from_their_name() {
+    use crate::import::program_for_name;
+    assert_eq!(program_for_name("Violins I"), Some(40));
+    assert_eq!(program_for_name("Violoncello"), Some(42));
+    assert_eq!(program_for_name("Kontrabass"), Some(43));
+    assert_eq!(program_for_name("English Horn"), Some(68));
+    assert_eq!(program_for_name("Horn in F"), Some(60));
+    assert_eq!(program_for_name("Pauken"), Some(47));
+    assert_eq!(program_for_name("Melody"), None);
+    let xml = r#"<?xml version="1.0"?><score-partwise version="4.0"><part-list>
+        <score-part id="P1"><part-name>Cellos</part-name></score-part></part-list>
+        <part id="P1"><measure number="1"><attributes><divisions>1</divisions></attributes>
+        <note><pitch><step>C</step><octave>3</octave></pitch><duration>4</duration><type>whole</type></note>
+        </measure></part></score-partwise>"#;
+    let s = crate::from_str(xml).unwrap();
+    assert_eq!(s.parts[0].program, 42);
+    // Saved before: piano for every part; the name wins.
+    let piano = xml.replace("<part-name>Cellos</part-name>", "<part-name>Cellos</part-name><midi-instrument id=\"I\"><midi-program>1</midi-program></midi-instrument>");
+    assert_eq!(crate::from_str(&piano).unwrap().parts[0].program, 42);
+    let harp = xml.replace("<part-name>Cellos</part-name>", "<part-name>Cellos</part-name><midi-instrument id=\"I\"><midi-program>47</midi-program></midi-instrument>");
+    assert_eq!(
+        crate::from_str(&harp).unwrap().parts[0].program,
+        46,
+        "a written program is kept"
+    );
+}

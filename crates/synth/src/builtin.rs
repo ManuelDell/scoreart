@@ -154,6 +154,7 @@ struct Voice {
     released: Option<(f32, f32)>,
     level: f32,
     noise: u32,
+    shape: Option<crate::shape::Shape>,
 }
 
 /// One built-in instrument (one mixer track).
@@ -174,7 +175,7 @@ impl Builtin {
         }
     }
 
-    pub(crate) fn note_on(&mut self, key: u8, velocity: u8) {
+    pub(crate) fn note_on_shaped(&mut self, key: u8, velocity: u8, shape: Option<crate::shape::Shape>) {
         if self.voices.len() >= MAX_VOICES {
             self.voices.remove(0);
         }
@@ -188,6 +189,7 @@ impl Builtin {
             released: None,
             level: 0.0,
             noise: self.seed,
+            shape,
         });
     }
 
@@ -250,7 +252,7 @@ impl Builtin {
                 v.phase += v.freq * (1.0 + vib) * dt;
                 v.phase -= v.phase.floor();
                 v.age += dt;
-                acc += s * env * v.gain;
+                acc += s * env * v.gain * v.shape.map_or(1.0, |sh| sh.gain(v.age));
             }
             *lo += acc * 0.5;
             *ro += acc * 0.5;

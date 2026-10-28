@@ -76,8 +76,18 @@ pub fn read(root: &Element) -> Result<Score, Error> {
             let program = sp
                 .path(&["midi-instrument", "midi-program"])
                 .and_then(|e| e.text.trim().parse::<i32>().ok())
-                .map(|p| (p - 1).clamp(0, 127) as u8)
-                .unwrap_or(0);
+                .map(|p| (p - 1).clamp(0, 127) as u8);
+            // No program written, or piano for a part whose name clearly says otherwise (as
+            // files without programs were saved): take it from the instrument's names.
+            let inst = sp
+                .path(&["score-instrument", "instrument-name"])
+                .map(|e| e.text.as_str())
+                .unwrap_or("");
+            let guess = program_for_name(&name).or_else(|| program_for_name(inst));
+            let program = match (program, guess) {
+                (None | Some(0), Some(g)) => g,
+                (p, _) => p.unwrap_or(0),
+            };
             let mut sound = PartSound::default();
             if let Some(v) = sp.path(&["score-instrument", "virtual-instrument"]) {
                 sound.library = clip(v.child_text("virtual-library").unwrap_or_default().trim());
@@ -207,6 +217,69 @@ fn read_defaults(d: &Element) -> PageFormat {
         r(v);
     }
     f.clamped()
+}
+
+/// The General MIDI program for an instrument name (English or German), if it is clear.
+pub fn program_for_name(name: &str) -> Option<u8> {
+    let n = name.to_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| n.contains(w));
+    Some(
+        if has(&[
+            "kontrabass",
+            "contrabass",
+            "double bass",
+            "basses",
+            "bässe",
+            "string bass",
+        ]) {
+            43
+        } else if has(&["violoncell", "cello"]) {
+            42
+        } else if has(&["viola", "bratsche"]) {
+            41
+        } else if has(&["violin", "violine", "geige"]) {
+            40
+        } else if has(&["harp", "harfe"]) {
+            46
+        } else if has(&["timpani", "pauke"]) {
+            47
+        } else if has(&["piccolo"]) {
+            72
+        } else if has(&["flute", "flöte", "floete"]) {
+            73
+        } else if has(&["oboe", "english horn", "cor anglais", "englischhorn"]) {
+            68
+        } else if has(&["clarinet", "klarinette"]) {
+            71
+        } else if has(&["bassoon", "fagott"]) {
+            70
+        } else if has(&["sax"]) {
+            65
+        } else if has(&["trumpet", "trompete", "cornet", "kornett"]) {
+            56
+        } else if has(&["trombone", "posaune"]) {
+            57
+        } else if has(&["tuba"]) {
+            58
+        } else if has(&["horn"]) {
+            60
+        } else if has(&[
+            "choir", "chor", "soprano", "sopran", "alto", "alt ", "tenor", "baritone", "bariton", "voice",
+            "stimme", "gesang",
+        ]) {
+            52
+        } else if has(&["organ", "orgel"]) {
+            19
+        } else if has(&["guitar", "gitarre"]) {
+            24
+        } else if has(&["strings", "streicher"]) {
+            48
+        } else if has(&["piano", "klavier", "flügel"]) {
+            0
+        } else {
+            return None;
+        },
+    )
 }
 
 /// ScoreArt's playback settings, kept as miscellaneous fields.
