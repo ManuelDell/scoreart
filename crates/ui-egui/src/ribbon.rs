@@ -1899,6 +1899,20 @@ fn tab_instruments(app: &mut ScoreApp, ui: &mut Ui) {
         if big(ui, Ico::Mixer, t("Mixer"), app.show_mixer, true, "F10").clicked() {
             app.show_mixer = !app.show_mixer;
         }
+        let on = app.session.score.playback.optimize;
+        if big(
+            ui,
+            Ico::Sliders,
+            t("Sound optimization"),
+            on,
+            true,
+            t("On: every note grows, rounds and lets go; staccato, pizz. and tremolo play the library's matching samples; all sounds balanced. Off: the notes as written with the chosen sound."),
+        )
+        .clicked()
+        {
+            app.run("score.playback", json!({ "optimize": !on }));
+            app.session.status = if on { t("Sound optimization off").into() } else { t("Sound optimization on").into() };
+        }
         column(ui, |ui| {
             if small(
                 ui,

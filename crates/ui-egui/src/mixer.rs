@@ -169,6 +169,14 @@ pub fn panel(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 {
                     app.run("score.playback", json!({ "humanize": human }));
                 }
+                let mut optimize = app.session.score.playback.optimize;
+                if ui
+                    .checkbox(&mut optimize, t("Sound optimization"))
+                    .on_hover_text(t("On: every note grows, rounds and lets go; staccato, pizz. and tremolo play the library's matching samples; all sounds balanced. Off: the notes as written with the chosen sound."))
+                    .changed()
+                {
+                    app.run("score.playback", json!({ "optimize": optimize }));
+                }
             });
             ui.add_space(6.0);
             let parts: Vec<(String, PartSound)> = app

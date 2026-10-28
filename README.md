@@ -141,7 +141,8 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   Each instrument family plays its own way: slurred notes bind, staccato is shorter for bows
   and winds than for keys. **Every note lives**: it grows into its sound, rounds and lets go
   (staccato quickly, accents with a push, slurred notes carrying on, long notes in a slow
-  arch). Desktop audio via cpal, Web Audio in the browser; **WAV** export.
+  arch). All of this is **sound optimisation**, on by default and switched off with
+  *Instruments → Sound optimization*. Desktop audio via cpal, Web Audio in the browser; **WAV** export.
   How it works: [docs/playback.md](docs/playback.md).
 - **Sample playback and a mixer** (`F10`): load free sample libraries — **SoundFont** (`.sf2`)
   and **SFZ** (`.sfz` with WAV/FLAC samples, also as a folder or zip), e.g. VSCO 2 CE (CC0),

@@ -322,9 +322,10 @@ pub fn write(score: &Score) -> String {
     if score.playback != PlaybackStyle::default() {
         let _ = writeln!(
             x,
-            "    <miscellaneous><miscellaneous-field name=\"scoreart-reverb\">{}</miscellaneous-field><miscellaneous-field name=\"scoreart-humanize\">{}</miscellaneous-field></miscellaneous>",
+            "    <miscellaneous><miscellaneous-field name=\"scoreart-reverb\">{}</miscellaneous-field><miscellaneous-field name=\"scoreart-humanize\">{}</miscellaneous-field><miscellaneous-field name=\"scoreart-optimize\">{}</miscellaneous-field></miscellaneous>",
             score.playback.reverb,
-            if score.playback.humanize { "yes" } else { "no" }
+            if score.playback.humanize { "yes" } else { "no" },
+            if score.playback.optimize { "yes" } else { "no" }
         );
     }
     x.push_str("  </identification>\n");

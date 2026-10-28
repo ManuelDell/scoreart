@@ -92,6 +92,15 @@ piece is played. *Mixer → Human touch* turns it off.
 
 Room and human touch are saved in the score (MusicXML `<miscellaneous-field>`s).
 
+## Sound optimisation on / off
+
+*Instruments → Sound optimization* (also in the mixer) is on by default. It covers what goes
+beyond the written notes: the life of every note (8), the library's matching samples for
+staccato, pizzicato, tremolo and mute (1, 4), the level balancing (6) and the gentler dynamics
+curve (3). Off, the notes play as written with the chosen sound. What the notation itself says
+(repeats, fermatas, ornaments, tempo changes, note lengths, hairpins) is always played. The
+setting is saved with the score and takes effect from the next start of playback.
+
 ## 8: the life of a note
 
 A played note is not a box: it grows into its sound, rounds a little and lets go, like a

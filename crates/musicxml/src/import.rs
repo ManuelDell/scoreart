@@ -294,6 +294,7 @@ fn read_playback(root: &Element) -> PlaybackStyle {
                     }
                 }
                 Some("scoreart-humanize") => p.humanize = f.text.trim() != "no",
+                Some("scoreart-optimize") => p.optimize = f.text.trim() != "no",
                 _ => {}
             }
         }

@@ -692,6 +692,10 @@ pub struct PlaybackStyle {
     pub reverb: u8,
     /// Small, natural variations in timing and loudness.
     pub humanize: bool,
+    /// Sound optimisation: every note shaped (grows, rounds, lets go), the library's matching
+    /// samples for staccato, pizzicato …, sounds balanced to a common loudness, and a gentler
+    /// dynamics curve. Off: the notes as written with the chosen sound.
+    pub optimize: bool,
 }
 
 impl Default for PlaybackStyle {
@@ -699,6 +703,7 @@ impl Default for PlaybackStyle {
         PlaybackStyle {
             reverb: 25,
             humanize: true,
+            optimize: true,
         }
     }
 }

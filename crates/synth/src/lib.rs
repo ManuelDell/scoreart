@@ -569,7 +569,14 @@ fn jitter(a: u64, b: u64, c: u64) -> f64 {
 /// is held (the sound has real tremolo) rather than played as repeated notes.
 type Choose<'a> = &'a dyn Fn(&PlayNote) -> (usize, bool);
 
-fn track_events(seq: &Sequence, from: u64, part: usize, choose: Choose, humanize: bool) -> Vec<TrackEvent> {
+fn track_events(
+    seq: &Sequence,
+    from: u64,
+    part: usize,
+    choose: Choose,
+    humanize: bool,
+    optimize: bool,
+) -> Vec<TrackEvent> {
     let t0 = seq.seconds_at(from);
     let mut out = Vec::new();
     let notes: Vec<&PlayNote> = seq
@@ -601,9 +608,14 @@ fn track_events(seq: &Sequence, from: u64, part: usize, choose: Choose, humanize
                 end = (end + shift).max(start + 0.03);
                 vel += jitter(part as u64, s.start, u64::from(s.key) + 128) * 3.0;
             }
-            let vel = curve(vel as f32).round().clamp(1.0, 127.0) as u8;
+            let vel = if optimize { curve(vel as f32) } else { vel as f32 };
+            let vel = vel.round().clamp(1.0, 127.0) as u8;
             let key = s.key.min(127);
-            let shape = Shape::for_note(family, s.tech, vel, (end - start) as f32, step);
+            let shape = if optimize {
+                Shape::for_note(family, s.tech, vel, (end - start) as f32, step)
+            } else {
+                None
+            };
             out.push(TrackEvent {
                 at: start,
                 key,
@@ -784,7 +796,7 @@ impl Synth {
                     .iter()
                     .map(|q| (Source::Builtin(Builtin::new(Family::of_program(*q), rate)), 1.0))
                     .collect();
-                let mut t = Track::new(p, track_events(seq, from, p, &choose, false), sources);
+                let mut t = Track::new(p, track_events(seq, from, p, &choose, false, false), sources);
                 t.swells = envelopes(seq, from, p);
                 t
             })
@@ -844,7 +856,9 @@ impl Synth {
                         Want::Program(n.program)
                     } else {
                         match Variant::of(n.tech) {
+                            // Without sound optimisation the part's own sound plays everything.
                             Variant::Own => continue,
+                            _ if !style.optimize => continue,
                             v => Want::Variant(v),
                         }
                     };
@@ -877,9 +891,20 @@ impl Synth {
                 };
                 let sources: Vec<(Source, f32)> = sounds
                     .iter()
-                    .map(|r| (Source::new(r, rate), balance(r, p.program, keys, rate)))
+                    .map(|r| {
+                        let g = if style.optimize {
+                            balance(r, p.program, keys, rate)
+                        } else {
+                            1.0
+                        };
+                        (Source::new(r, rate), g)
+                    })
                     .collect();
-                let mut t = Track::new(pi, track_events(seq, from, pi, &choose, style.humanize), sources);
+                let mut t = Track::new(
+                    pi,
+                    track_events(seq, from, pi, &choose, style.humanize, style.optimize),
+                    sources,
+                );
                 t.swells = envelopes(seq, from, pi);
                 t
             })
@@ -1364,5 +1389,43 @@ mod tests {
         let (start, middle, end) = (rms(0.0, 0.02), rms(0.3, 0.5), rms(1.0, 1.07));
         assert!(start < 0.8 * middle, "a soft start ({start} / {middle})");
         assert!(end < 0.85 * middle, "lets go at the end ({end} / {middle})");
+    }
+
+    #[test]
+    fn sound_optimisation_can_be_turned_off() {
+        let mut s = two_parts();
+        s.parts[0].sound.library = "Lib".into();
+        s.parts[0].sound.preset = "Lib/ViolinSus".into();
+        let kind = EventKind::Chord(vec![Note::new(Pitch::new(Step::A, 0, 4))]);
+        s.overwrite(
+            Pos {
+                tick: TPQ * 2,
+                ..Pos::default()
+            },
+            kind,
+            Duration::new(NoteValue::Half, 0),
+        )
+        .unwrap();
+        let r = scoreart_model::edit::EventRef {
+            part: 0,
+            staff: 0,
+            voice: 0,
+            measure: 0,
+            index: 1,
+        };
+        s.event_mut(r).unwrap().text = Some("pizz.".into());
+        s.playback.optimize = false;
+        let bank = Arc::new(SoundBank::from_bytes("Lib.zip", variants_zip()).unwrap());
+        let seq = scoreart_midi::sequence(&s);
+        let (syn, _) = Synth::for_score(&s, &seq, 0, 44_100, std::slice::from_ref(&bank), None);
+        let t = &syn.tracks[0];
+        assert_eq!(t.sources.len(), 1, "no pizzicato sample");
+        assert_eq!(t.sources[0].1, 1.0, "no balancing");
+        assert!(t.events.iter().all(|e| e.shape.is_none()), "no shaping");
+        // On (the default): all of it.
+        s.playback.optimize = true;
+        let (syn, _) = Synth::for_score(&s, &seq, 0, 44_100, &[bank], None);
+        assert_eq!(syn.tracks[0].sources.len(), 2);
+        assert!(syn.tracks[0].events.iter().any(|e| e.shape.is_some()));
     }
 }
