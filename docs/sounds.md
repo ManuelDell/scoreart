@@ -146,3 +146,30 @@ Not supported yet:
 - **The SFZ reader** is written from the public format description only.
 - **Testing** used freely licensed libraries downloaded for that purpose. None of their files are
   committed; the tests use samples and SFZ files written for this repository.
+
+## Example: a whole orchestra
+
+[`docs/examples/mountain-king-vsco.mxl`](examples/mountain-king-vsco.mxl) is Grieg's "In the Hall
+of the Mountain King" (public domain) arranged for 15 parts: woodwinds, brass, timpani and
+strings. It starts with pizzicato cellos and bassoon, adds a section each time round and ends in
+an accelerating tutti. Every part names its VSCO 2 CE preset (for example `ViolinEnsSpic`,
+`CelloEnsPizz`, `FHornSus`), so the score plays with the right sounds as soon as the library is
+loaded.
+
+Fetch the 14 instruments it uses (about 250 MB) and render it:
+
+```
+for i in FluteStac OboeStac ClarinetStac BassoonStac FHornSus TrumpetStac TromboneStac \
+         TubaStac Timpani ViolinEnsSpic ViolinEnsTrem ViolaEnsSpic CelloEnsPizz ContrabassPizz; do
+  scoreart-cli sounds install "VSCO 2 CE" $i.sfz --accept-licence
+done
+scoreart-cli convert docs/examples/mountain-king-vsco.mxl mountain-king.wav \
+  --sounds ~/.local/share/ScoreArt/Sounds/"VSCO 2 CE"
+```
+
+In the app: open the file, then *Instruments → Get free sounds… → VSCO 2 CE*, tick the
+instruments (or download the whole library).
+
+Audio files are rendered without a limiter and then turned down as a whole until the loudest
+moment is just under full scale, so a soft opening stays soft against a full tutti instead of
+both being squashed to the same level. Live playback keeps a gentle limiter.

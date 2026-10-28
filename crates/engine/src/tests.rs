@@ -572,3 +572,64 @@ fn texts_and_dynamics_move_and_keep_their_place() {
     );
     assert!(s.execute("note.place", &json!({ "kind": "lyric" })).is_err());
 }
+
+/// Samples of a 16-bit stereo WAV file written by `wav_file`.
+fn wav_samples(w: &[u8]) -> Vec<f32> {
+    let (pairs, _) = w.get(44..).unwrap_or(&[]).as_chunks::<2>();
+    pairs
+        .iter()
+        .map(|b| f32::from(i16::from_le_bytes(*b)) / 32767.0)
+        .collect()
+}
+
+#[test]
+fn a_loud_tutti_is_turned_down_not_squashed() {
+    // Twelve instruments hammering fff chords: far more than full scale when summed.
+    let mut s = Session::default();
+    let insts = [
+        "violin",
+        "violin",
+        "viola",
+        "cello",
+        "contrabass",
+        "flute",
+        "oboe",
+        "bassoon",
+        "trombone",
+        "tuba",
+        "piano",
+        "organ",
+    ];
+    s.execute("file.new", &json!({ "instruments": insts, "measures": 2 }))
+        .unwrap();
+    for part in 0..insts.len() {
+        s.execute(
+            "cursor.set",
+            &json!({ "part": part, "staff": 0, "measure": 0, "tick": 0 }),
+        )
+        .unwrap();
+        s.execute("input.toggle", &json!({})).unwrap();
+        for st in ["c", "e", "g", "c"] {
+            s.execute("note.enter", &json!({ "step": st })).unwrap();
+            s.execute("note.add", &json!({ "step": "e" })).unwrap();
+            s.execute("note.add", &json!({ "step": "g" })).unwrap();
+        }
+        s.execute("input.toggle", &json!({})).unwrap();
+        s.execute(
+            "select.event",
+            &json!({ "part": part, "staff": 0, "voice": 0, "measure": 0, "index": 0 }),
+        )
+        .unwrap();
+        s.execute("note.dynamic", &json!({ "type": "fff" })).unwrap();
+    }
+    let pcm = wav_samples(&s.save_bytes("x.wav").unwrap());
+    let peak = pcm.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    assert!(peak > 0.8 && peak <= 0.9, "peak {peak}");
+    // Not held against the ceiling the way a saturating limiter would.
+    let near = pcm.iter().filter(|v| v.abs() > 0.85).count();
+    assert!(
+        near * 1000 < pcm.len(),
+        "{near} of {} samples near full scale",
+        pcm.len()
+    );
+}

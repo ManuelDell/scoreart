@@ -558,7 +558,9 @@ pub fn wav_with(score: &Score, sounds: &[Arc<SoundBank>]) -> Vec<u8> {
     let (mut synth, _) = Synth::for_score(score, &seq, 0, WAV_RATE, sounds, None);
     let frames = (synth.duration().min(WAV_MAX_SECS) * f64::from(WAV_RATE)) as usize;
     let mut pcm = vec![0.0f32; frames * 2];
-    synth.render(&mut pcm);
+    synth.render_linear(&mut pcm);
+    let k = scoreart_synth::normalize(scoreart_synth::peak(&pcm));
+    pcm.iter_mut().for_each(|v| *v *= k);
     wav_file(&pcm, WAV_RATE)
 }
 
@@ -567,7 +569,19 @@ pub fn stems(score: &Score, sounds: &[Arc<SoundBank>]) -> Result<Vec<u8>> {
     use std::io::Write;
     let seq = scoreart_midi::sequence(score);
     let (mut synth, _) = Synth::for_score(score, &seq, 0, WAV_RATE, sounds, None);
-    let tracks = synth.render_stems(WAV_MAX_SECS);
+    let mut tracks = synth.render_stems(WAV_MAX_SECS);
+    // One factor for all stems, from their sum, so that together they still make the mix.
+    let len = tracks.iter().map(|t| t.1.len()).max().unwrap_or(0);
+    let mut sum = vec![0.0f32; len];
+    for (_, pcm) in &tracks {
+        for (s, v) in sum.iter_mut().zip(pcm) {
+            *s += v;
+        }
+    }
+    let k = scoreart_synth::normalize(scoreart_synth::peak(&sum));
+    for (_, pcm) in &mut tracks {
+        pcm.iter_mut().for_each(|v| *v *= k);
+    }
     let mut buf = std::io::Cursor::new(Vec::new());
     {
         let mut z = zip::ZipWriter::new(&mut buf);

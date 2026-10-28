@@ -590,6 +590,16 @@ impl Synth {
     /// Renders interleaved stereo frames into `out` (its length should be even). Silence after
     /// the end.
     pub fn render(&mut self, out: &mut [f32]) {
+        self.mix(out, true);
+    }
+
+    /// Like [`Synth::render`] but without the limiter: the plain sum, which may exceed ±1. For
+    /// files, where the whole piece can be scaled afterwards (see [`normalize`]).
+    pub fn render_linear(&mut self, out: &mut [f32]) {
+        self.mix(out, false);
+    }
+
+    fn mix(&mut self, out: &mut [f32], limit: bool) {
         let rate = f64::from(self.rate);
         let g = self.volume * MASTER;
         for chunk in out.chunks_mut(BLOCK * 2) {
@@ -614,9 +624,9 @@ impl Synth {
                 }
                 self.controls.add_peak(t.part, peak * g);
             }
-            // Gentle limiter.
+            // Gentle limiter (live), or just the master gain (files).
             for v in chunk.iter_mut() {
-                *v = (*v * g).tanh();
+                *v = if limit { (*v * g).tanh() } else { *v * g };
             }
             if chunk.len() % 2 == 1
                 && let Some(last) = chunk.last_mut()
@@ -628,7 +638,8 @@ impl Synth {
     }
 
     /// Renders the whole piece once more, one interleaved stereo buffer per part ("stems"), each
-    /// with its own volume and pan but ignoring mute and solo. Capped at `max_secs`.
+    /// with its own volume and pan but ignoring mute and solo, without a limiter (see
+    /// [`normalize`]). Capped at `max_secs`.
     pub fn render_stems(&mut self, max_secs: f64) -> Vec<(usize, Vec<f32>)> {
         let rate = f64::from(self.rate);
         let total = (self.end.min(max_secs).max(0.0) * rate) as u64;
@@ -644,14 +655,34 @@ impl Synth {
                 t.render(self.frames, n, rate);
                 let (gl, gr) = self.controls.gains(t.part);
                 for i in 0..n {
-                    buf.push((t.l[i] * gl * g).tanh());
-                    buf.push((t.r[i] * gr * g).tanh());
+                    buf.push(t.l[i] * gl * g);
+                    buf.push(t.r[i] * gr * g);
                 }
             }
             self.frames += n as u64;
         }
         out
     }
+}
+
+/// Highest peak of a rendered file: about -1 dBFS.
+const FILE_PEAK: f32 = 0.89;
+
+/// The factor that brings a whole rendered piece under [`FILE_PEAK`]: loud pieces are turned
+/// down as a whole, so loud and soft passages keep their distance instead of being squashed by
+/// a limiter; quiet pieces are left as they are. `peak` is the largest sample of the mix.
+pub fn normalize(peak: f32) -> f32 {
+    if peak.is_finite() && peak > FILE_PEAK {
+        FILE_PEAK / peak
+    } else {
+        1.0
+    }
+}
+
+/// The largest absolute sample.
+pub fn peak(pcm: &[f32]) -> f32 {
+    pcm.iter()
+        .fold(0.0f32, |m, v| if v.is_finite() { m.max(v.abs()) } else { m })
 }
 
 #[cfg(test)]
@@ -661,6 +692,14 @@ mod tests {
     use scoreart_model::{
         Duration, EventKind, KeySig, Note, NoteValue, Pitch, Score, Step, TPQ, TimeSig, instrument,
     };
+
+    #[test]
+    fn files_are_turned_down_only_when_too_loud() {
+        assert_eq!(normalize(0.5), 1.0);
+        assert!((normalize(4.0) * 4.0 - FILE_PEAK).abs() < 1e-6);
+        assert_eq!(normalize(f32::NAN), 1.0);
+        assert_eq!(peak(&[0.1, -0.7, f32::INFINITY, 0.3]), 0.7);
+    }
 
     #[test]
     fn renders_audio_and_ends() {
