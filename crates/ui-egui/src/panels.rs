@@ -52,31 +52,9 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     }
                     ui.separator();
                     ui.menu_button(t("Export"), |ui| {
-                        let stem = app
-                            .session
-                            .file_name
-                            .rsplit_once('.')
-                            .map(|(a, _)| a.to_string())
-                            .unwrap_or_else(|| app.session.file_name.clone());
-                        for (label, ext) in [
-                            (t("MusicXML (.musicxml)"), "musicxml"),
-                            (t("Compressed MusicXML (.mxl)"), "mxl"),
-                            (t("MIDI (.mid)"), "mid"),
-                            (t("SVG, first page (.svg)"), "svg"),
-                            (t("Audio (.wav)"), "wav"),
-                            (t("Audio per instrument (.zip of .wav)"), "zip"),
-                        ] {
+                        for (label, ext) in export_formats() {
                             if ui.button(label).clicked() {
-                                let name = format!("{stem}.{ext}");
-                                let bytes = app.session.save_bytes(&name);
-                                match bytes {
-                                    Ok(b) => {
-                                        if let Some(n) = app.host.save(&name, b, true) {
-                                            app.session.status = tf("Exported {}", &[&n]);
-                                        }
-                                    }
-                                    Err(e) => app.session.status = e.to_string(),
-                                }
+                                export(app, ext);
                                 ui.close();
                             }
                         }
@@ -225,6 +203,15 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     }
                 });
                 ui.menu_button(t("View"), |ui| {
+                    ui.menu_button(t("Interface"), |ui| {
+                        for s in crate::ribbon::Surface::ALL {
+                            if ui.selectable_label(app.surface == s, s.label()).clicked() {
+                                crate::ribbon::set_surface(app, s);
+                                ui.close();
+                            }
+                        }
+                    });
+                    ui.separator();
                     crate::page::view_choices(app, ui);
                     ui.separator();
                     ui.menu_button(t("Language"), |ui| {
@@ -282,6 +269,9 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         ui.close();
                     }
                 });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    crate::ribbon::surface_switch(app, ui);
+                });
             });
         });
 }
@@ -290,7 +280,12 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
 
 /// A square button showing a SMuFL glyph (or a text label), with a baseline at `base` (0–1 of
 /// the button height) and the glyph size in px.
-fn glyph_button(ui: &mut egui::Ui, label: GlyphLabel, selected: bool, tip: &str) -> egui::Response {
+pub(crate) fn glyph_button(
+    ui: &mut egui::Ui,
+    label: GlyphLabel,
+    selected: bool,
+    tip: &str,
+) -> egui::Response {
     let tk = Tokens::get(ui.ctx());
     let size = Vec2::new(34.0, 34.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
@@ -324,7 +319,7 @@ fn glyph_button(ui: &mut egui::Ui, label: GlyphLabel, selected: bool, tip: &str)
 }
 
 #[derive(Clone, Copy)]
-enum GlyphLabel {
+pub(crate) enum GlyphLabel {
     /// glyph, em px, baseline (fraction of height), x offset from centre
     Glyph(char, f32, f32, f32),
     Icon(Icon),
@@ -332,7 +327,7 @@ enum GlyphLabel {
 
 /// Toolbar icons drawn in code, so they look the same whatever fonts the system has.
 #[derive(Clone, Copy)]
-enum Icon {
+pub(crate) enum Icon {
     Play,
     Stop,
     Pen,
@@ -402,7 +397,7 @@ fn paint_icon(p: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
     }
 }
 
-fn duration_glyph(v: NoteValue) -> char {
+pub(crate) fn duration_glyph(v: NoteValue) -> char {
     match v {
         NoteValue::Breve => '\u{ECA0}',
         NoteValue::Whole => '\u{ECA2}',
@@ -548,6 +543,37 @@ pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
         });
 }
 
+/// The export formats: label and file extension.
+pub(crate) fn export_formats() -> [(&'static str, &'static str); 6] {
+    [
+        (t("MusicXML (.musicxml)"), "musicxml"),
+        (t("Compressed MusicXML (.mxl)"), "mxl"),
+        (t("MIDI (.mid)"), "mid"),
+        (t("SVG, first page (.svg)"), "svg"),
+        (t("Audio (.wav)"), "wav"),
+        (t("Audio per instrument (.zip of .wav)"), "zip"),
+    ]
+}
+
+/// Writes the score in the format of `ext` and hands it to the host to save.
+pub(crate) fn export(app: &mut ScoreApp, ext: &str) {
+    let stem = app
+        .session
+        .file_name
+        .rsplit_once('.')
+        .map(|(a, _)| a.to_string())
+        .unwrap_or_else(|| app.session.file_name.clone());
+    let name = format!("{stem}.{ext}");
+    match app.session.save_bytes(&name) {
+        Ok(b) => {
+            if let Some(n) = app.host.save(&name, b, true) {
+                app.session.status = tf("Exported {}", &[&n]);
+            }
+        }
+        Err(e) => app.session.status = e.to_string(),
+    }
+}
+
 // ---------- status bar ----------
 
 pub fn status_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
@@ -622,16 +648,36 @@ fn smufl_button(ui: &mut egui::Ui, name: &str, tip: &str) -> egui::Response {
         tk.toolbar
     };
     ui.painter().rect_filled(rect, 5.0, bg);
+    paint_smufl(ui.painter(), rect, name, ui.visuals().text_color());
+    resp
+}
+
+/// A SMuFL glyph by name, scaled and centred to fit `rect`.
+pub(crate) fn paint_smufl(p: &egui::Painter, rect: Rect, name: &str, color: Color32) {
     if let Some((c, w, lo, hi)) = scoreart_engrave::smufl::get(name) {
         let h = (hi - lo).max(0.3);
         let span = w.max(h).max(0.6);
-        let em = (4.0 * 24.0 / span).min(30.0);
+        let fit = rect.width().min(rect.height()) - 10.0;
+        let em = (4.0 * fit / span).min(fit * 1.25);
         let sp = em / 4.0;
         let x = rect.center().x - w * sp / 2.0;
         let y = rect.center().y + (hi + lo) / 2.0 * sp;
-        glyph::paint(ui.painter(), c, Pos2::new(x, y), em, ui.visuals().text_color());
+        glyph::paint(p, c, Pos2::new(x, y), em, color);
     }
-    resp
+}
+
+/// A dynamic ("mf", "sfz" …) in Bravura letters, sized to fit `rect`.
+pub(crate) fn paint_dynamic(p: &egui::Painter, rect: Rect, id: &str, color: Color32) {
+    let letters: Vec<(char, f32)> = id.chars().filter_map(g::dynamic_letter).collect();
+    let width: f32 = letters.iter().map(|l| l.1 - 0.1).sum::<f32>().max(0.5);
+    let em = (4.0 * (rect.width() - 6.0) / width).min(rect.height());
+    let sp = em / 4.0;
+    let mut x = rect.center().x - width * sp / 2.0;
+    let y = rect.center().y + 0.35 * sp;
+    for (c, w) in letters {
+        glyph::paint(p, c, Pos2::new(x, y), em, color);
+        x += (w - 0.1) * sp;
+    }
 }
 
 fn text_button(ui: &mut egui::Ui, label: impl Into<egui::WidgetText>, tip: &str) -> egui::Response {
@@ -993,7 +1039,7 @@ pub fn palette_content(app: &mut ScoreApp, ui: &mut egui::Ui) {
     });
 }
 
-fn key_label(f: i32) -> String {
+pub(crate) fn key_label(f: i32) -> String {
     match f {
         0 => "♮".into(),
         f if f > 0 => format!("{f}♯"),

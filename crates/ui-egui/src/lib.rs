@@ -16,12 +16,14 @@ pub mod i18n;
 mod i18n_de;
 #[cfg(test)]
 mod i18n_tests;
+mod icons;
 mod instruments;
 mod midi;
 mod mixer;
 mod page;
 mod panels;
 mod playback;
+pub mod ribbon;
 pub mod side;
 pub mod theme;
 
@@ -213,6 +215,9 @@ pub struct ScoreApp {
     pub(crate) midi: midi::MidiUi,
     /// A note being dragged on the score.
     pub(crate) note_drag: Option<canvas::NoteDrag>,
+    /// What surrounds the score: ribbon, side panel, both or the focus bar.
+    pub surface: ribbon::Surface,
+    pub ribbon: ribbon::RibbonState,
 }
 
 impl ScoreApp {
@@ -248,6 +253,7 @@ impl ScoreApp {
             .map_or(i18n::Lang::En, |c| i18n::Lang::from_code(&c));
         i18n::set_lang(lang);
         glyph::install_fonts(ctx);
+        let surface = ribbon::saved_surface(host.as_ref());
         ScoreApp {
             session,
             host,
@@ -266,6 +272,8 @@ impl ScoreApp {
             page_settings: None,
             midi: Default::default(),
             note_drag: None,
+            surface,
+            ribbon: Default::default(),
         }
     }
 
@@ -352,14 +360,25 @@ impl ScoreApp {
         self.host.tick();
         midi::poll(self);
         self.follow_playback(&ctx);
-        panels::menu_bar(self, ui);
-        panels::toolbar(self, ui);
+        match self.surface {
+            ribbon::Surface::Side => {
+                panels::menu_bar(self, ui);
+                panels::toolbar(self, ui);
+            }
+            ribbon::Surface::Ribbon | ribbon::Surface::Both => {
+                ribbon::title_bar(self, ui);
+                ribbon::ribbon(self, ui);
+            }
+            ribbon::Surface::Focus => ribbon::title_bar(self, ui),
+        }
         panels::status_bar(self, ui);
         if self.show_mixer {
             mixer::panel(self, ui);
         }
-        side::strip(self, ui);
-        side::panel(self, ui);
+        if self.surface.has_side() {
+            side::strip(self, ui);
+            side::panel(self, ui);
+        }
         let tk = theme::Tokens::get(&ctx);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(tk.canvas))
@@ -371,6 +390,9 @@ impl ScoreApp {
         instruments::dialogs(self, &ctx);
         page::dialog(self, &ctx);
         midi::window(self, &ctx);
+        if self.surface == ribbon::Surface::Focus {
+            ribbon::focus_bar(self, &ctx);
+        }
         // Ctrl + mouse wheel zooms.
         let (zoom_delta, cmd) = ctx.input(|i| (i.zoom_delta(), i.modifiers.command));
         if (zoom_delta - 1.0).abs() > 1e-3 {
@@ -449,6 +471,7 @@ impl ScoreApp {
             (Key::N, _, _) if cmd_only => self.dialog = Some(Dialog::NewScore(panels::NewScore::default())),
             (Key::T, _, _) if plain => self.run("note.tie", json!({})),
             (Key::Space, _, _) if plain => self.toggle_playback(),
+            (Key::F1, _, _) if cmd_only => self.ribbon.minimized = !self.ribbon.minimized,
             (Key::F10, _, _) if plain => self.show_mixer = !self.show_mixer,
             (Key::I, _, _) if plain => side::toggle(self, side::SideTab::Instruments),
             (Key::Escape, _, _) if self.is_playing() => self.stop_playback(),

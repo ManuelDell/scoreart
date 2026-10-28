@@ -16,6 +16,7 @@ const SOURCES: &[&str] = &[
     include_str!("canvas.rs"),
     include_str!("playback.rs"),
     include_str!("side.rs"),
+    include_str!("ribbon.rs"),
 ];
 
 /// Messages the engine and model put in the status line (exact texts and templates).

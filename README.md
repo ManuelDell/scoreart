@@ -16,7 +16,7 @@
   <img alt="Status: early alpha" src="https://img.shields.io/badge/status-early%20alpha-orange?style=flat-square">
 </p>
 
-![ScoreArt with the side panel on the palettes tab, showing the Ode to Joy sample](docs/images/app.png)
+![ScoreArt with the ribbon on the Notation tab and the side panel on the palettes, showing the Ode to Joy sample](docs/images/app.png)
 
 ScoreArt is a scorewriter in the spirit of MuseScore, written from scratch. It follows the
 engineering conventions of the ArtCraft apps (Rust only, egui, one command registry for UI,
@@ -24,6 +24,24 @@ CLI and agents, WebAssembly build, strict clean-room rules) — but it is an **i
 project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group.**
 
 ## What works today
+
+- **Four interface layouts**, switched in the title bar (or *View → Interface*) and remembered:
+  - **Ribbon**: tabs of grouped buttons, as in the ArtCraft office apps;
+  - **Side panel**: menus, a toolbar and the MuseScore-like side panel;
+  - **Both** (the default);
+  - **Focus**: only the score and a floating input bar.
+
+  The ribbon tabs are ordered by how often they are needed:
+  - *Home*: note input, durations, accidentals, voices, editing and playback;
+  - *Notation*: the everyday marks (articulation, dynamics, slurs and hairpins, breath, grace notes);
+  - *More symbols*: the rare marks (ornaments, techniques, octave and pedal lines, tremolos,
+    noteheads …);
+  - then *Measures*, *Text*, *Instruments*, *Format* and *View*.
+
+  Buttons that cannot act on the current selection are greyed out, and their tooltip says why.
+  Double-clicking a tab or pressing Ctrl+F1 folds the ribbon.
+
+  ![Focus mode: only the score and a floating input bar](docs/images/focus.png)
 
 - **Engraving** with the SMuFL reference font Bravura: clefs, key and time signatures, notes,
   chords (with seconds displaced), rests and whole-measure rests, accidentals (key- and
@@ -85,7 +103,7 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   system or browser language is used at first and the choice is remembered). Every text has
   to have a German translation: a test fails otherwise (`crates/ui-egui/src/i18n_de.rs`).
 
-![The interface in German, with the Properties tab open](docs/images/app-de.png)
+![The interface in German: the Measures tab of the ribbon and the Properties tab of the side panel](docs/images/app-de.png)
 
 - **MIDI keyboard input** (desktop and browser): connect a device, play notes and chords into
   the score; **every key and controller can be given its own action** (note value, rest, tie,
@@ -166,6 +184,7 @@ attribution, crate layering, wasm build).
 | `/` | grace note | `Shift+→` | extend the selection |
 | `Ctrl+K` | chord symbol | `Ctrl+T` / `Ctrl+M` | staff text / rehearsal mark |
 | `F10` | mixer | `I` | instruments and sounds |
+| `Ctrl+F1` | fold or unfold the ribbon | | |
 
 ## How it is built
 

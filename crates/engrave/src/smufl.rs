@@ -169,6 +169,26 @@ pub static TABLE: &[(&str, char, f32, f32, f32)] = &[
     ("flag32ndUp", '\u{E244}', 1.048, -3.248, 0.596),
     ("accidentalParensLeft", '\u{E26A}', 0.564, -0.992, 0.988),
     ("accidentalParensRight", '\u{E26B}', 0.564, -0.992, 0.988),
+    // Accidentals, clefs, time and repeat signs, single notes for buttons.
+    ("accidentalFlat", '\u{E260}', 0.904, -0.700, 1.756),
+    ("accidentalNatural", '\u{E261}', 0.672, -1.340, 1.364),
+    ("accidentalSharp", '\u{E262}', 0.996, -1.392, 1.400),
+    ("accidentalDoubleSharp", '\u{E263}', 1.000, -0.500, 0.508),
+    ("accidentalDoubleFlat", '\u{E264}', 1.652, -0.700, 1.748),
+    ("gClef", '\u{E050}', 2.684, -2.632, 4.392),
+    ("gClef8vb", '\u{E052}', 2.656, -3.512, 4.392),
+    ("cClef", '\u{E05C}', 2.796, -2.024, 2.024),
+    ("fClef", '\u{E062}', 2.736, -2.540, 1.048),
+    ("unpitchedPercussionClef1", '\u{E069}', 1.528, -1.000, 1.000),
+    ("timeSigCommon", '\u{E08A}', 1.696, -0.996, 1.004),
+    ("timeSigCutCommon", '\u{E08B}', 1.668, -1.436, 1.444),
+    ("repeatLeft", '\u{E040}', 1.472, 0.000, 4.000),
+    ("repeatRight", '\u{E041}', 1.468, 0.000, 4.000),
+    ("noteheadBlack", '\u{E0A4}', 1.180, -0.500, 0.500),
+    ("graceNoteAcciaccaturaStemUp", '\u{E560}', 1.428, -0.332, 2.096),
+    ("graceNoteAppoggiaturaStemUp", '\u{E562}', 1.292, -0.324, 2.104),
+    ("note16thUp", '\u{E1D7}', 2.324, -0.552, 3.492),
+    ("note32ndUp", '\u{E1D9}', 2.252, -0.552, 4.092),
 ];
 
 /// A glyph by SMuFL name: (char, width, bottom, top) — y up, in staff spaces.
