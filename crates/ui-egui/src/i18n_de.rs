@@ -6,6 +6,7 @@ pub const DE: &[(&str, &str)] = &[
         "    Systeme, die das neue Instrument nicht hat, werden zu zusätzlichen Stimmen.",
     ),
     (" (on the server)", " (auf dem Server)"),
+    (" and {} more", " und {} weitere"),
     (" semitones", " Halbtöne"),
     ("(by instrument)", "(nach Instrument)"),
     ("(remove the change)", "(Wechsel entfernen)"),
@@ -262,6 +263,11 @@ pub const DE: &[(&str, &str)] = &[
     ("Down mordent", "Mordent von unten"),
     ("Down prall", "Pralltriller von unten"),
     ("Download \"{}\"…", "„{}“ herunterladen…"),
+    (
+        "Download one instrument with its ⤓ button, or tick several and download the selection.",
+        "Ein Instrument lädst du mit seinem ⤓-Knopf; für mehrere kreuze sie an und lade die Auswahl.",
+    ),
+    ("Download only \"{}\"…", "Nur „{}“ herunterladen…"),
     ("Download selected ({})…", "Auswahl herunterladen ({})…"),
     (
         "Download the whole library ({} instruments)…",
@@ -828,6 +834,10 @@ pub const DE: &[(&str, &str)] = &[
     ("Text style", "Textstil"),
     ("Text styles", "Textstile"),
     ("Texts", "Texte"),
+    (
+        "That is the whole library: {}.",
+        "Das ist die ganze Bibliothek: {}.",
+    ),
     (
         "The author asks that nobody links directly to his download files: link to his website or keep your own copy.",
         "Der Autor bittet, nicht direkt auf seine Download-Dateien zu verlinken: Verlinke seine Webseite oder behalte eine eigene Kopie.",

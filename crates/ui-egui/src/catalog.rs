@@ -320,32 +320,27 @@ fn instruments(
         .copied()
         .filter(|i| st.chosen.contains(i) && obtainable(app, lib, i))
         .collect();
-    ui.horizontal_wrapped(|ui| {
+    ui.label(
+        RichText::new(t(
+            "Download one instrument with its ⤓ button, or tick several and download the selection.",
+        ))
+        .small()
+        .color(tk.text_dim),
+    );
+    if !chosen.is_empty() {
         let label = tf("Download selected ({})…", &[&chosen.len()]);
         if ui
-            .add_enabled(!chosen.is_empty() && !busy, egui::Button::new(label))
+            .add_enabled(!busy, egui::Button::new(RichText::new(label).strong()))
             .clicked()
         {
             st.confirm = Some(chosen.clone());
             st.accepted = false;
         }
-        let label = tf("Download the whole library ({} instruments)…", &[&missing.len()]);
-        if ui
-            .add_enabled(
-                !missing.is_empty() && !busy,
-                egui::Button::new(RichText::new(label).strong()),
-            )
-            .on_hover_text(tf("Everything not loaded yet · {}", &[&t(lib.size)]))
-            .clicked()
-        {
-            st.confirm = Some(missing.clone());
-            st.accepted = false;
-        }
-    });
+    }
     ui.add_space(2.0);
     egui::ScrollArea::vertical()
         .id_salt("catalog-instruments")
-        .max_height(200.0)
+        .max_height(260.0)
         .show(ui, |ui| {
             ui.set_min_width(320.0);
             for inst in &shown {
@@ -359,7 +354,21 @@ fn instruments(
                     label.push_str(t(" (on the server)"));
                 }
                 let mut on = st.chosen.contains(inst);
-                let r = ui.checkbox(&mut on, label);
+                let r = ui
+                    .horizontal(|ui| {
+                        let get = ui
+                            .add_enabled(
+                                !busy && obtainable(app, lib, inst),
+                                egui::Button::new("⤓").small(),
+                            )
+                            .on_hover_text(tf("Download only \"{}\"…", &[&catalog::instrument_name(inst)]));
+                        if get.clicked() {
+                            st.confirm = Some(vec![*inst]);
+                            st.accepted = false;
+                        }
+                        ui.checkbox(&mut on, label)
+                    })
+                    .inner;
                 let r = if inst.contains('/') {
                     r.on_hover_text(*inst)
                 } else {
@@ -374,6 +383,21 @@ fn instruments(
                 }
             }
         });
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        let label = tf("Download the whole library ({} instruments)…", &[&missing.len()]);
+        if ui
+            .add_enabled(
+                !missing.is_empty() && !busy,
+                egui::Button::new(RichText::new(label).small()),
+            )
+            .on_hover_text(tf("Everything not loaded yet · {}", &[&t(lib.size)]))
+            .clicked()
+        {
+            st.confirm = Some(missing.clone());
+            st.accepted = false;
+        }
+    });
     if chosen.iter().any(|i| installed(app, lib, i)) {
         ui.label(
             RichText::new(t(
@@ -416,10 +440,33 @@ fn confirm(
                 "You are about to download \"{}\" ({}).",
                 &[&catalog::instrument_name(one), &lib.name],
             )),
-            _ => ui.label(tf(
-                "You are about to download {} instruments of {}, one after the other.",
-                &[&insts.len(), &lib.name],
-            )),
+            _ => {
+                let r = ui.label(
+                    RichText::new(tf(
+                        "You are about to download {} instruments of {}, one after the other.",
+                        &[&insts.len(), &lib.name],
+                    ))
+                    .strong(),
+                );
+                let names: Vec<&str> = insts
+                    .iter()
+                    .take(6)
+                    .map(|i| catalog::instrument_name(i))
+                    .collect();
+                let more = insts.len().saturating_sub(names.len());
+                let mut list = names.join(", ");
+                if more > 0 {
+                    list.push_str(&tf(" and {} more", &[&more]));
+                }
+                ui.label(RichText::new(list).color(tk.text_dim));
+                if insts.len() == lib.instruments.len() || insts.len() > 20 {
+                    ui.label(
+                        RichText::new(tf("That is the whole library: {}.", &[&t(lib.size)]))
+                            .color(ui.visuals().warn_fg_color),
+                    );
+                }
+                r
+            }
         };
         egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
             licence_box(ui, lib, tk);
