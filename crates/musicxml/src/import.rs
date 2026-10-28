@@ -8,7 +8,7 @@ use scoreart_model::{
     Anchor, Arpeggio, Articulation, Barline, Clef, Duration, Dynamic, Event, EventKind, Grace,
     InstrumentChange, Jump, KeySig, MeasureInfo, Meta, Note, NoteHead, NoteValue, PageFormat, Part,
     PartMeasure, PartSound, Pitch, Placement, PlaybackStyle, Score, Spanner, SpannerKind, StaffMeasure, Step,
-    TPQ, Tempo, TimeSig, TimeSymbol, Tremolo, Tuplet, Voice, clip, limits,
+    TPQ, Tempo, TextSettings, TimeSig, TimeSymbol, Tremolo, Tuplet, Voice, clip, limits,
 };
 
 use crate::Error;
@@ -73,6 +73,7 @@ pub fn read(root: &Element) -> Result<Score, Error> {
         playback: read_playback(root),
         ..Score::default()
     };
+    read_texts(root, &mut score);
 
     // Part list: names and MIDI programs.
     let mut infos: Vec<(String, String, String, u8, PartSound)> = Vec::new();
@@ -324,6 +325,20 @@ fn read_playback(root: &Element) -> PlaybackStyle {
         }
     }
     p
+}
+
+/// ScoreArt's text styles and blocks, kept as one miscellaneous field.
+fn read_texts(root: &Element, score: &mut Score) {
+    let Some(misc) = root.path(&["identification", "miscellaneous"]) else {
+        return;
+    };
+    for f in misc.children_named("miscellaneous-field") {
+        if f.attr("name") == Some("scoreart-text")
+            && let Ok(t) = serde_json::from_str::<TextSettings>(f.text.trim())
+        {
+            t.apply(score);
+        }
+    }
 }
 
 fn read_meta(root: &Element) -> Meta {

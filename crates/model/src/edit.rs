@@ -300,6 +300,12 @@ impl Score {
                 }
             }
         }
+        // Headings and texts stay with their music.
+        for b in &mut self.blocks {
+            if b.measure >= at && !appending {
+                b.measure += count;
+            }
+        }
         for _ in 0..count {
             self.measures.insert(at, MeasureInfo::default());
             for p in &mut self.parts {
@@ -355,6 +361,13 @@ impl Score {
                     measure: at.saturating_sub(1),
                     tick: u32::MAX,
                 };
+            }
+        }
+        for b in &mut self.blocks {
+            if b.measure >= end {
+                b.measure -= removed;
+            } else if b.measure >= at {
+                b.measure = at;
             }
         }
         self.measures.drain(at..end);

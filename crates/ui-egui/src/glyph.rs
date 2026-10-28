@@ -6,6 +6,8 @@ use std::sync::Arc;
 use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId, Painter, Pos2};
 
 pub const FAMILY: &str = "bravura";
+/// The serif text font of the score (Crimson Text).
+pub const SERIF: &str = "serif";
 
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
@@ -21,6 +23,20 @@ pub fn install_fonts(ctx: &egui::Context) {
     for family in [FontFamily::Proportional, FontFamily::Monospace] {
         fonts.families.entry(family).or_default().push(FAMILY.into());
     }
+    // Score texts in the serif: Crimson Text first, egui's fonts and Bravura for anything it lacks.
+    fonts.font_data.insert(
+        SERIF.into(),
+        Arc::new(FontData::from_static(scoreart_render::SERIF)),
+    );
+    let mut serif = vec![SERIF.to_string()];
+    serif.extend(
+        fonts
+            .families
+            .get(&FontFamily::Proportional)
+            .cloned()
+            .unwrap_or_default(),
+    );
+    fonts.families.insert(FontFamily::Name(SERIF.into()), serif);
     ctx.set_fonts(fonts);
 }
 

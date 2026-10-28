@@ -63,6 +63,12 @@ pub enum Ico {
     Collapse,
     Expand,
     Reset,
+    Fonts,
+    Heading,
+    TextBlock,
+    Header,
+    Footer,
+    PageNumber,
 }
 
 /// Paints `ico` centred in `rect`, scaled to the smaller side.
@@ -448,6 +454,36 @@ pub fn paint(p: &Painter, rect: Rect, ico: Ico, color: Color32) {
         Ico::Reset => {
             arc(12.0, 12.0, 7.5, -PI * 0.2, PI * 1.5);
             fill(&[(12.0, 1.5), (16.5, 4.5), (12.0, 7.5)]);
+        }
+        Ico::Fonts => {
+            // A big serif A and a small a.
+            line(&[(2.5, 20.0), (8.5, 4.0), (14.5, 20.0)]);
+            line(&[(5.0, 14.5), (12.0, 14.5)]);
+            circle(18.5, 16.8, 3.2);
+            line(&[(21.7, 13.0), (21.7, 20.0)]);
+        }
+        Ico::Heading => {
+            line(&[(4.0, 3.0), (4.0, 13.0)]);
+            line(&[(12.0, 3.0), (12.0, 13.0)]);
+            line(&[(4.0, 8.0), (12.0, 8.0)]);
+            line(&[(4.0, 17.0), (20.0, 17.0)]);
+            line(&[(4.0, 21.0), (16.0, 21.0)]);
+        }
+        Ico::TextBlock => {
+            for (y, x1) in [(5.0, 20.0), (9.5, 20.0), (14.0, 20.0), (18.5, 13.0)] {
+                line(&[(4.0, y), (x1, y)]);
+            }
+        }
+        Ico::Header | Ico::Footer | Ico::PageNumber => {
+            rect_s(5.0, 2.5, 14.0, 19.0);
+            match ico {
+                Ico::Header => rect_f(7.5, 5.0, 9.0, 2.6),
+                Ico::Footer => rect_f(7.5, 16.4, 9.0, 2.6),
+                _ => text(14.5, 7.0, "2", 7.5),
+            }
+            for y in [10.0, 12.5] {
+                line(&[(8.0, y), (16.0, y)]);
+            }
         }
     }
 }

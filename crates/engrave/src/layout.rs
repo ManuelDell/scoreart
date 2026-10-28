@@ -2,11 +2,13 @@ use std::collections::{BTreeSet, HashMap};
 
 use scoreart_model::edit::EventRef;
 use scoreart_model::{
-    Accidental, Barline, Clef, Event, KeySig, NoteValue, Pitch, Score, SpannerKind, TPQ, TimeSig, TimeSymbol,
+    Accidental, Barline, Clef, Event, KeySig, NoteValue, Pitch, Score, SpannerKind, TPQ, TextKind,
+    TextStyles, TimeSig, TimeSymbol,
 };
 
 use crate::glyphs as g;
 use crate::{Align, Hit, Item, Layout, Page, Shape, StaffBox, Style, Target, View};
+use scoreart_model::BlockRef;
 
 /// Key into the accidental table: (part, staff, measure, voice, event, note).
 type NoteKey = (usize, usize, usize, usize, usize, usize);
@@ -32,7 +34,6 @@ impl MeasurePlan {
 
 const PAD_LEFT: f32 = 1.2;
 const STEM_LEN: f32 = 3.5;
-const TITLE_SIZE: f32 = 4.4;
 const NAME_SIZE: f32 = 1.9;
 const LYRIC_SIZE: f32 = 1.8;
 /// Distance between the lines of different verses.
@@ -354,7 +355,7 @@ fn name_indent(score: &Score, first: bool) -> f32 {
             if !first && shown_parts(score) < 2 {
                 0.0
             } else {
-                text_width(name, NAME_SIZE)
+                text_width(name, Fonts::of(score).size(TextKind::InstrumentName, NAME_SIZE))
             }
         })
         .fold(0.0f32, f32::max);
@@ -489,10 +490,54 @@ fn key_positions(clef: Clef, sharps: bool) -> [f32; 7] {
     out
 }
 
+/// The score's text styles, applied to every text that is not a note.
+#[derive(Clone, Copy)]
+struct Fonts<'a> {
+    styles: &'a TextStyles,
+    offsets: &'a scoreart_model::text::BlockOffsets,
+    blocks: &'a [scoreart_model::TextBlock],
+    /// Staff space in mm (text sizes are points, independent of the staff size).
+    space: f32,
+}
+
+impl<'a> Fonts<'a> {
+    fn of(score: &'a Score) -> Fonts<'a> {
+        Fonts {
+            styles: &score.text_styles,
+            offsets: &score.block_offsets,
+            blocks: &score.blocks,
+            space: score.page.clamped().staff_space_mm,
+        }
+    }
+
+    /// The size in sp of a text of `kind` that ScoreArt draws `nominal` sp big by default.
+    fn size(&self, kind: TextKind, nominal: f32) -> f32 {
+        let st = self.styles.get(kind);
+        let base = kind.default_style().size_sp(1.75);
+        (nominal * st.size_sp(self.space) / base).clamp(0.3, 60.0)
+    }
+
+    fn shape(&self, kind: TextKind, text: &str, x: f32, y: f32, nominal: f32, align: Align) -> Shape {
+        let st = self.styles.get(kind);
+        Shape::Text {
+            text: text.to_string(),
+            x,
+            y,
+            size: self.size(kind, nominal),
+            align,
+            bold: st.bold,
+            italic: st.italic,
+            serif: st.font == scoreart_model::TextFont::Serif,
+            kind: Some(kind),
+        }
+    }
+}
+
 struct Out<'a> {
     page: &'a mut Page,
     page_index: usize,
     hits: &'a mut Vec<Hit>,
+    f: Fonts<'a>,
 }
 
 impl Out<'_> {
@@ -527,9 +572,23 @@ impl Out<'_> {
                 align,
                 bold,
                 italic,
+                serif: false,
+                kind: None,
             },
             None,
         );
+    }
+    /// A styled text; returns its size in sp.
+    fn styled(&mut self, kind: TextKind, text: &str, x: f32, y: f32, nominal: f32, align: Align) -> f32 {
+        let sh = self.f.shape(kind, text, x, y, nominal, align);
+        let size = match &sh {
+            Shape::Text { size, .. } => *size,
+            _ => nominal,
+        };
+        if !text.is_empty() {
+            self.push(sh, None);
+        }
+        size
     }
     fn hit(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, target: Target) {
         self.hits.push(Hit {
@@ -682,6 +741,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
     };
     let endless = style.view != View::Page;
 
+    let fonts = Fonts::of(score);
     let mut out = Layout::default();
     let mut ctx = Ctx {
         score,
@@ -705,26 +765,65 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             page: &mut page,
             page_index,
             hits: &mut out.hits,
+            f: fonts,
         };
+        let frame = Frame { ml, mr, pw };
+        let fixed = |k: TextKind| BlockRef::Fixed(k);
         if !meta.title.is_empty() {
-            y += TITLE_SIZE;
-            o.text(&meta.title, pw / 2.0, y, TITLE_SIZE, Align::Center, false, false);
-            y += 1.0;
+            y += draw_block(
+                &mut o,
+                &frame,
+                TextKind::Title,
+                &meta.title,
+                y,
+                fixed(TextKind::Title),
+            ) + 0.6;
         }
         if !meta.subtitle.is_empty() {
-            y += 2.4;
-            o.text(&meta.subtitle, pw / 2.0, y, 2.4, Align::Center, false, false);
-            y += 0.6;
+            y += draw_block(
+                &mut o,
+                &frame,
+                TextKind::Subtitle,
+                &meta.subtitle,
+                y,
+                fixed(TextKind::Subtitle),
+            ) + 0.4;
         }
         if !meta.composer.is_empty() || !meta.lyricist.is_empty() {
-            y += 2.2;
-            o.text(&meta.composer, pw - mr, y, 1.9, Align::Right, false, false);
-            o.text(&meta.lyricist, ml, y, 1.9, Align::Left, false, false);
+            let c = draw_block(
+                &mut o,
+                &frame,
+                TextKind::Composer,
+                &meta.composer,
+                y,
+                fixed(TextKind::Composer),
+            );
+            let l = draw_block(
+                &mut o,
+                &frame,
+                TextKind::Lyricist,
+                &meta.lyricist,
+                y,
+                fixed(TextKind::Lyricist),
+            );
             // Keep rehearsal marks and tempo above the first system clear of this line.
-            y += 1.5;
+            y += c.max(l) + 1.0;
         }
         if y > mt {
             y += 3.0;
+        }
+        if !endless && !meta.copyright.is_empty() {
+            // At the foot of the first page, in the bottom margin.
+            let h = block_height(&o.f, &frame, TextKind::Copyright, &meta.copyright);
+            let at = (ph - mb + 1.0).min(ph - h - 0.5).max(ph - mb - h);
+            draw_block(
+                &mut o,
+                &frame,
+                TextKind::Copyright,
+                &meta.copyright,
+                at,
+                fixed(TextKind::Copyright),
+            );
         }
     }
 
@@ -788,6 +887,26 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             }
         }
         let sys_h = (sy - style.part_gap).max(4.0);
+        // Headings and text blocks above this system.
+        let frame = Frame { ml, mr, pw };
+        let above: Vec<(usize, &scoreart_model::TextBlock)> = if style.view == View::Horizontal {
+            Vec::new()
+        } else {
+            score
+                .blocks
+                .iter()
+                .enumerate()
+                .filter(|(_, b)| matches!(b.kind, TextKind::Heading | TextKind::Text))
+                .filter(|(_, b)| {
+                    sys.measures.contains(&b.measure)
+                        || (si == 0 && sys.measures.first().is_some_and(|f| b.measure < *f))
+                })
+                .collect()
+        };
+        let blocks_h: f32 = above
+            .iter()
+            .map(|(_, b)| block_height(&fonts, &frame, b.kind, &b.text) + BLOCK_GAP)
+            .sum();
         // A page break set by the user after the previous system's last measure.
         let forced = si > 0
             && systems
@@ -795,7 +914,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                 .and_then(|p| p.measures.last())
                 .and_then(|m| score.measures.get(*m))
                 .is_some_and(|i| i.page_break);
-        if !endless && (y + sys_h > ph - mb || forced) && !page.items.is_empty() && si > 0 {
+        if !endless && (y + blocks_h + sys_h > ph - mb || forced) && !page.items.is_empty() && si > 0 {
             out.pages.push(std::mem::take(&mut page));
             page = Page {
                 width: pw,
@@ -808,17 +927,21 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                 page: &mut page,
                 page_index,
                 hits: &mut out.hits,
+                f: fonts,
             };
-            o.text(
-                &(page_index + 1).to_string(),
-                pw - mr,
-                mt - 1.5,
-                1.6,
-                Align::Right,
-                false,
-                false,
-            );
+            page_furniture(&mut o, score, &frame, mt, ph, mb);
             y += 1.0;
+        }
+        if !above.is_empty() {
+            let mut o = Out {
+                page: &mut page,
+                page_index,
+                hits: &mut out.hits,
+                f: fonts,
+            };
+            for (i, b) in &above {
+                y += draw_block(&mut o, &frame, b.kind, &b.text, y, BlockRef::Added(*i)) + BLOCK_GAP;
+            }
         }
         let top = y;
         draw_system(
@@ -837,6 +960,138 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
     draw_spanners(&ctx, &mut out, &mut page, page_index);
     out.pages.push(page);
     out
+}
+
+/// Space between a heading or text block and what follows, sp.
+const BLOCK_GAP: f32 = 1.2;
+
+/// The horizontal frame of a page: margins and width, sp.
+struct Frame {
+    ml: f32,
+    mr: f32,
+    pw: f32,
+}
+
+impl Frame {
+    fn width(&self) -> f32 {
+        (self.pw - self.ml - self.mr).max(4.0)
+    }
+}
+
+/// The lines of a block's text, broken at newlines and wrapped to the page width.
+fn block_lines(text: &str, size: f32, width: f32) -> Vec<String> {
+    let mut out = Vec::new();
+    for para in text.lines() {
+        let mut line = String::new();
+        for word in para.split_whitespace() {
+            let next = if line.is_empty() {
+                word.to_string()
+            } else {
+                format!("{line} {word}")
+            };
+            if !line.is_empty() && text_width(&next, size) > width {
+                out.push(std::mem::replace(&mut line, word.to_string()));
+            } else {
+                line = next;
+            }
+        }
+        out.push(line);
+    }
+    out
+}
+
+fn line_height(size: f32) -> f32 {
+    size * 1.25
+}
+
+/// Height of a block (its lines) in sp.
+fn block_height(f: &Fonts, frame: &Frame, kind: TextKind, text: &str) -> f32 {
+    if text.trim().is_empty() {
+        return 0.0;
+    }
+    let size = f.size(kind, kind.default_style().size_sp(1.75));
+    let n = block_lines(text, size, frame.width()).len().max(1) as f32;
+    size + (n - 1.0) * line_height(size) + size * 0.25
+}
+
+/// Draws a block of the page with its top at `y`, aligned by its style and moved by its
+/// offset; returns its height. Its box can be picked up and moved.
+fn draw_block(o: &mut Out, frame: &Frame, kind: TextKind, text: &str, y: f32, block: BlockRef) -> f32 {
+    let h = block_height(&o.f, frame, kind, text);
+    if h <= 0.0 {
+        return 0.0;
+    }
+    let score_offset = match block {
+        BlockRef::Fixed(k) => o.f.offsets.get(&k).copied().unwrap_or_default(),
+        BlockRef::Added(i) => o.f.blocks.get(i).map_or((0, 0), |b| (b.dx, b.dy)),
+    };
+    let (dx, dy) = (f32::from(score_offset.0) / 10.0, f32::from(score_offset.1) / 10.0);
+    let st = o.f.styles.get(kind);
+    let size = o.f.size(kind, kind.default_style().size_sp(1.75));
+    let (x, align) = match st.align {
+        scoreart_model::TextAlign::Left => (frame.ml, Align::Left),
+        scoreart_model::TextAlign::Center => (frame.pw / 2.0, Align::Center),
+        scoreart_model::TextAlign::Right => (frame.pw - frame.mr, Align::Right),
+    };
+    let (x, top) = (x + dx, y + dy);
+    let lines = block_lines(text, size, frame.width());
+    let mut by = top + size;
+    let (mut x0, mut x1) = (f32::MAX, f32::MIN);
+    for l in &lines {
+        let sh = o.f.shape(kind, l, x, by, size, align);
+        let w = text_width(l, size);
+        let lx = match align {
+            Align::Left => x,
+            Align::Center => x - w / 2.0,
+            Align::Right => x - w,
+        };
+        x0 = x0.min(lx);
+        x1 = x1.max(lx + w);
+        if !l.is_empty() {
+            o.push(sh, None);
+        }
+        by += line_height(size);
+    }
+    if x1 > x0 {
+        o.hit(x0 - 0.3, top - 0.2, x1 + 0.3, top + h, Target::Block { block });
+    }
+    h
+}
+
+/// Page number, header and footer of every page after the first.
+fn page_furniture(o: &mut Out, score: &Score, frame: &Frame, mt: f32, ph: f32, mb: f32) {
+    let fixed = BlockRef::Fixed(TextKind::PageNumber);
+    if !score.hide_page_numbers {
+        let n = (o.page_index + 1).to_string();
+        let h = block_height(&o.f, frame, TextKind::PageNumber, &n);
+        draw_block(o, frame, TextKind::PageNumber, &n, (mt - 1.2 - h).max(0.3), fixed);
+    }
+    for (i, b) in score.blocks.iter().enumerate() {
+        let h = block_height(&o.f, frame, b.kind, &b.text);
+        match b.kind {
+            TextKind::Header => {
+                draw_block(
+                    o,
+                    frame,
+                    b.kind,
+                    &b.text,
+                    (mt - 1.2 - h).max(0.3),
+                    BlockRef::Added(i),
+                );
+            }
+            TextKind::Footer => {
+                draw_block(
+                    o,
+                    frame,
+                    b.kind,
+                    &b.text,
+                    (ph - mb + 1.0).min(ph - h - 0.3),
+                    BlockRef::Added(i),
+                );
+            }
+            _ => {}
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -862,6 +1117,7 @@ fn draw_system(
         page,
         page_index,
         hits: &mut out.hits,
+        f: Fonts::of(score),
     };
 
     // Staff lines.
@@ -904,14 +1160,13 @@ fn draw_system(
         let name = if si == 0 { &part.name } else { &part.abbreviation };
         if si == 0 || shown_parts(score) > 1 {
             let nx = x_start - if multi { 3.0 } else { 1.0 } - if ensemble { 1.4 } else { 0.0 };
-            o.text(
+            o.styled(
+                TextKind::InstrumentName,
                 name,
                 nx,
                 (pt + pb) / 2.0 + 0.7,
                 NAME_SIZE,
                 Align::Right,
-                false,
-                false,
             );
         }
     }
@@ -947,14 +1202,13 @@ fn draw_system(
 
     // Measure number at the start of every system but the first.
     if first_m > 0 {
-        o.text(
+        o.styled(
+            TextKind::MeasureNumber,
             &score.measure_number(first_m).to_string(),
             x_start,
             sys_top - 2.0,
             1.4,
             Align::Left,
-            false,
-            true,
         );
     }
 
@@ -1042,7 +1296,9 @@ fn draw_system(
             if let Some(r) = &info.rehearsal {
                 // Boxed rehearsal mark: above the barline; at the start of a system above the
                 // clef; below the staff when moved there; plus the user's offset.
-                let w = text_width(r, 2.2) + 1.0;
+                let rs = o.f.size(TextKind::Rehearsal, 2.2);
+                let bh = rs + 0.4;
+                let w = text_width(r, rs) + 1.0;
                 let staff_top = top + t0;
                 let place = info.rehearsal_place.unwrap_or_default();
                 let (mut bx0, mut by1) = if place.below {
@@ -1056,12 +1312,19 @@ fn draw_system(
                 };
                 bx0 += place.dx_sp();
                 by1 += place.dy_sp();
-                o.text(r, bx0 + w / 2.0, by1 - 0.6, 2.2, Align::Center, true, false);
+                o.styled(
+                    TextKind::Rehearsal,
+                    r,
+                    bx0 + w / 2.0,
+                    by1 - 0.6 * bh / 2.6,
+                    2.2,
+                    Align::Center,
+                );
                 for (a, b, c, d2) in [
                     (bx0, by1, bx0 + w, by1),
-                    (bx0, by1 - 2.6, bx0 + w, by1 - 2.6),
-                    (bx0, by1, bx0, by1 - 2.6),
-                    (bx0 + w, by1, bx0 + w, by1 - 2.6),
+                    (bx0, by1 - bh, bx0 + w, by1 - bh),
+                    (bx0, by1, bx0, by1 - bh),
+                    (bx0 + w, by1, bx0 + w, by1 - bh),
                 ] {
                     o.line(a, b, c, d2, 0.16, None);
                 }
@@ -1081,8 +1344,8 @@ fn draw_system(
                 }
             }
             if let Some(tt) = &info.tempo_text {
-                o.text(tt, tx, ty, 2.0, Align::Left, true, false);
-                tx += text_width(tt, 2.0) + 0.8;
+                let ts = o.styled(TextKind::Tempo, tt, tx, ty, 2.0, Align::Left);
+                tx += text_width(tt, ts) + 0.8;
             }
             let mut end_x = m_end - 0.3;
             for j in info.jumps.iter().filter(|j| j.at_end()) {
@@ -1093,8 +1356,8 @@ fn draw_system(
                         o.glyph(c, end_x - w, ty + lo, None);
                         end_x -= w + 0.5;
                     }
-                    o.text(t, end_x, ty, 1.9, Align::Right, true, true);
-                    end_x -= text_width(t, 1.9) + 1.0;
+                    let ts = o.styled(TextKind::SystemText, t, end_x, ty, 1.9, Align::Right);
+                    end_x -= text_width(t, ts) + 1.0;
                 }
             }
             if let Some(tempo) = info.tempo {
@@ -1107,19 +1370,12 @@ fn draw_system(
                     },
                     None,
                 );
-                o.text(
-                    &format!("= {}", tempo.bpm),
-                    tx + 1.4,
-                    ty,
-                    1.9,
-                    Align::Left,
-                    true,
-                    false,
-                );
-                tx += 7.0;
+                let label = format!("= {}", tempo.bpm);
+                let ts = o.styled(TextKind::Tempo, &label, tx + 1.4, ty, 1.9, Align::Left);
+                tx += (1.4 + text_width(&label, ts) + 1.0).max(7.0);
             }
             if let Some(text) = &info.text {
-                o.text(text, tx, ty, 1.9, Align::Left, true, false);
+                o.styled(TextKind::SystemText, text, tx, ty, 1.9, Align::Left);
             }
         }
 
@@ -1134,14 +1390,13 @@ fn draw_system(
                     .and_then(|p| p.measures.get(m))
                     .and_then(|pm| pm.instrument_change.as_ref())
             {
-                o.text(
+                o.styled(
+                    TextKind::StaffText,
                     &format!("To {}", ch.name),
                     m_start + 0.6,
                     staff_top - 2.6,
                     1.8,
                     Align::Left,
-                    false,
-                    true,
                 );
             }
             out_staff_box(
@@ -2010,19 +2265,10 @@ fn out_staff_box(
             for (ni, n) in notes.iter().enumerate().rev() {
                 if let Some(f) = &n.fingering {
                     let hx = gg.heads.get(ni).map(|h| h.2).unwrap_or(gg.x);
-                    o.push(
-                        Shape::Text {
-                            text: f.clone(),
-                            x: hx + head_w / 2.0,
-                            y: fy,
-                            size: 1.6,
-                            align: Align::Center,
-                            bold: false,
-                            italic: false,
-                        },
-                        Some(ev),
-                    );
-                    fy -= 1.4;
+                    let sh =
+                        o.f.shape(TextKind::Fingering, f, hx + head_w / 2.0, fy, 1.6, Align::Center);
+                    o.push(sh, Some(ev));
+                    fy -= o.f.size(TextKind::Fingering, 1.4);
                 }
             }
             for a in e
@@ -2113,18 +2359,9 @@ fn out_staff_box(
             if let Some(cs) = &e.chord_symbol {
                 // All chord symbols of the measure sit on one line.
                 let y = chord_row;
-                o.push(
-                    Shape::Text {
-                        text: chord_text(cs),
-                        x: gg.x,
-                        y,
-                        size: 2.2,
-                        align: Align::Left,
-                        bold: true,
-                        italic: false,
-                    },
-                    Some(gg.ev),
-                );
+                let sh =
+                    o.f.shape(TextKind::ChordSymbol, &chord_text(cs), gg.x, y, 2.2, Align::Left);
+                o.push(sh, Some(gg.ev));
             }
             if let Some(t) = &e.text {
                 let reach = anchors
@@ -2154,18 +2391,8 @@ fn out_staff_box(
                     y + 0.5,
                     Target::Text { ev: gg.ev },
                 );
-                o.push(
-                    Shape::Text {
-                        text: t.clone(),
-                        x: text_x,
-                        y,
-                        size: 1.9,
-                        align: Align::Left,
-                        bold: false,
-                        italic: true,
-                    },
-                    Some(gg.ev),
-                );
+                let sh = o.f.shape(TextKind::StaffText, t, text_x, y, 1.9, Align::Left);
+                o.push(sh, Some(gg.ev));
             }
             for (verse, l) in e.lyrics.iter().enumerate().filter(|(_, l)| !l.is_empty()) {
                 let y = d.top + 4.0 + 5.6 + LYRIC_LINE * verse as f32;
@@ -2175,30 +2402,20 @@ fn out_staff_box(
                     let left = from;
                     let right = cx - syllable_width(l) / 2.0;
                     if right - left > 0.6 {
-                        o.text(
+                        o.styled(
+                            TextKind::Lyrics,
                             "-",
                             (left + right) / 2.0,
                             py,
                             LYRIC_SIZE,
                             Align::Center,
-                            false,
-                            false,
                         );
                     }
                 }
                 let text = l.strip_suffix('-').filter(|t| !t.is_empty()).unwrap_or(l);
-                o.push(
-                    Shape::Text {
-                        text: text.to_string(),
-                        x: cx,
-                        y,
-                        size: LYRIC_SIZE,
-                        align: Align::Center,
-                        bold: false,
-                        italic: false,
-                    },
-                    Some(gg.ev),
-                );
+                let sh =
+                    o.f.shape(TextKind::Lyrics, text, cx, y, LYRIC_SIZE, Align::Center);
+                o.push(sh, Some(gg.ev));
                 if l.ends_with('-') && text.len() < l.len() {
                     if hyphen_from.len() <= verse {
                         hyphen_from.resize(verse + 1, None);
@@ -2211,7 +2428,7 @@ fn out_staff_box(
         }
         // Hyphens whose next syllable is in a later measure: right after the syllable.
         for (from, y) in hyphen_from.into_iter().flatten() {
-            o.text("-", from + 1.0, y, LYRIC_SIZE, Align::Center, false, false);
+            o.styled(TextKind::Lyrics, "-", from + 1.0, y, LYRIC_SIZE, Align::Center);
         }
         let _ = d.x1;
     }
@@ -2812,17 +3029,11 @@ fn draw_spanners(ctx: &Ctx, out: &mut Layout, last_page: &mut Page, last_index: 
                     if s.first {
                         local.push((
                             s.page,
-                            Shape::Text {
-                                text: word.into(),
-                                x: a.x_left,
-                                y,
-                                size: 1.9,
-                                align: Align::Left,
-                                bold: false,
-                                italic: true,
-                            },
+                            Fonts::of(score).shape(TextKind::StaffText, word, a.x_left, y, 1.9, Align::Left),
                         ));
-                        x0 = a.x_left + text_width(word, 1.9) + 0.4;
+                        x0 = a.x_left
+                            + text_width(word, Fonts::of(score).size(TextKind::StaffText, 1.9))
+                            + 0.4;
                     }
                     dashed(
                         &mut local,
@@ -2982,17 +3193,11 @@ fn draw_spanners(ctx: &Ctx, out: &mut Layout, last_page: &mut Page, last_index: 
                     if s.first {
                         local.push((
                             s.page,
-                            Shape::Text {
-                                text: word.into(),
-                                x: a.x_left,
-                                y,
-                                size: 1.8,
-                                align: Align::Left,
-                                bold: false,
-                                italic: true,
-                            },
+                            Fonts::of(score).shape(TextKind::StaffText, word, a.x_left, y, 1.8, Align::Left),
                         ));
-                        x0 = a.x_left + text_width(word, 1.8) + 0.3;
+                        x0 = a.x_left
+                            + text_width(word, Fonts::of(score).size(TextKind::StaffText, 1.8))
+                            + 0.3;
                     }
                     let x1 = if s.last { b.x_right + 0.4 } else { s.x1 - 0.4 };
                     dashed(&mut local, s.page, x0, x1, y - 0.6);

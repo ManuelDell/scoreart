@@ -5,6 +5,7 @@ mod edit;
 mod marks;
 mod note;
 mod score;
+mod text;
 
 use std::sync::OnceLock;
 
@@ -68,6 +69,7 @@ pub fn registry() -> &'static [CommandSpec] {
         v.extend(note::commands());
         v.extend(marks::commands());
         v.extend(score::commands());
+        v.extend(text::commands());
         v
     })
 }

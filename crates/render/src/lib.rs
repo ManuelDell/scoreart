@@ -1,5 +1,5 @@
 //! Renders an engraved [`Layout`] page to SVG. Music glyphs are emitted as real outlines from the
-//! bundled Bravura font (OFL-1.1), so the SVG needs no font installed; text uses a serif font.
+//! bundled Bravura font (OFL-1.1), so the SVG needs no font installed; text uses Crimson Text (serif) or a sans-serif font, by style.
 #![deny(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -17,6 +17,10 @@ use scoreart_engrave::{Align, Layout, Page, Shape, Style};
 /// Bravura, the SMuFL reference font by Steinberg Media Technologies GmbH (SIL OFL 1.1),
 /// bundled unmodified. See `assets/fonts/OFL-Bravura.txt`.
 pub static BRAVURA: &[u8] = include_bytes!("../../../assets/fonts/Bravura.otf");
+
+/// Crimson Text by Sebastian Kosch (SIL OFL 1.1), the serif text font, bundled unmodified.
+/// See `assets/fonts/OFL-CrimsonText.txt`.
+pub static SERIF: &[u8] = include_bytes!("../../../assets/fonts/CrimsonText-Regular.ttf");
 
 struct PathBuilder {
     d: String,
@@ -182,6 +186,8 @@ pub fn page_svg(page: &Page, style: &Style) -> String {
                 align,
                 bold,
                 italic,
+                serif,
+                ..
             } => {
                 let anchor = match align {
                     Align::Left => "start",
@@ -190,10 +196,15 @@ pub fn page_svg(page: &Page, style: &Style) -> String {
                 };
                 let _ = writeln!(
                     body,
-                    "<text x=\"{}\" y=\"{}\" font-size=\"{}\" text-anchor=\"{anchor}\"{}{}>{}</text>",
+                    "<text x=\"{}\" y=\"{}\" font-size=\"{}\" text-anchor=\"{anchor}\" font-family=\"{}\"{}{}>{}</text>",
                     f(*x),
                     f(*y),
                     f(*size),
+                    if *serif {
+                        "Crimson Text, Georgia, serif"
+                    } else {
+                        "Helvetica, Arial, sans-serif"
+                    },
                     if *bold { " font-weight=\"bold\"" } else { "" },
                     if *italic { " font-style=\"italic\"" } else { "" },
                     esc(text)

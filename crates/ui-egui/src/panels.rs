@@ -184,6 +184,23 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         crate::page::open(app);
                         ui.close();
                     }
+                    if ui.button(t("Fonts…")).clicked() {
+                        crate::texts::open(app, scoreart_model::TextKind::Title);
+                        ui.close();
+                    }
+                    ui.menu_button(t("Add text"), |ui| {
+                        for k in [
+                            scoreart_model::TextKind::Heading,
+                            scoreart_model::TextKind::Text,
+                            scoreart_model::TextKind::Header,
+                            scoreart_model::TextKind::Footer,
+                        ] {
+                            if ui.button(crate::texts::kind_label(k)).clicked() {
+                                crate::texts::add_block(app, k);
+                                ui.close();
+                            }
+                        }
+                    });
                     ui.menu_button(t("Note spacing"), |ui| {
                         for (label, f) in [
                             (t("Tight"), 0.8),
@@ -1446,6 +1463,12 @@ pub fn dialogs(app: &mut ScoreApp, ctx: &egui::Context) {
                 });
             }
         }
+        Dialog::Block(d) => {
+            close = crate::texts::block_dialog(app, ctx, d);
+            if !close {
+                return;
+            }
+        }
         Dialog::Shortcuts => {
             let resp = egui::Modal::new(egui::Id::unique("shortcuts")).show(ctx, |ui| {
                 ui.set_width(460.0);
@@ -1472,7 +1495,9 @@ pub fn dialogs(app: &mut ScoreApp, ctx: &egui::Context) {
                 ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
                 ui.label(t("An open-source music notation editor written in Rust."));
                 ui.add_space(6.0);
-                ui.label(t("Licensed MIT OR Apache-2.0. Music font: Bravura by Steinberg Media Technologies GmbH, SIL Open Font License 1.1."));
+                ui.label(t(
+                    "Licensed MIT OR Apache-2.0. Music font: Bravura by Steinberg Media Technologies GmbH; text font: Crimson Text by Sebastian Kosch; both SIL Open Font License 1.1.",
+                ));
                 ui.label(t("MusicXML and SMuFL are specifications of the W3C Music Notation Community Group."));
                 ui.add_space(6.0);
                 ui.label(RichText::new(t("ScoreArt is independent and not affiliated with MuseScore / Muse Group or ArtCraft.")).small());

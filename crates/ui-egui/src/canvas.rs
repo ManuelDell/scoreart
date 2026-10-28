@@ -93,6 +93,29 @@ pub(crate) struct LineDrag {
     hit: scoreart_engrave::Hit,
 }
 
+/// A text block of the page (title, heading, header …) picked up with the hand.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BlockDrag {
+    block: scoreart_model::BlockRef,
+    page: usize,
+    grab: (f32, f32),
+    delta: (f32, f32),
+    hit: scoreart_engrave::Hit,
+}
+
+/// The box of a block on a page.
+fn block_box(
+    layout: &scoreart_engrave::Layout,
+    page: usize,
+    block: scoreart_model::BlockRef,
+) -> Option<scoreart_engrave::Hit> {
+    layout
+        .hits
+        .iter()
+        .copied()
+        .find(|h| h.page == page && h.target == Target::Block { block })
+}
+
 impl LineDrag {
     /// Pulling a hairpin's open end more up or down than sideways: changing its opening.
     fn spreading(&self) -> bool {
@@ -267,6 +290,99 @@ fn drop_tick(sb: &scoreart_engrave::StaffBox, x: f32, step: u32, len: u32) -> u3
     best.0
 }
 
+/// Paints one engraved shape; `map` turns page staff spaces into screen points.
+pub(crate) fn paint_shape(
+    painter: &egui::Painter,
+    shape: &Shape,
+    map: &dyn Fn(f32, f32) -> Pos2,
+    zoom: f32,
+    color: Color32,
+) {
+    match shape {
+        Shape::Glyph { c, x, y, scale } => glyph::paint(painter, *c, map(*x, *y), 4.0 * zoom * scale, color),
+        Shape::Line {
+            x1,
+            y1,
+            x2,
+            y2,
+            width,
+        } => {
+            painter.line_segment(
+                [map(*x1, *y1), map(*x2, *y2)],
+                Stroke::new((width * zoom).max(0.6), color),
+            );
+        }
+        Shape::Rect { x, y, w, h } => {
+            painter.rect_filled(
+                Rect::from_min_size(map(*x, *y), Vec2::new(w * zoom, h * zoom)),
+                0.0,
+                color,
+            );
+        }
+        Shape::Quad { p } => {
+            painter.add(EShape::convex_polygon(
+                p.iter().map(|(a, b)| map(*a, *b)).collect(),
+                color,
+                Stroke::NONE,
+            ));
+        }
+        Shape::Curve { p, thick } => {
+            painter.add(EShape::mesh(curve_mesh(*p, *thick, &map, color)));
+        }
+        Shape::Text {
+            text,
+            x,
+            y,
+            size,
+            align,
+            bold,
+            italic,
+            serif,
+            ..
+        } => {
+            let family = if *serif {
+                egui::FontFamily::Name(glyph::SERIF.into())
+            } else {
+                egui::FontFamily::Proportional
+            };
+            let font = egui::FontId::new((size * zoom).max(1.0), family);
+            let mut job = egui::text::LayoutJob::default();
+            job.append(
+                text,
+                0.0,
+                egui::TextFormat {
+                    font_id: font,
+                    color,
+                    italics: *italic,
+                    ..Default::default()
+                },
+            );
+            let galley = painter.layout_job(job);
+            let w = galley.size().x;
+            let baseline = galley
+                .rows
+                .first()
+                .and_then(|r| r.row.glyphs.first().map(|g| r.pos.y + g.pos.y))
+                .unwrap_or(0.0);
+            let pos = map(*x, *y);
+            let gx = match align {
+                Align::Left => pos.x,
+                Align::Center => pos.x - w / 2.0,
+                Align::Right => pos.x - w,
+            };
+            let gp = Pos2::new(gx, pos.y - baseline);
+            painter.galley(gp, galley.clone(), color);
+            if *bold {
+                painter.galley(
+                    gp + Vec2::new((size * zoom * 0.035).clamp(0.4, 2.0), 0.0),
+                    galley,
+                    color,
+                );
+            }
+        }
+    }
+}
+
 pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
     let zoom = app.zoom;
     let selected = app.session.selection;
@@ -365,6 +481,12 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                                 app.mark_drag = Some(MarkDrag { ev, text, page: pi, grab: (sx, sy), delta: (0.0, 0.0), hit });
                             }
                         }
+                        Some(Target::Block { block }) => {
+                            app.block_sel = Some(block);
+                            if let Some(hit) = block_box(&layout, pi, block) {
+                                app.block_drag = Some(BlockDrag { block, page: pi, grab: (sx, sy), delta: (0.0, 0.0), hit });
+                            }
+                        }
                         Some(Target::Line { index, first, last }) => {
                             if let Some(hit) = line_box(&layout, pi, sx, sy, index) {
                                 // Near an end of the line: that end moves; elsewhere the line.
@@ -392,6 +514,14 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     }
                 }
                 if let Some(d) = app.line_drag.as_mut()
+                    && d.page == pi
+                    && resp.dragged()
+                    && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
+                {
+                    let (sx, sy) = ((pos.x - origin.x) / zoom, (pos.y - origin.y) / zoom);
+                    d.delta = (sx - d.grab.0, sy - d.grab.1);
+                }
+                if let Some(d) = app.block_drag.as_mut()
                     && d.page == pi
                     && resp.dragged()
                     && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
@@ -430,7 +560,13 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     let target = layout.hit(pi, hx, hy);
                     let movable = matches!(
                         target,
-                        Some(Target::Note { .. } | Target::Text { .. } | Target::Dynamic { .. } | Target::Line { .. })
+                        Some(
+                            Target::Note { .. }
+                                | Target::Text { .. }
+                                | Target::Dynamic { .. }
+                                | Target::Line { .. }
+                                | Target::Block { .. }
+                        )
                     );
                     // At the end of a line: the end can be pulled sideways.
                     // Which end is under the pointer: Some(true) start, Some(false) end.
@@ -452,7 +588,11 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
                     } else if app.line_drag.is_some_and(|d| d.end.is_some()) {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-                    } else if app.mark_drag.is_some() || app.note_drag.is_some() || app.line_drag.is_some() {
+                    } else if app.mark_drag.is_some()
+                        || app.note_drag.is_some()
+                        || app.line_drag.is_some()
+                        || app.block_drag.is_some()
+                    {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                     } else if at_open {
                         // Sideways: the end moves; up or down: the hairpin opens or closes.
@@ -485,80 +625,7 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         _ => false,
                     };
                     let color = if sel { tk.accent } else { ink };
-                    match &it.shape {
-                        Shape::Glyph { c, x, y, scale } => {
-                            glyph::paint(&painter, *c, map(*x, *y), 4.0 * zoom * scale, color)
-                        }
-                        Shape::Line {
-                            x1,
-                            y1,
-                            x2,
-                            y2,
-                            width,
-                        } => {
-                            painter.line_segment(
-                                [map(*x1, *y1), map(*x2, *y2)],
-                                Stroke::new((width * zoom).max(0.6), color),
-                            );
-                        }
-                        Shape::Rect { x, y, w, h } => {
-                            painter.rect_filled(
-                                Rect::from_min_size(map(*x, *y), Vec2::new(w * zoom, h * zoom)),
-                                0.0,
-                                color,
-                            );
-                        }
-                        Shape::Quad { p } => {
-                            painter.add(EShape::convex_polygon(
-                                p.iter().map(|(a, b)| map(*a, *b)).collect(),
-                                color,
-                                Stroke::NONE,
-                            ));
-                        }
-                        Shape::Curve { p, thick } => {
-                            painter.add(EShape::mesh(curve_mesh(*p, *thick, &map, color)));
-                        }
-                        Shape::Text {
-                            text,
-                            x,
-                            y,
-                            size,
-                            align,
-                            bold,
-                            italic,
-                        } => {
-                            let font = egui::FontId::proportional((size * zoom).max(1.0));
-                            let mut job = egui::text::LayoutJob::default();
-                            job.append(
-                                text,
-                                0.0,
-                                egui::TextFormat {
-                                    font_id: font,
-                                    color,
-                                    italics: *italic,
-                                    ..Default::default()
-                                },
-                            );
-                            let galley = painter.layout_job(job);
-                            let w = galley.size().x;
-                            let baseline = galley
-                                .rows
-                                .first()
-                                .and_then(|r| r.row.glyphs.first().map(|g| r.pos.y + g.pos.y))
-                                .unwrap_or(0.0);
-                            let pos = map(*x, *y);
-                            let gx = match align {
-                                Align::Left => pos.x,
-                                Align::Center => pos.x - w / 2.0,
-                                Align::Right => pos.x - w,
-                            };
-                            let gp = Pos2::new(gx, pos.y - baseline);
-                            painter.galley(gp, galley.clone(), color);
-                            if *bold {
-                                painter.galley(gp + Vec2::new(0.6, 0.0), galley, color);
-                            }
-                        }
-                    }
+                    paint_shape(&painter, &it.shape, &map, zoom, color);
                 }
                 // Measure-range selection frame.
                 if let Some(Selection::Measures {
@@ -641,6 +708,18 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         }
                     }
                 }
+                // The picked text block, and where a dragged one would go.
+                if let Some(b) = app.block_sel
+                    && let Some(h) = block_box(&layout, pi, b)
+                {
+                    crate::texts::frame(&painter, Rect::from_min_max(map(h.x0, h.y0), map(h.x1, h.y1)), tk.accent);
+                }
+                if let Some(d) = app.block_drag.filter(|d| d.page == pi) {
+                    let h = d.hit;
+                    let r = Rect::from_min_max(map(h.x0 + d.delta.0, h.y0 + d.delta.1), map(h.x1 + d.delta.0, h.y1 + d.delta.1));
+                    painter.rect_filled(r, 3.0, tk.accent.linear_multiply(0.12));
+                    painter.rect_stroke(r, 3.0, Stroke::new(1.2, tk.accent), egui::StrokeKind::Outside);
+                }
                 // Where a dragged text or dynamic would go.
                 if let Some(d) = app.mark_drag.filter(|d| d.page == pi) {
                     let h = d.hit;
@@ -709,9 +788,21 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
     {
         drop_line(app, &layout, d);
     }
+    if resp_drag_stopped(ui)
+        && let Some(d) = app.block_drag.take()
+    {
+        crate::texts::move_block(app, d.block, d.delta);
+    }
 
     if let Some((page, x, y, shift, _cmd)) = click {
         handle_click(app, &layout, page, x, y, shift);
+    }
+    // Double-clicking a text block edits it.
+    if let Some((page, x, y)) = double
+        && !app.session.input.active
+        && let Some(Target::Block { block }) = layout.hit(page, x, y)
+    {
+        crate::texts::edit_block(app, block);
     }
     // Double-clicking a staff text edits it.
     if let Some((page, x, y)) = double
@@ -820,6 +911,7 @@ fn handle_click(
     y: f32,
     shift: bool,
 ) {
+    app.block_sel = None;
     let s = &mut app.session;
     if s.input.active {
         if let Some(sb) = layout.staff_box_at(page, x, y) {
@@ -862,6 +954,10 @@ fn handle_click(
             "select.event",
             &json!({ "part": ev.part, "staff": ev.staff, "voice": ev.voice, "measure": ev.measure, "index": ev.index, "extend": shift }),
         ),
+        Some(Target::Block { block }) => {
+            app.block_sel = Some(block);
+            return;
+        }
         Some(Target::Measure { part, staff, measure }) => {
             s.execute("select.measure", &json!({ "part": part, "staff": staff, "measure": measure, "extend": shift }))
         }

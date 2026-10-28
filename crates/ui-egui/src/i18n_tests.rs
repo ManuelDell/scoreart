@@ -17,6 +17,7 @@ const SOURCES: &[&str] = &[
     include_str!("playback.rs"),
     include_str!("side.rs"),
     include_str!("ribbon.rs"),
+    include_str!("texts.rs"),
 ];
 
 /// Messages the engine and model put in the status line (exact texts and templates).
@@ -155,6 +156,10 @@ pub fn required_keys() -> BTreeSet<String> {
         {
             add(s);
         }
+    }
+    for k in scoreart_model::TextKind::ALL {
+        add(k.label());
+        add(k.group());
     }
     for m in ENGINE_MESSAGES {
         add(m);

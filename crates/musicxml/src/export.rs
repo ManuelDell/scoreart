@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use scoreart_model::marks::XmlGroup;
 use scoreart_model::{
     Accidental, Arpeggio, Barline, Clef, Event, EventKind, Jump, MeasureInfo, PageFormat, Pitch, Placement,
-    PlaybackStyle, Score, Spanner, SpannerKind, TPQ, TimeSymbol, Tremolo,
+    PlaybackStyle, Score, Spanner, SpannerKind, TPQ, TextSettings, TimeSymbol, Tremolo,
 };
 
 use crate::dom::esc;
@@ -358,14 +358,29 @@ pub fn write(score: &Score) -> String {
         "    <encoding><software>ScoreArt {}</software><supports element=\"accidental\" type=\"no\"/><supports element=\"stem\" type=\"no\"/></encoding>",
         env!("CARGO_PKG_VERSION")
     );
+    let mut misc = String::new();
     if score.playback != PlaybackStyle::default() {
-        let _ = writeln!(
-            x,
-            "    <miscellaneous><miscellaneous-field name=\"scoreart-reverb\">{}</miscellaneous-field><miscellaneous-field name=\"scoreart-humanize\">{}</miscellaneous-field><miscellaneous-field name=\"scoreart-optimize\">{}</miscellaneous-field></miscellaneous>",
+        let _ = write!(
+            misc,
+            "<miscellaneous-field name=\"scoreart-reverb\">{}</miscellaneous-field><miscellaneous-field name=\"scoreart-humanize\">{}</miscellaneous-field><miscellaneous-field name=\"scoreart-optimize\">{}</miscellaneous-field>",
             score.playback.reverb,
             if score.playback.humanize { "yes" } else { "no" },
             if score.playback.optimize { "yes" } else { "no" }
         );
+    }
+    // Text styles and text blocks (MusicXML has no place for them).
+    let texts = TextSettings::of(score);
+    if texts != TextSettings::default()
+        && let Ok(j) = serde_json::to_string(&texts)
+    {
+        let _ = write!(
+            misc,
+            "<miscellaneous-field name=\"scoreart-text\">{}</miscellaneous-field>",
+            esc(&j)
+        );
+    }
+    if !misc.is_empty() {
+        let _ = writeln!(x, "    <miscellaneous>{misc}</miscellaneous>");
     }
     x.push_str("  </identification>\n");
     write_defaults(&mut x, &score.page);

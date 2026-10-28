@@ -2030,6 +2030,90 @@ fn tab_format(app: &mut ScoreApp, ui: &mut Ui) {
             }
         });
     });
+    group(ui, t("Texts"), |ui| {
+        if big(
+            ui,
+            Ico::Fonts,
+            t("Fonts"),
+            app.fonts.is_some(),
+            true,
+            t("Fonts of all texts (not the notes), with a live preview…"),
+        )
+        .clicked()
+        {
+            if app.fonts.is_some() {
+                app.fonts = None;
+            } else {
+                crate::texts::open(app, scoreart_model::TextKind::Title);
+            }
+        }
+        column(ui, |ui| {
+            for (k, ico, tip) in [
+                (
+                    scoreart_model::TextKind::Heading,
+                    Ico::Heading,
+                    t("Add a heading above the system of the selected measure"),
+                ),
+                (
+                    scoreart_model::TextKind::Text,
+                    Ico::TextBlock,
+                    t("Add a text block above the system of the selected measure"),
+                ),
+            ] {
+                if small(ui, Some(ico), crate::texts::kind_label(k), false, true, tip).clicked() {
+                    crate::texts::add_block(app, k);
+                }
+            }
+        });
+        column(ui, |ui| {
+            for (k, ico, tip) in [
+                (
+                    scoreart_model::TextKind::Header,
+                    Ico::Header,
+                    t("Add a header to every page from page 2"),
+                ),
+                (
+                    scoreart_model::TextKind::Footer,
+                    Ico::Footer,
+                    t("Add a footer to every page from page 2"),
+                ),
+            ] {
+                if small(ui, Some(ico), crate::texts::kind_label(k), false, true, tip).clicked() {
+                    crate::texts::add_block(app, k);
+                }
+            }
+        });
+        column(ui, |ui| {
+            let on = !app.session.score.hide_page_numbers;
+            if small(
+                ui,
+                Some(Ico::PageNumber),
+                t("Page numbers"),
+                on,
+                true,
+                t("Page numbers from page 2 on (toggle)"),
+            )
+            .clicked()
+            {
+                app.run("page.numbers", json!({ "on": !on }));
+            }
+            if small(
+                ui,
+                Some(Ico::Text),
+                t("Copyright"),
+                false,
+                true,
+                t("The copyright line at the foot of the first page"),
+            )
+            .clicked()
+            {
+                crate::texts::edit_block(
+                    app,
+                    scoreart_model::BlockRef::Fixed(scoreart_model::TextKind::Copyright),
+                );
+            }
+        });
+    });
     group(ui, t("Breaks"), |ui| {
         column(ui, |ui| {
             cmd_small(

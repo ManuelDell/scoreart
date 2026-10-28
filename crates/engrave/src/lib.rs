@@ -157,6 +157,10 @@ pub enum Shape {
         align: Align,
         bold: bool,
         italic: bool,
+        /// The serif text font (else sans-serif).
+        serif: bool,
+        /// Which kind of text it is (for styles and highlighting), if it has one.
+        kind: Option<scoreart_model::TextKind>,
     },
 }
 
@@ -201,6 +205,10 @@ pub enum Target {
         part: usize,
         staff: usize,
         measure: usize,
+    },
+    /// A text block of the page (title, heading, header …).
+    Block {
+        block: scoreart_model::BlockRef,
     },
 }
 
@@ -283,7 +291,7 @@ impl Layout {
         let inside = |h: &&Hit| h.page == page && x >= h.x0 && x <= h.x1 && y >= h.y0 && y <= h.y1;
         let rank = |t: &Target| match t {
             Target::Note { .. } => 0,
-            Target::Text { .. } | Target::Dynamic { .. } => 1,
+            Target::Text { .. } | Target::Dynamic { .. } | Target::Block { .. } => 1,
             Target::Line { .. } => 2,
             Target::Rest { .. } => 3,
             Target::Measure { .. } => 4,
@@ -322,7 +330,8 @@ impl Layout {
                 Target::Text { .. }
                 | Target::Dynamic { .. }
                 | Target::Line { .. }
-                | Target::Measure { .. } => false,
+                | Target::Measure { .. }
+                | Target::Block { .. } => false,
             };
             if matches {
                 out = Some(match out {

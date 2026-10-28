@@ -25,6 +25,7 @@ mod panels;
 mod playback;
 pub mod ribbon;
 pub mod side;
+mod texts;
 pub mod theme;
 
 use crate::i18n::{t, tf, tr};
@@ -187,6 +188,8 @@ pub(crate) enum Dialog {
         key: &'static str,
         value: String,
     },
+    /// Adding or editing a text block of the page.
+    Block(texts::BlockDialog),
 }
 
 pub struct ScoreApp {
@@ -221,6 +224,11 @@ pub struct ScoreApp {
     pub(crate) mark_drag: Option<canvas::MarkDrag>,
     /// A line (hairpin, slur …) being dragged.
     pub(crate) line_drag: Option<canvas::LineDrag>,
+    /// A text block of the page being dragged, and the one picked by a click.
+    pub(crate) block_drag: Option<canvas::BlockDrag>,
+    pub(crate) block_sel: Option<scoreart_model::BlockRef>,
+    /// The "Fonts" window, when open.
+    pub(crate) fonts: Option<texts::FontsWindow>,
     /// What surrounds the score: ribbon, side panel, both or the focus bar.
     pub surface: ribbon::Surface,
     pub ribbon: ribbon::RibbonState,
@@ -288,6 +296,9 @@ impl ScoreApp {
             note_drag: None,
             mark_drag: None,
             line_drag: None,
+            block_drag: None,
+            block_sel: None,
+            fonts: None,
             surface,
             ribbon: Default::default(),
         }
@@ -406,6 +417,7 @@ impl ScoreApp {
         catalog::window(self, &ctx);
         instruments::dialogs(self, &ctx);
         page::dialog(self, &ctx);
+        texts::window(self, &ctx);
         midi::window(self, &ctx);
         if self.surface == ribbon::Surface::Focus {
             ribbon::focus_bar(self, &ctx);
@@ -526,6 +538,11 @@ impl ScoreApp {
             (Key::ArrowLeft, _, _) if plain => self.run("select.prev", json!({})),
             (Key::ArrowRight, _, _) if cmd_only => self.run("select.next-measure", json!({})),
             (Key::ArrowLeft, _, _) if cmd_only => self.run("select.prev-measure", json!({})),
+            (Key::Delete | Key::Backspace, _, _) if plain && self.block_sel.is_some() => {
+                if let Some(b) = self.block_sel.take() {
+                    texts::remove_block(self, b);
+                }
+            }
             (Key::Delete | Key::Backspace, _, _) if plain => self.run("note.delete", json!({})),
             (Key::Delete, _, _) if cmd_only => self.run("measure.delete", json!({})),
             (Key::Insert, _, _) if plain => self.run("measure.insert", json!({})),

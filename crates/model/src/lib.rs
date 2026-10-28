@@ -17,6 +17,7 @@ mod arrange;
 pub mod edit;
 pub mod marks;
 mod pitch;
+pub mod text;
 mod time;
 
 pub use arrange::{Line, Rearrange};
@@ -24,6 +25,7 @@ pub use marks::{
     Anchor, Arpeggio, Articulation, Dynamic, Grace, Jump, NoteHead, Spanner, SpannerKind, Tremolo,
 };
 pub use pitch::{Accidental, Pitch, Step};
+pub use text::{BlockRef, TextAlign, TextBlock, TextFont, TextKind, TextSettings, TextStyle, TextStyles};
 pub use time::{Duration, NoteValue, TPQ, Tuplet};
 
 use serde::{Deserialize, Serialize};
@@ -38,6 +40,7 @@ pub mod limits {
     pub const MAX_CHORD_NOTES: usize = 16;
     pub const MAX_TEXT: usize = 1_000;
     pub const MAX_SPANNERS: usize = 20_000;
+    pub const MAX_BLOCKS: usize = 500;
     pub const MAX_GRACE: usize = 8;
 }
 
@@ -682,6 +685,17 @@ pub struct Score {
     /// How the score is played back.
     #[serde(default)]
     pub playback: PlaybackStyle,
+    /// How its texts look, by kind.
+    #[serde(default)]
+    pub text_styles: TextStyles,
+    /// Headings and texts between the systems, header and footer.
+    #[serde(default)]
+    pub blocks: Vec<TextBlock>,
+    /// Where the title page's texts and the page number were moved (tenths of a staff space).
+    #[serde(default)]
+    pub block_offsets: text::BlockOffsets,
+    #[serde(default)]
+    pub hide_page_numbers: bool,
 }
 
 /// How a score is played back (not printed): the room and a human touch.
@@ -1119,6 +1133,11 @@ impl Score {
             first.key.get_or_insert_with(KeySig::default);
         }
         let n = self.measures.len();
+        self.blocks.truncate(limits::MAX_BLOCKS);
+        for b in &mut self.blocks {
+            b.measure = b.measure.min(n - 1);
+            b.text = clip(&b.text);
+        }
         let lens: Vec<u32> = (0..n).map(|m| self.measure_ticks(m)).collect();
         for part in &mut self.parts {
             if part.clefs.is_empty() {

@@ -733,3 +733,166 @@ fn lines_move_up_down_sideways_and_by_their_ends() {
             .any(|h| matches!(h.target, scoreart_engrave::Target::Line { index: 0, .. }))
     );
 }
+
+#[test]
+fn text_styles_and_blocks() {
+    use scoreart_engrave::Target;
+    use scoreart_model::{BlockRef, TextFont, TextKind};
+    let mut s = Session::default();
+    // Styles: set, read back, reset; "all" changes every font.
+    s.execute(
+        "text.style",
+        &json!({ "kind": "title", "size": 30, "bold": true, "font": "sans" }),
+    )
+    .unwrap();
+    let st = s.score.text_styles.get(TextKind::Title);
+    assert_eq!((st.size, st.bold, st.font), (30.0, true, TextFont::Sans));
+    assert!(s.execute("text.style", &json!({ "kind": "nope" })).is_err());
+    assert!(
+        s.execute("text.style", &json!({ "kind": "title", "align": "up" }))
+            .is_err()
+    );
+    let big_title = |s: &mut Session| {
+        s.layout().pages[0]
+            .items
+            .iter()
+            .find_map(|it| match &it.shape {
+                scoreart_engrave::Shape::Text {
+                    kind: Some(TextKind::Title),
+                    size,
+                    bold,
+                    ..
+                } => Some((*size, *bold)),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let (size, bold) = big_title(&mut s);
+    assert!(
+        bold && size > 5.0,
+        "30 pt title is larger than the default ({size})"
+    );
+    s.execute("text.style", &json!({ "kind": "all", "font": "sans" }))
+        .unwrap();
+    assert!(
+        TextKind::ALL
+            .iter()
+            .all(|k| s.score.text_styles.get(*k).font == TextFont::Sans)
+    );
+    s.execute("text.style", &json!({ "kind": "all", "reset": true }))
+        .unwrap();
+    assert!(s.score.text_styles.0.is_empty());
+
+    // Blocks: a heading above measure 5, a header; moved by hand; edited; removed.
+    s.execute(
+        "block.add",
+        &json!({ "kind": "heading", "text": "Part two", "measure": 4 }),
+    )
+    .unwrap();
+    s.execute("block.add", &json!({ "kind": "footer", "text": "Footer" }))
+        .unwrap();
+    assert!(
+        s.execute("block.add", &json!({ "kind": "title", "text": "x" }))
+            .is_err()
+    );
+    assert!(
+        s.execute("block.add", &json!({ "kind": "text", "text": "  " }))
+            .is_err()
+    );
+    let layout = s.layout();
+    let heading = layout
+        .hits
+        .iter()
+        .find(|h| {
+            h.target
+                == Target::Block {
+                    block: BlockRef::Added(0),
+                }
+        })
+        .copied()
+        .expect("the heading can be picked");
+    // It sits above the system that holds measure 5.
+    let sys = layout.staves.iter().find(|b| b.measure == 4).unwrap();
+    assert!(heading.y1 <= sys.top && heading.page == sys.page);
+    s.execute("block.move", &json!({ "block": 0, "dx": 2.5, "dy": -1 }))
+        .unwrap();
+    assert_eq!((s.score.blocks[0].dx, s.score.blocks[0].dy), (25, -10));
+    let moved = s
+        .layout()
+        .hits
+        .iter()
+        .find(|h| {
+            h.target
+                == Target::Block {
+                    block: BlockRef::Added(0),
+                }
+        })
+        .copied()
+        .unwrap();
+    assert!((moved.x0 - heading.x0 - 2.5).abs() < 0.01 && (moved.y0 - heading.y0 + 1.0).abs() < 0.01);
+    s.execute("block.move", &json!({ "block": "title", "dx": 0, "dy": 3 }))
+        .unwrap();
+    assert_eq!(s.score.block_offsets.get(&TextKind::Title), Some(&(0, 30)));
+    s.execute(
+        "block.edit",
+        &json!({ "block": "subtitle", "text": "New subtitle" }),
+    )
+    .unwrap();
+    assert_eq!(s.score.meta.subtitle, "New subtitle");
+    assert!(
+        s.execute("block.edit", &json!({ "block": 9, "text": "x" }))
+            .is_err()
+    );
+    s.execute("block.remove", &json!({ "block": "page-number" }))
+        .unwrap();
+    assert!(s.score.hide_page_numbers);
+    s.execute("page.numbers", &json!({ "on": true })).unwrap();
+    assert!(!s.score.hide_page_numbers);
+    // Inserting measures before it keeps the heading with its measure.
+    s.execute("select.measure", &json!({ "part": 0, "staff": 0, "measure": 0 }))
+        .unwrap();
+    s.execute("measure.insert", &json!({ "count": 2 })).unwrap();
+    assert_eq!(s.score.blocks[0].measure, 6);
+    // Everything survives saving.
+    let bytes = s.save_bytes("x.musicxml").unwrap();
+    let mut t = Session::default();
+    t.open_bytes("x.musicxml", &bytes).unwrap();
+    assert_eq!(t.score.blocks, s.score.blocks);
+    assert_eq!(t.score.block_offsets, s.score.block_offsets);
+    s.execute("block.remove", &json!({ "block": 0 })).unwrap();
+    assert_eq!(s.score.blocks.len(), 1);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.score.blocks.len(), 2);
+}
+
+#[test]
+fn page_furniture_from_page_two() {
+    use scoreart_model::TextKind;
+    let mut s = Session::default();
+    s.execute("measure.append", &json!({ "count": 120 })).unwrap();
+    s.execute("block.add", &json!({ "kind": "header", "text": "My header" }))
+        .unwrap();
+    s.execute("score.meta", &json!({ "copyright": "© me" })).unwrap();
+    let l = s.layout();
+    assert!(l.pages.len() >= 2);
+    let kinds = |p: usize| -> Vec<TextKind> {
+        l.pages[p]
+            .items
+            .iter()
+            .filter_map(|it| match &it.shape {
+                scoreart_engrave::Shape::Text { kind: Some(k), .. } => Some(*k),
+                _ => None,
+            })
+            .collect()
+    };
+    assert!(kinds(0).contains(&TextKind::Copyright) && !kinds(0).contains(&TextKind::Header));
+    assert!(kinds(1).contains(&TextKind::Header) && kinds(1).contains(&TextKind::PageNumber));
+    s.execute("page.numbers", &json!({ "on": false })).unwrap();
+    assert!(!s.layout().pages[1].items.iter().any(|it| matches!(
+        &it.shape,
+        scoreart_engrave::Shape::Text {
+            kind: Some(TextKind::PageNumber),
+            ..
+        }
+    )));
+}

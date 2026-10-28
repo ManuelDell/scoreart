@@ -85,6 +85,19 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   in MusicXML (`relative-x`/`relative-y`); MuseScore offsets of texts and dynamics are read.
   Double-clicking a staff text edits it. The mouse pointer shows a hand over anything that can
   be picked up.
+- **Texts as tagged blocks**: title, subtitle, composer, lyricist, copyright (foot of the first
+  page), **headings** and **text blocks** between the systems, **headers**, **footers** and page
+  numbers (from page 2). Each is a block of its kind that the hand picks up and moves freely;
+  double-click edits it, `Delete` removes the picked one (*Format → Texts*).
+- **Fonts** (*Format → Fonts*): one clear list of every kind of text that is not a note —
+  title page, between the systems, every page, in the music (instrument names, measure numbers,
+  tempo, rehearsal marks, staff and system text, chord symbols, lyrics, fingering) — each with
+  font (Crimson Text serif or sans-serif), size in points, bold, italic and, for blocks, the
+  alignment. Next to it a **live preview** of the sample song shows every change at once, the
+  chosen kind highlighted; clicking a text in the preview picks its kind. Styles and blocks are
+  saved in MusicXML.
+
+![The Fonts window: kinds of text, their style, and the live preview](docs/images/fonts.png)
 - **Side panel** like MuseScore's: a strip of tabs on the left — **Palettes**, **Instruments**,
   **Properties**, **Sounds** — switches what the panel shows; clicking the open tab folds it away.
 - **Editing**: selection of notes, rests, note ranges (`Shift+click`, `Shift+→`) and measure ranges; palettes for every mark above; add/insert/delete measures; add,
@@ -234,7 +247,9 @@ Details: [docs/architecture.md](docs/architecture.md). Research and plan: [docs/
 - Sounds: **no sample library is bundled**; users load their own (see [docs/sounds.md](docs/sounds.md)).
   Muse Sounds are proprietary and not used.
 - Music font: **Bravura** © Steinberg Media Technologies GmbH, SIL Open Font License 1.1,
-  bundled unmodified ([assets/fonts/OFL-Bravura.txt](assets/fonts/OFL-Bravura.txt)). Every asset
+  bundled unmodified ([assets/fonts/OFL-Bravura.txt](assets/fonts/OFL-Bravura.txt)). Text font:
+  **Crimson Text** © The Crimson Text Project Authors, SIL Open Font License 1.1, bundled
+  unmodified ([assets/fonts/OFL-CrimsonText.txt](assets/fonts/OFL-CrimsonText.txt)). Every asset
   is listed in [ATTRIBUTION.md](ATTRIBUTION.md); see also [NOTICE](NOTICE).
 - **Clean room**: no MuseScore (GPL) or other copyleft notation code is read or used; file
   formats come from public specifications (MusicXML 4.0 and SMuFL 1.4 of the W3C Music Notation
