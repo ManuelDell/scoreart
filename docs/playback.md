@@ -38,12 +38,15 @@ The General MIDI program decides the family (`crates/midi/src/perform.rs`):
 
 | Family | plain note | staccato | under a slur | accent / marcato |
 |---|---|---|---|---|
-| keys | 97 % | 50 % | as written | +18 / +26 |
+| keys | 99 % | 50 % | runs 1/16 beat into the next note | +18 / +26 |
 | plucked, percussion | rings | 55 % | as written | +18 / +26 |
-| bowed strings | 93 % | 45 % | runs 1/24 beat into the next note | +16 / +24 |
-| winds, brass, voices | 90 % | 40 % | runs 1/32 beat into the next note | +16 / +24 |
+| bowed strings | 98 % | 45 % | runs 1/12 beat into the next note | +16 / +24 |
+| winds, brass, voices | 97 % | 40 % | runs 1/16 beat into the next note | +16 / +24 |
 
-Tenuto plays the full length, portato 70–85 %. The last note under a slur is let go.
+Legato is the norm: a plain note joins the next one (only a breath of a gap), a slurred note
+runs into it, and short notes are played only where staccato is written. Tenuto plays the full
+length, portato 70–85 %. The last note under a slur is let go. A key struck again lets go of its
+previous note just before, so the new note is never cut by the old one's release.
 
 ## 3: dynamics
 
@@ -116,7 +119,7 @@ samples (`crates/synth/src/shape.rs`):
 
 | Note | start | growing into the tone | arch | end |
 |---|---|---|---|---|
-| plain | 55 % | 35 ms (winds), 60 ms (bows), 70 ms (voices); louder is quicker | peaks at about a third, 1 dB deep | tapers to 65 % over the last 0.15 s |
+| plain | 65 % | 35 ms (winds), 60 ms (bows), 70 ms (voices); louder is quicker | peaks at about a third, under 1 dB deep | eases to 85 % over the last 0.08 s, joining the next note |
 | staccato | 40 % | 10 ms | early peak, falls steeply | down to 35 % over its second half |
 | accent | 60 % | 8 ms, with a push of +30 % that falls back in about 0.1 s | early peak | as plain |
 | legato (under a slur) | 75 % | 1.5 × slower | peaks in the middle | carries on into the next note |

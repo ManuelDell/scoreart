@@ -6,7 +6,8 @@
 //!
 //! - staccato: a quick start and an early, fast fall;
 //! - accent: a sharp start with a peak that falls back;
-//! - a plain note: a soft start, a gentle arch, a short taper before the next note;
+//! - a plain note: played legato (the norm), a soft start, a gentle arch and only a light
+//!   easing at its end, so it joins the next note;
 //! - legato: a softer start that carries on into the next note without tapering;
 //! - long notes: a slow, wide arch (messa di voce).
 //!
@@ -103,14 +104,14 @@ impl Shape {
         } else {
             Shape {
                 len,
-                start: 0.55,
+                start: 0.65,
                 attack,
                 peak: 0.35 + lean,
-                depth: 0.1,
+                depth: 0.07,
                 push: 0.0,
                 push_fall: 0.1,
-                taper: (len * 0.3).min(0.15),
-                end: 0.65,
+                taper: (len * 0.15).min(0.08),
+                end: 0.85,
             }
         };
         if tech.accent && !tech.ornament {
@@ -124,8 +125,8 @@ impl Shape {
         if len > 1.2 && !tech.short && !tech.accent && !tech.ornament {
             s.depth = 0.14;
             s.peak = (0.45 + lean).clamp(0.2, 0.7);
-            s.taper = (len * 0.2).min(0.25);
-            s.end = if tech.legato { 0.9 } else { 0.8 };
+            s.taper = (len * 0.15).min(0.2);
+            s.end = if tech.legato { 0.92 } else { 0.85 };
         }
         s.attack = s.attack.min(len * 0.4).max(0.002);
         s.peak = s.peak.clamp(0.05, 0.9);
@@ -174,10 +175,13 @@ mod tests {
     fn notes_grow_round_and_let_go() {
         let s = Shape::for_note(Family::Bowed, tech(false, false, false), 80, 0.6, 0).unwrap();
         let g = |t: f32| s.gain(t);
-        assert!(g(0.0) < 0.6, "a soft start");
+        assert!(g(0.0) < 0.7, "a soft start");
         let top = (0..60).map(|i| g(i as f32 * 0.01)).fold(0.0, f32::max);
         assert!(top > 0.95 && top <= 1.0);
-        assert!(g(0.59) < 0.75 * top, "lets go at the end");
+        assert!(
+            g(0.59) < 0.9 * top && g(0.59) > 0.75 * top,
+            "eases at the end, still joined"
+        );
         // No plateau: the level keeps moving in the middle.
         assert!((g(0.2) - g(0.4)).abs() > 0.005);
     }

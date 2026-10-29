@@ -632,7 +632,33 @@ fn track_events(
             });
         }
     }
+    release_before_restrike(&mut out);
     out
+}
+
+/// A key struck again lets go of its previous note just before (after the human touch moved
+/// the notes a little, the old note-off could otherwise come after the new note-on and silence
+/// it). `out` holds note-on / note-off pairs.
+fn release_before_restrike(out: &mut [TrackEvent]) {
+    let mut pairs: Vec<usize> = (0..out.len() / 2).map(|i| i * 2).collect();
+    pairs.sort_by(|a, b| {
+        let at = |i: &usize| out.get(*i).map_or(0.0, |e| e.at);
+        at(a).total_cmp(&at(b))
+    });
+    let mut last_off: std::collections::HashMap<(usize, u8), usize> = std::collections::HashMap::new();
+    for on in pairs {
+        let Some(&TrackEvent { at, key, src, .. }) = out.get(on) else {
+            continue;
+        };
+        if let Some(&off) = last_off.get(&(src, key))
+            && let Some(start) = out.get(off - 1).map(|e| e.at)
+            && let Some(e) = out.get_mut(off)
+            && e.at > at - 0.003
+        {
+            e.at = (at - 0.003).max(start + 0.01);
+        }
+        last_off.insert((src, key), on + 1);
+    }
 }
 
 /// The hairpins of a part, in seconds from `from`.
@@ -1359,6 +1385,22 @@ mod tests {
     }
 
     #[test]
+    fn a_key_struck_again_is_released_first() {
+        let ev = |at: f64, vel: u8| TrackEvent {
+            at,
+            key: 69,
+            vel,
+            src: 0,
+            shape: None,
+        };
+        // The old note's end was moved past the new note's start (human touch).
+        let mut out = vec![ev(0.0, 80), ev(0.52, 0), ev(0.5, 80), ev(1.0, 0)];
+        release_before_restrike(&mut out);
+        assert!(out[1].at < out[2].at, "{} < {}", out[1].at, out[2].at);
+        assert!((out[3].at - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn humanizing_is_small_and_repeatable() {
         let mut s = two_parts();
         s.playback.humanize = true;
@@ -1387,10 +1429,13 @@ mod tests {
             let (a, b) = ((a * 44_100.0) as usize, (b * 44_100.0) as usize);
             (buf[a * 2..b * 2].iter().map(|v| v * v).sum::<f32>() / (b - a) as f32).sqrt()
         };
-        // 100 bpm: the half note lasts 1.2 s and sounds about 1.1 s.
-        let (start, middle, end) = (rms(0.0, 0.02), rms(0.3, 0.5), rms(1.0, 1.07));
-        assert!(start < 0.8 * middle, "a soft start ({start} / {middle})");
-        assert!(end < 0.85 * middle, "lets go at the end ({end} / {middle})");
+        // 100 bpm: the half note lasts 1.2 s and, played legato, sounds almost all of it.
+        let (start, middle, end) = (rms(0.0, 0.02), rms(0.3, 0.5), rms(1.13, 1.17));
+        assert!(start < 0.85 * middle, "a soft start ({start} / {middle})");
+        assert!(
+            end < 0.97 * middle && end > 0.6 * middle,
+            "eases at the end ({end} / {middle})"
+        );
     }
 
     #[test]

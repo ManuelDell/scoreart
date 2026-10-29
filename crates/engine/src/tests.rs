@@ -1077,3 +1077,77 @@ fn hymn_in_six_eight() {
         .fold(0.0f32, f32::max);
     assert!(last < page.width * 0.8, "{last}");
 }
+
+/// Legato is the norm; slurred notes join even more; staccato only where it is written.
+#[test]
+fn legato_by_default_slurs_join_staccato_when_written() {
+    let mut s = Session::default();
+    s.execute(
+        "file.new",
+        &json!({ "instruments": ["piano"], "names": ["Chor"], "measures": 3 }),
+    )
+    .unwrap();
+    s.execute(
+        "cursor.set",
+        &json!({ "part": 0, "staff": 0, "measure": 0, "tick": 0 }),
+    )
+    .unwrap();
+    s.execute("input.toggle", &json!({})).unwrap();
+    s.execute("input.duration", &json!({ "value": "quarter" }))
+        .unwrap();
+    // Measure 1: plain C D E F; measure 2: slurred G A G A; measure 3: staccato C C C C.
+    for st in ["c", "d", "e", "f", "g", "a", "g", "a", "c", "c", "c", "c"] {
+        s.execute("note.enter", &json!({ "step": st, "octave": 5 }))
+            .unwrap();
+    }
+    s.execute("input.toggle", &json!({})).unwrap();
+    s.execute(
+        "select.event",
+        &json!({ "part": 0, "staff": 0, "measure": 1, "index": 0 }),
+    )
+    .unwrap();
+    s.execute(
+        "select.event",
+        &json!({ "part": 0, "staff": 0, "measure": 1, "index": 3, "extend": true }),
+    )
+    .unwrap();
+    s.execute("line.add", &json!({ "type": "slur" })).unwrap();
+    for i in 0..4 {
+        s.execute(
+            "select.event",
+            &json!({ "part": 0, "staff": 0, "measure": 2, "index": i }),
+        )
+        .unwrap();
+        s.execute("note.articulation", &json!({ "type": "staccato" }))
+            .unwrap();
+    }
+    // Saved and opened again: a piano called "Chor" stays a piano.
+    let bytes = s.save_bytes("x.musicxml").unwrap();
+    let mut t = Session::default();
+    t.open_bytes("x.musicxml", &bytes).unwrap();
+    assert_eq!(t.score.parts[0].program, 0);
+
+    let seq = scoreart_midi::sequence(&t.score);
+    let q = u64::from(TPQ);
+    let n = &seq.notes;
+    assert_eq!(n.len(), 12);
+    for p in &n[0..4] {
+        assert!(
+            p.ticks * 100 >= q * 97,
+            "plain notes are legato: {} of {q}",
+            p.ticks
+        );
+    }
+    for p in &n[4..7] {
+        assert!(p.ticks > q, "slurred notes run into the next: {}", p.ticks);
+    }
+    for p in &n[8..12] {
+        assert!(p.ticks * 100 <= q * 55, "staccato is short: {}", p.ticks);
+    }
+    // No two notes of one key overlap (a repeated key is struck again cleanly).
+    for (a, b) in n.iter().zip(n.iter().skip(1)) {
+        if a.key == b.key && a.part == b.part {
+            assert!(a.start + a.ticks < b.start || b.start < a.start);
+        }
+    }
+}

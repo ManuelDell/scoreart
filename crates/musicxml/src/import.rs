@@ -75,6 +75,10 @@ pub fn read(root: &Element) -> Result<Score, Error> {
     };
     read_texts(root, &mut score);
 
+    // Written by ScoreArt itself?
+    let ours = root
+        .path(&["identification", "encoding", "software"])
+        .is_some_and(|e| e.text.trim().starts_with("ScoreArt"));
     // Part list: names and MIDI programs.
     let mut infos: Vec<(String, String, String, u8, PartSound)> = Vec::new();
     if let Some(list) = root.child("part-list") {
@@ -93,8 +97,11 @@ pub fn read(root: &Element) -> Result<Score, Error> {
                 .map(|e| e.text.as_str())
                 .unwrap_or("");
             let guess = program_for_name(&name).or_else(|| program_for_name(inst));
+            // A piano program is doubted only in files of other programs (some write it for
+            // every part); ScoreArt writes the program it plays, whatever the part is called.
             let program = match (program, guess) {
-                (None | Some(0), Some(g)) => g,
+                (None, Some(g)) => g,
+                (Some(0), Some(g)) if !ours => g,
                 (p, _) => p.unwrap_or(0),
             };
             let mut sound = PartSound::default();

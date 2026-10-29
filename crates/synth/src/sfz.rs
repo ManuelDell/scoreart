@@ -651,6 +651,11 @@ pub fn references(files: &dyn Files, path: &str) -> Result<References, String> {
 impl SfzInstrument {
     /// Loads the instrument at `path` (relative to the library root) with its samples.
     pub fn load(files: &dyn Files, path: &str) -> Result<SfzInstrument, String> {
+        SfzInstrument::load_within(files, path, MAX_SAMPLE_FLOATS)
+    }
+
+    /// Loads with at most about `budget` sample values in memory.
+    fn load_within(files: &dyn Files, path: &str, budget: usize) -> Result<SfzInstrument, String> {
         let path = clean(path);
         let bytes = files.read(&path).ok_or_else(|| format!("cannot read {path}"))?;
         if bytes.len() > MAX_TEXT {
@@ -677,6 +682,9 @@ impl SfzInstrument {
         let mut by_path: HashMap<String, Option<usize>> = HashMap::new();
         let mut samples: Vec<Arc<Sample>> = Vec::new();
         let mut floats = 0usize;
+        // Regions whose sample did not fit in memory: they play the nearest loaded layer.
+        let mut over_budget: Vec<Region> = Vec::new();
+        const NOT_LOADED: usize = usize::MAX;
         let mut regions = Vec::new();
         let (mut sw_lo, mut sw_hi, mut sw_default) = (None, None, None);
         for (ops, default_path) in &p.out {
@@ -704,7 +712,7 @@ impl SfzInstrument {
             let idx = match by_path.get(&full) {
                 Some(i) => *i,
                 None => {
-                    let loaded = if floats < MAX_SAMPLE_FLOATS {
+                    let loaded = if floats < budget {
                         match files.read(&full).map(|b| decode(&b)) {
                             Some(Ok(s)) => {
                                 floats += s.data.len();
@@ -725,13 +733,17 @@ impl SfzInstrument {
                             }
                         }
                     } else {
-                        None
+                        Some(NOT_LOADED)
                     };
                     by_path.insert(full, loaded);
                     loaded
                 }
             };
             let Some(idx) = idx else { continue };
+            if idx == NOT_LOADED {
+                over_budget.push(build_region(ops, idx));
+                continue;
+            }
             let mut r = build_region(ops, idx);
             let explicit_mode = ops.iter().any(|(k, _)| k == "loop_mode" || k == "loopmode");
             if let Some(s) = samples.get(idx) {
@@ -749,6 +761,40 @@ impl SfzInstrument {
                 }
             }
             regions.push(r);
+        }
+        // A layer that did not fit plays the loaded layer of the same keys nearest in velocity
+        // (a loud note on a softer sample is better than silence).
+        let mut stand_ins = 0usize;
+        for r in over_budget {
+            let vel_mid = |x: &Region| (f32::from(x.lovel) + f32::from(x.hivel)) / 2.0;
+            let best = regions
+                .iter()
+                .filter(|q| {
+                    q.trigger == r.trigger
+                        && q.sw_last == r.sw_last
+                        && q.lokey <= r.hikey
+                        && r.lokey <= q.hikey
+                })
+                .min_by(|a, b| {
+                    let d = |q: &Region| {
+                        (q.keycenter - r.keycenter).abs() * 4.0 + (vel_mid(q) - vel_mid(&r)).abs()
+                    };
+                    d(a).total_cmp(&d(b))
+                })
+                .cloned();
+            if let Some(mut q) = best {
+                q.lovel = r.lovel;
+                q.hivel = r.hivel;
+                q.lokey = r.lokey.max(q.lokey);
+                q.hikey = r.hikey.min(q.hikey);
+                regions.push(q);
+                stand_ins += 1;
+            }
+        }
+        if stand_ins > 0 && warnings.len() < 20 {
+            warnings.push(format!(
+                "not every sample fits in memory: {stand_ins} regions play the nearest loaded layer"
+            ));
         }
         if regions.is_empty() {
             return Err(match warnings.first() {
@@ -1151,6 +1197,25 @@ mod tests {
             .map(|i| ((i as f32 * 0.1).sin() * 12000.0) as i16)
             .collect();
         wav16(&s, 1, 44_100, Some((100, len as u32 - 1)))
+    }
+
+    #[test]
+    fn layers_that_do_not_fit_play_the_nearest_loaded_one() {
+        let sfz = "<region> sample=soft.wav key=60 lovel=1 hivel=64\n<region> sample=loud.wav key=60 lovel=65 hivel=127\n";
+        let mut m = HashMap::new();
+        m.insert("p.sfz".to_string(), sfz.as_bytes().to_vec());
+        m.insert("soft.wav".to_string(), tone(4000));
+        m.insert("loud.wav".to_string(), tone(4000));
+        // Room for one sample only: the loud layer is played by the soft sample, not silence.
+        let inst = SfzInstrument::load_within(&TestFiles(m), "p.sfz", 1).unwrap();
+        assert_eq!(inst.samples.len(), 1);
+        assert_eq!(inst.regions.len(), 2, "{:?}", inst.warnings);
+        assert!(inst.warnings.iter().any(|w| w.contains("nearest loaded layer")));
+        let mut p = SfzPlayer::new(Arc::new(inst), 44_100);
+        p.note_on(60, 120);
+        let (mut l, mut r) = (vec![0.0f32; 512], vec![0.0f32; 512]);
+        p.render(&mut l, &mut r);
+        assert!(l.iter().any(|v| v.abs() > 0.01), "a loud note sounds");
     }
 
     #[test]

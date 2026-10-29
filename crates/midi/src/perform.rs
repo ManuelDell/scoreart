@@ -51,11 +51,11 @@ pub fn profile(f: Family) -> Profile {
     let q = u64::from(TPQ);
     match f {
         Family::Keys => Profile {
-            plain: 0.97,
+            plain: 0.99,
             staccato: 0.5,
             staccatissimo: 0.3,
             portato: 0.8,
-            overlap: 0,
+            overlap: q / 16,
             accent: 18,
             marcato: 26,
         },
@@ -69,20 +69,20 @@ pub fn profile(f: Family) -> Profile {
             marcato: 26,
         },
         Family::Bowed => Profile {
-            plain: 0.93,
+            plain: 0.98,
             staccato: 0.45,
             staccatissimo: 0.25,
             portato: 0.75,
-            overlap: q / 24,
+            overlap: q / 12,
             accent: 16,
             marcato: 24,
         },
         Family::Wind | Family::Voice => Profile {
-            plain: 0.9,
+            plain: 0.97,
             staccato: 0.4,
             staccatissimo: 0.25,
             portato: 0.7,
-            overlap: q / 32,
+            overlap: q / 16,
             accent: 16,
             marcato: 24,
         },

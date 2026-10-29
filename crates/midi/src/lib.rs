@@ -616,8 +616,31 @@ pub fn sequence(score: &Score) -> Sequence {
     seq.end = end;
     seq.tempos = timing::tempo_map(score, &played, end, &stretches, &pauses);
     seq.notes.sort_by_key(|n| (n.start, n.part, n.key));
+    let n = seq.notes.len();
+    untangle_repeated_keys(&mut seq.notes);
+    debug_assert_eq!(n, seq.notes.len());
     seq.prepare();
     seq
+}
+
+/// A note that would still sound when the same key of the same part is struck again (legato
+/// overlap, a long note under a short one) ends just as it is struck again, so the new note is
+/// not cut off by the old one's release. `notes` is sorted by start.
+fn untangle_repeated_keys(notes: &mut [PlayNote]) {
+    let mut last: std::collections::HashMap<(usize, u8), usize> = std::collections::HashMap::new();
+    for i in 0..notes.len() {
+        let Some(&cur) = notes.get(i) else { continue };
+        if let Some(&j) = last.get(&(cur.part, cur.key))
+            && let Some(prev) = notes.get_mut(j)
+            && prev.start < cur.start
+            && prev.start + prev.ticks > cur.start
+        {
+            prev.ticks = (cur.start - prev.start)
+                .saturating_sub(u64::from(TPQ) / 96)
+                .max(1);
+        }
+        last.insert((cur.part, cur.key), i);
+    }
 }
 
 /// Writes a format-1 Standard MIDI File: a tempo track plus one track per part.
