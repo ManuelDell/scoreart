@@ -24,7 +24,9 @@ fn block(s: &Session, p: &Value) -> Result<BlockRef> {
                 | TextKind::Composer
                 | TextKind::Lyricist
                 | TextKind::Copyright
-                | TextKind::PageNumber),
+                | TextKind::PageNumber
+                | TextKind::Header
+                | TextKind::Footer),
             ) => Ok(BlockRef::Fixed(k)),
             _ => Err(Error::Param(format!("no fixed block {k:?}"))),
         },
@@ -163,7 +165,7 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "Add text block",
             menu: &[],
             shortcut: None,
-            params: "kind: heading|text (above the system with the measure) or header|footer (every page after the first), text, measure? (default: the selected one)",
+            params: "kind: heading|text (above the system with the measure; measure = the number of measures: after the last system) or header|footer (the middle of the header or footer), text, measure? (default: the selected one)",
             enabled: always,
             run: |s, p| {
                 let k = kind(p)?;
@@ -177,10 +179,25 @@ pub fn commands() -> Vec<CommandSpec> {
                 if text.trim().is_empty() {
                     return Err(Error::Param("the text is empty".into()));
                 }
+                // A header or footer text goes into the middle of the header or footer.
+                if matches!(k, TextKind::Header | TextKind::Footer) {
+                    let hf = &mut s.score.header_footer;
+                    let (show, rows) = if k == TextKind::Header {
+                        (&mut hf.show_header, &mut hf.header)
+                    } else {
+                        (&mut hf.show_footer, &mut hf.footer)
+                    };
+                    *show = true;
+                    for row in rows.iter_mut() {
+                        row[1] = text.clone();
+                    }
+                    return Ok(Value::Null);
+                }
                 if s.score.blocks.len() >= limits::MAX_BLOCKS {
                     return Err(Error::Param("too many text blocks".into()));
                 }
-                let last = s.score.measures.len().saturating_sub(1);
+                // The number of measures: after the last system.
+                let last = s.score.measures.len();
                 let measure = p_usize(p, "measure").unwrap_or_else(|| s.focus().2).min(last);
                 s.score.blocks.push(TextBlock {
                     kind: k,
@@ -205,6 +222,19 @@ pub fn commands() -> Vec<CommandSpec> {
                 match block(s, p)? {
                     BlockRef::Fixed(TextKind::PageNumber) => {
                         return Err(Error::Param("the page number has no text".into()));
+                    }
+                    BlockRef::Fixed(k @ (TextKind::Header | TextKind::Footer)) => {
+                        // The middle field of every page's header or footer.
+                        let hf = &mut s.score.header_footer;
+                        let (show, rows) = if k == TextKind::Header {
+                            (&mut hf.show_header, &mut hf.header)
+                        } else {
+                            (&mut hf.show_footer, &mut hf.footer)
+                        };
+                        *show = true;
+                        for row in rows.iter_mut() {
+                            row[1] = text.clone();
+                        }
                     }
                     BlockRef::Fixed(k) => {
                         if let Some(f) = meta_field(s, k) {
@@ -265,6 +295,8 @@ pub fn commands() -> Vec<CommandSpec> {
             run: |s, p| {
                 match block(s, p)? {
                     BlockRef::Fixed(TextKind::PageNumber) => s.score.hide_page_numbers = true,
+                    BlockRef::Fixed(TextKind::Header) => s.score.header_footer.show_header = false,
+                    BlockRef::Fixed(TextKind::Footer) => s.score.header_footer.show_footer = false,
                     BlockRef::Fixed(k) => {
                         if let Some(f) = meta_field(s, k) {
                             f.clear();
@@ -293,6 +325,67 @@ pub fn commands() -> Vec<CommandSpec> {
                     .ok_or_else(|| Error::Param("on: true or false".into()))?;
                 s.score.hide_page_numbers = !on;
                 Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "page.header-footer",
+            label: "Header and footer",
+            menu: &[],
+            shortcut: None,
+            params: "any of: show_header, header_first_page, header_odd_even, show_footer, footer_first_page, footer_odd_even, page_number_first_page (true|false); odd_header, even_header, odd_footer, even_footer ([left, centre, right] texts; macros: $p page number (not on the first page), $P page number, $n number of pages, $C copyright (first page), $c copyright, $$ dollar, $:workTitle: $:subtitle: $:composer: $:lyricist: $:copyright:); reset: true (as MuseScore 4: page number and copyright in the footer)",
+            enabled: always,
+            run: |s, p| {
+                let mut hf = if p.get("reset").and_then(Value::as_bool) == Some(true) {
+                    scoreart_model::HeaderFooter::default()
+                } else {
+                    s.score.header_footer.clone()
+                };
+                for (k, slot) in [
+                    ("show_header", &mut hf.show_header),
+                    ("header_first_page", &mut hf.header_first_page),
+                    ("header_odd_even", &mut hf.header_odd_even),
+                    ("show_footer", &mut hf.show_footer),
+                    ("footer_first_page", &mut hf.footer_first_page),
+                    ("footer_odd_even", &mut hf.footer_odd_even),
+                    ("page_number_first_page", &mut hf.page_number_first_page),
+                ] {
+                    match p.get(k) {
+                        None | Some(Value::Null) => {}
+                        Some(Value::Bool(b)) => *slot = *b,
+                        Some(_) => return Err(Error::Param(format!("{k}: true or false"))),
+                    }
+                }
+                let [oh, eh] = &mut hf.header;
+                let [of, ef] = &mut hf.footer;
+                for (k, row) in [
+                    ("odd_header", oh),
+                    ("even_header", eh),
+                    ("odd_footer", of),
+                    ("even_footer", ef),
+                ] {
+                    match p.get(k) {
+                        None | Some(Value::Null) => {}
+                        Some(Value::Array(a)) if a.len() == 3 => {
+                            for (slot, v) in row.iter_mut().zip(a) {
+                                *slot = clip(
+                                    v.as_str()
+                                        .ok_or_else(|| Error::Param(format!("{k}: three texts")))?,
+                                );
+                            }
+                        }
+                        Some(_) => return Err(Error::Param(format!("{k}: [left, centre, right]"))),
+                    }
+                }
+                s.score.header_footer = hf;
+                let h = &s.score.header_footer;
+                Ok(json!({
+                    "show_header": h.show_header, "header_first_page": h.header_first_page, "header_odd_even": h.header_odd_even,
+                    "odd_header": h.header[0], "even_header": h.header[1],
+                    "show_footer": h.show_footer, "footer_first_page": h.footer_first_page, "footer_odd_even": h.footer_odd_even,
+                    "odd_footer": h.footer[0], "even_footer": h.footer[1],
+                    "page_number_first_page": h.page_number_first_page,
+                }))
             },
             undoable: true,
         },

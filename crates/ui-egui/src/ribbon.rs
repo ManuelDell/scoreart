@@ -2010,7 +2010,7 @@ fn tab_format(app: &mut ScoreApp, ui: &mut Ui) {
             t("Page settings"),
             app.page_settings.is_some(),
             true,
-            t("Page settings…"),
+            t("Paper, margins, two-sided, staff size, distances"),
         )
         .clicked()
         {
@@ -2099,21 +2099,17 @@ fn tab_format(app: &mut ScoreApp, ui: &mut Ui) {
             }
         });
         column(ui, |ui| {
-            for (k, ico, tip) in [
-                (
-                    scoreart_model::TextKind::Header,
-                    Ico::Header,
-                    t("Add a header to every page from page 2"),
-                ),
-                (
-                    scoreart_model::TextKind::Footer,
-                    Ico::Footer,
-                    t("Add a footer to every page from page 2"),
-                ),
-            ] {
-                if small(ui, Some(ico), crate::texts::kind_label(k), false, true, tip).clicked() {
-                    crate::texts::add_block(app, k);
-                }
+            if small(
+                ui,
+                Some(Ico::Header),
+                t("Header & footer…"),
+                app.header_footer.is_some(),
+                true,
+                t("Header and footer: left, middle and right, odd and even pages, page numbers and copyright"),
+            )
+            .clicked()
+            {
+                crate::texts::open_header_footer(app);
             }
         });
         column(ui, |ui| {

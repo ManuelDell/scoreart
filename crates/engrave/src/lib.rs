@@ -52,6 +52,9 @@ pub struct Style {
     /// Horizontal spacing factor (1.0 = default).
     pub spacing: f32,
     pub view: View,
+    /// Everything else of the page format: two-sided margins, music margins, vertical fill,
+    /// last-system fill, first page number, first-system indent, header and footer offsets.
+    pub page: PageFormat,
 }
 
 impl Default for Style {
@@ -77,6 +80,25 @@ impl Style {
             system_gap: p.system_gap,
             spacing: p.spacing,
             view,
+            page: p,
+        }
+    }
+
+    /// Margins of a page (by its printed number) in staff spaces: top, bottom, left, right.
+    /// The odd-page margins are this style's own fields; even pages of a two-sided score have
+    /// theirs from the page format.
+    pub fn margins_of(&self, page_number: i32) -> [f32; 4] {
+        if self.page.two_sided && page_number.rem_euclid(2) == 0 {
+            let s = self.space();
+            [
+                self.page.even_margin_top_mm,
+                self.page.even_margin_bottom_mm,
+                self.page.even_margin_left_mm,
+                self.page.even_margin_right_mm,
+            ]
+            .map(|m| fin(m, 15.0).clamp(0.0, 100.0) / s)
+        } else {
+            self.margins_sp()
         }
     }
 
@@ -101,7 +123,7 @@ impl Style {
         .map(|m| fin(m, 15.0).clamp(0.0, 100.0) / s)
     }
 
-    fn space(&self) -> f32 {
+    pub(crate) fn space(&self) -> f32 {
         fin(self.staff_space_mm, 1.75).clamp(0.5, 10.0)
     }
 }

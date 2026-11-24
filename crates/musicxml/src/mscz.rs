@@ -4,7 +4,7 @@
 //! `.mscx` file whose elements are named after the notation objects) — never from MuseScore's
 //! source code. Elements we don't know are skipped; the reader is lenient by design.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use scoreart_model::marks::MARKS;
 use scoreart_model::{
@@ -258,6 +258,12 @@ struct OpenLine {
 
 /// Parses the `.mscx` XML of a MuseScore file.
 pub fn from_mscx(xml: &str) -> Result<Score, Error> {
+    from_mscx_styled(xml, None)
+}
+
+/// Reads an `.mscx`; `mss` is the `score_style.mss` of an `.mscz`, which holds the style in
+/// MuseScore 4 files.
+pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
     let root = dom::parse(xml)?;
     if root.name != "museScore" {
         return Err(Error::Unsupported(format!(
@@ -377,17 +383,59 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
         };
         let top_staff = first_staff;
         first_staff = false;
-        // Title frame (only on the first staff).
-        for vb in st.children_named("VBox") {
-            for t in vb.children_named("Text") {
-                let v = clip(&flat_text(t.child("text").unwrap_or(t)));
-                match t.child_text("style").unwrap_or("") {
-                    "title" | "Title" => meta.title = v,
-                    "subtitle" | "Subtitle" => meta.subtitle = v,
-                    "composer" | "Composer" => meta.composer = v,
-                    "lyricist" | "poet" | "Lyricist" => meta.lyricist = v,
-                    _ => {}
+        // Frames (only on the first staff): the title frame before the first measure gives the
+        // title page; texts in later frames (the title of a further piece, a poem at the end)
+        // become headings and text blocks above the measure that follows them.
+        let mut measures_before = 0usize;
+        let mut title_frame_done = false;
+        for c in &st.children {
+            match c.name.as_str() {
+                "Measure" => measures_before += 1,
+                "VBox" | "TBox" => {
+                    for t in c.children_named("Text") {
+                        let v = clip(&flat_text(t.child("text").unwrap_or(t)));
+                        if v.trim().is_empty() {
+                            continue;
+                        }
+                        let style = t.child_text("style").unwrap_or("");
+                        let title_page = measures_before == 0 && !title_frame_done;
+                        let kind = match (title_page, style) {
+                            (true, "title" | "Title") => {
+                                meta.title = v;
+                                continue;
+                            }
+                            (true, "subtitle" | "Subtitle") => {
+                                meta.subtitle = v;
+                                continue;
+                            }
+                            (true, "composer" | "Composer") => {
+                                meta.composer = v;
+                                continue;
+                            }
+                            (true, "lyricist" | "poet" | "Lyricist") => {
+                                meta.lyricist = v;
+                                continue;
+                            }
+                            (_, "title" | "Title" | "subtitle" | "Subtitle") => {
+                                scoreart_model::TextKind::Heading
+                            }
+                            _ => scoreart_model::TextKind::Text,
+                        };
+                        if top_staff && score.blocks.len() < limits::MAX_BLOCKS {
+                            score.blocks.push(scoreart_model::TextBlock {
+                                kind,
+                                text: v,
+                                measure: measures_before,
+                                dx: 0,
+                                dy: 0,
+                            });
+                        }
+                    }
+                    if measures_before == 0 {
+                        title_frame_done = true;
+                    }
                 }
+                _ => {}
             }
         }
         let mut clef_now: Option<Clef> = None;
@@ -1103,60 +1151,339 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
             }
         }
     }
+    // The style: MuseScore's defaults for the file's version, the score's own style, and the
+    // style file of an .mscz, in that order.
+    let major = if version.starts_with('3') { 3 } else { 4 };
+    let mut style: BTreeMap<String, String> = ms_defaults(major)
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
     if let Some(st) = sc.child("Style") {
-        apply_style(&mut score, st);
+        collect_style(&mut style, st);
     }
+    if let Some(mss) = mss
+        && let Ok(r) = dom::parse(mss)
+        && let Some(st) = if r.name == "Style" {
+            Some(&r)
+        } else {
+            r.child("Style")
+        }
+    {
+        collect_style(&mut style, st);
+    }
+    apply_style(&mut score, &style, major);
     score.normalize();
     Ok(score)
 }
 
-/// Page size, margins, staff size and distances from a MuseScore style (inline `<Style>` or
-/// the `score_style.mss` of an `.mscz`). Page lengths are in inches, the staff space in mm,
-/// distances in staff spaces.
-pub(crate) fn apply_style(score: &mut Score, st: &Element) {
-    let num = |k: &str| st.child_num(k).filter(|v| v.is_finite() && *v > 0.0);
+/// MuseScore's own values for the style settings ScoreArt reads, by major version (a score
+/// stores only what differs from them). Observed in style files saved by MuseScore 3 and 4.
+fn ms_defaults(major: u8) -> &'static [(&'static str, &'static str)] {
+    const COMMON: &[(&str, &str)] = &[
+        ("pageWidth", "8.27"),
+        ("pageHeight", "11.69"),
+        ("staffUpperBorder", "7"),
+        ("staffLowerBorder", "7"),
+        ("staffDistance", "6.5"),
+        ("akkoladeDistance", "6.5"),
+        ("minSystemDistance", "8.5"),
+        ("maxSystemDistance", "15"),
+        ("spreadSystem", "2.5"),
+        ("minSystemSpread", "8.5"),
+        ("maxSystemSpread", "32"),
+        ("lastSystemFillLimit", "0.3"),
+        ("firstSystemIndentationValue", "5"),
+        ("showPageNumber", "1"),
+        ("showPageNumberOne", "0"),
+        ("headerFirstPage", "0"),
+        ("headerOddEven", "1"),
+        ("footerFirstPage", "1"),
+        ("footerOddEven", "1"),
+        ("evenFooterC", "$:copyright:"),
+        ("oddFooterC", "$:copyright:"),
+        ("showFooter", "1"),
+        ("titleAlign", "center,top"),
+        ("subTitleAlign", "center,top"),
+        ("composerAlign", "right,bottom"),
+        ("lyricistAlign", "left,bottom"),
+        ("frameAlign", "left,top"),
+        ("tempoFontStyle", "1"),
+        ("rehearsalMarkFontStyle", "1"),
+        ("fingeringFontSize", "8"),
+        ("measureNumberFontSize", "8"),
+        ("tempoFontSize", "12"),
+        ("systemFontSize", "10"),
+        ("staffFontSize", "10"),
+        ("rehearsalMarkFontSize", "14"),
+    ];
+    const V3: &[(&str, &str)] = &[
+        ("pagePrintableWidth", "7.08661"),
+        ("pageOddLeftMargin", "0.590551"),
+        ("pageEvenLeftMargin", "0.590551"),
+        ("pageOddTopMargin", "0.590551"),
+        ("pageOddBottomMargin", "0.590551"),
+        ("pageEvenTopMargin", "0.590551"),
+        ("pageEvenBottomMargin", "0.590551"),
+        ("spatium", "1.74978"),
+        ("enableVerticalSpread", "1"),
+        ("measureSpacing", "1.2"),
+        ("enableIndentationOnFirstSystem", "1"),
+        ("showHeader", "1"),
+        ("evenHeaderL", "$p"),
+        ("oddHeaderR", "$p"),
+        ("footerOffset", "0"),
+        ("defaultFontFace", "Edwin"),
+        ("titleFontSize", "22"),
+        ("subTitleFontSize", "16"),
+        ("composerFontSize", "10"),
+        ("lyricistFontSize", "10"),
+        ("headerFontSize", "11"),
+        ("headerFontStyle", "1"),
+        ("footerFontSize", "9"),
+        ("longInstrumentFontSize", "10"),
+        ("measureNumberFontStyle", "2"),
+        ("measureNumberFontSpatiumDependent", "0"),
+        ("chordSymbolAFontSize", "11"),
+        ("lyricsOddFontSize", "10"),
+        ("frameFontSize", "10"),
+    ];
+    const V4: &[(&str, &str)] = &[
+        ("pagePrintableWidth", "7.4826"),
+        ("pageOddLeftMargin", "0.393701"),
+        ("pageEvenLeftMargin", "0.393701"),
+        ("pageOddTopMargin", "0.393701"),
+        ("pageOddBottomMargin", "0.787402"),
+        ("pageEvenTopMargin", "0.393701"),
+        ("pageEvenBottomMargin", "0.787402"),
+        ("spatium", "1.76389"),
+        ("enableVerticalSpread", "0"),
+        ("measureSpacing", "1.5"),
+        ("enableIndentationOnFirstSystem", "0"),
+        ("showHeader", "0"),
+        ("evenFooterL", "$p"),
+        ("oddFooterR", "$p"),
+        ("footerOffset", "5"),
+        ("defaultFontFace", "Edwin"),
+        ("titleFontSize", "24"),
+        ("subTitleFontSize", "14"),
+        ("composerFontSize", "12"),
+        ("lyricistFontSize", "12"),
+        ("headerFontSize", "8"),
+        ("footerFontSize", "8"),
+        ("longInstrumentFontSize", "12"),
+        ("chordSymbolAFontSize", "12"),
+        ("lyricsOddFontSize", "11"),
+        ("frameFontSize", "12"),
+    ];
+    static MERGED: std::sync::OnceLock<[Vec<(&'static str, &'static str)>; 2]> = std::sync::OnceLock::new();
+    let m = MERGED.get_or_init(|| {
+        let mut v3 = COMMON.to_vec();
+        v3.extend_from_slice(V3);
+        let mut v4 = COMMON.to_vec();
+        v4.extend_from_slice(V4);
+        [v3, v4]
+    });
+    if major == 3 { &m[0] } else { &m[1] }
+}
+
+/// Adds a `<Style>`'s values to `map` (offsets by their y, as "footerOffset" → "5").
+fn collect_style(map: &mut BTreeMap<String, String>, st: &Element) {
+    for c in &st.children {
+        let v = if c.name.ends_with("Offset") {
+            c.attr("y").unwrap_or("0").to_string()
+        } else {
+            c.text.trim().to_string()
+        };
+        // MuseScore 3 wrote the staff space capitalised.
+        let name = if c.name == "Spatium" {
+            "spatium".to_string()
+        } else {
+            c.name.clone()
+        };
+        map.insert(name, v);
+    }
+}
+
+/// Whether a font is a sans-serif one (everything else counts as serif).
+fn sans_font(face: &str) -> bool {
+    let f = face.to_lowercase();
+    f.contains("sans")
+        || [
+            "arial",
+            "helvetica",
+            "inter",
+            "roboto",
+            "verdana",
+            "calibri",
+            "segoe",
+            "tahoma",
+            "lato",
+        ]
+        .iter()
+        .any(|n| f.starts_with(n))
+}
+
+/// The page format, headers and footers and text styles of a MuseScore style (page lengths in
+/// inches, the staff space in mm, distances in staff spaces, font sizes in points).
+pub(crate) fn apply_style(score: &mut Score, st: &BTreeMap<String, String>, major: u8) {
+    use scoreart_model::{TextAlign, TextFont, TextKind, TextStyle};
+    let text = |k: &str| st.get(k).map(String::as_str);
+    let num = |k: &str| {
+        text(k)
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .filter(|v| v.is_finite())
+    };
+    let flag = |k: &str| text(k).map(|v| v.trim() == "1" || v.trim() == "true");
     let inch = |v: f64| (v * 25.4) as f32;
     let f = &mut score.page;
-    if let Some(s) = num("spatium").or_else(|| num("Spatium")) {
+    if let Some(s) = num("spatium").filter(|s| *s > 0.0) {
         f.staff_space_mm = s as f32;
     }
-    if let Some(w) = num("pageWidth") {
+    let w = num("pageWidth").filter(|v| *v > 0.0);
+    if let Some(w) = w {
         f.width_mm = inch(w);
-        if let (Some(pw), Some(l)) = (num("pagePrintableWidth"), num("pageOddLeftMargin")) {
+    }
+    if let Some(h) = num("pageHeight").filter(|v| *v > 0.0) {
+        f.height_mm = inch(h);
+    }
+    let printable = num("pagePrintableWidth");
+    if let (Some(w), Some(pw)) = (w, printable) {
+        if let Some(l) = num("pageOddLeftMargin") {
             f.margin_left_mm = inch(l);
             f.margin_right_mm = inch((w - pw - l).max(0.0));
         }
-    }
-    if let Some(h) = num("pageHeight") {
-        f.height_mm = inch(h);
-    }
-    if let Some(t) = num("pageOddTopMargin") {
-        f.margin_top_mm = inch(t);
-    }
-    if let Some(b) = num("pageOddBottomMargin") {
-        f.margin_bottom_mm = inch(b);
-    }
-    if let Some(d) = num("akkoladeDistance") {
-        f.staff_gap = d as f32;
-    }
-    if let Some(d) = num("staffDistance") {
-        f.part_gap = d as f32;
-    }
-    if let Some(d) = num("minSystemDistance") {
-        f.system_gap = d as f32;
-    }
-    score.page = score.page.clamped();
-}
-
-/// Applies a `score_style.mss` file.
-pub(crate) fn apply_style_file(score: &mut Score, mss: &str) {
-    if let Ok(root) = dom::parse(mss)
-        && let Some(st) = if root.name == "Style" {
-            Some(&root)
-        } else {
-            root.child("Style")
+        if let Some(l) = num("pageEvenLeftMargin") {
+            f.even_margin_left_mm = inch(l);
+            f.even_margin_right_mm = inch((w - pw - l).max(0.0));
         }
-    {
-        apply_style(score, st);
+    }
+    for (k, slot) in [
+        ("pageOddTopMargin", &mut f.margin_top_mm),
+        ("pageOddBottomMargin", &mut f.margin_bottom_mm),
+        ("pageEvenTopMargin", &mut f.even_margin_top_mm),
+        ("pageEvenBottomMargin", &mut f.even_margin_bottom_mm),
+    ] {
+        if let Some(v) = num(k).filter(|v| *v >= 0.0) {
+            *slot = inch(v);
+        }
+    }
+    // Two-sided matters only where the even pages differ.
+    let differ = |a: f32, b: f32| (a - b).abs() > 0.05;
+    f.two_sided = flag("pageTwosided").unwrap_or(true)
+        && (differ(f.margin_left_mm, f.even_margin_left_mm)
+            || differ(f.margin_right_mm, f.even_margin_right_mm)
+            || differ(f.margin_top_mm, f.even_margin_top_mm)
+            || differ(f.margin_bottom_mm, f.even_margin_bottom_mm));
+    let sp = |k: &str, slot: &mut f32| {
+        if let Some(v) = num(k).filter(|v| *v >= 0.0) {
+            *slot = v as f32;
+        }
+    };
+    sp("staffUpperBorder", &mut f.music_top);
+    sp("staffLowerBorder", &mut f.music_bottom);
+    sp("akkoladeDistance", &mut f.staff_gap);
+    sp("staffDistance", &mut f.part_gap);
+    sp("maxSystemDistance", &mut f.max_system_gap);
+    sp("spreadSystem", &mut f.spread_factor);
+    sp("maxSystemSpread", &mut f.max_system_spread);
+    sp("maxStaffSpread", &mut f.max_staff_spread);
+    sp("lastSystemFillLimit", &mut f.last_system_fill);
+    f.vertical_justify = flag("enableVerticalSpread").unwrap_or(false);
+    // With vertical justification the least system distance is a setting of its own.
+    let min_key = if f.vertical_justify {
+        "minSystemSpread"
+    } else {
+        "minSystemDistance"
+    };
+    sp(min_key, &mut f.system_gap);
+    f.first_indent = if flag("enableIndentationOnFirstSystem").unwrap_or(false) {
+        num("firstSystemIndentationValue").unwrap_or(5.0) as f32
+    } else {
+        0.0
+    };
+    // MuseScore spaces notes by a ratio whose default is ScoreArt's normal spacing.
+    let normal = if major == 3 { 1.2 } else { 1.5 };
+    if let Some(v) = num("measureSpacing").filter(|v| *v > 0.0) {
+        f.spacing = (v / normal) as f32;
+    }
+    sp("headerOffset", &mut f.header_offset);
+    sp("footerOffset", &mut f.footer_offset);
+    score.page = score.page.clamped();
+
+    // Headers and footers.
+    let hf = &mut score.header_footer;
+    let field = |k: &str| clip(text(k).unwrap_or(""));
+    hf.show_header = flag("showHeader").unwrap_or(false);
+    hf.header_first_page = flag("headerFirstPage").unwrap_or(false);
+    hf.header_odd_even = flag("headerOddEven").unwrap_or(true);
+    hf.show_footer = flag("showFooter").unwrap_or(true);
+    hf.footer_first_page = flag("footerFirstPage").unwrap_or(true);
+    hf.footer_odd_even = flag("footerOddEven").unwrap_or(true);
+    for (row, side) in [(0usize, "odd"), (1, "even")] {
+        for (i, pos) in ["L", "C", "R"].iter().enumerate() {
+            hf.header[row][i] = field(&format!("{side}Header{pos}"));
+            hf.footer[row][i] = field(&format!("{side}Footer{pos}"));
+        }
+    }
+    score.hide_page_numbers = !flag("showPageNumber").unwrap_or(true);
+    hf.page_number_first_page = flag("showPageNumberOne").unwrap_or(false);
+
+    // Text styles.
+    let spatium = f64::from(score.page.staff_space_mm);
+    let default_face = text("defaultFontFace").unwrap_or("Edwin").to_string();
+    for (prefix, kind) in [
+        ("title", TextKind::Title),
+        ("subTitle", TextKind::Subtitle),
+        ("composer", TextKind::Composer),
+        ("lyricist", TextKind::Lyricist),
+        ("header", TextKind::Header),
+        ("footer", TextKind::Footer),
+        ("footer", TextKind::PageNumber),
+        ("footer", TextKind::Copyright),
+        ("frame", TextKind::Text),
+        ("longInstrument", TextKind::InstrumentName),
+        ("measureNumber", TextKind::MeasureNumber),
+        ("tempo", TextKind::Tempo),
+        ("system", TextKind::SystemText),
+        ("staff", TextKind::StaffText),
+        ("rehearsalMark", TextKind::Rehearsal),
+        ("chordSymbolA", TextKind::ChordSymbol),
+        ("lyricsOdd", TextKind::Lyrics),
+        ("fingering", TextKind::Fingering),
+    ] {
+        let k = |what: &str| format!("{prefix}{what}");
+        let face = text(&k("FontFace")).unwrap_or(&default_face).to_string();
+        let Some(mut size) = num(&k("FontSize"))
+            .or_else(|| num("defaultFontSize"))
+            .or(Some(10.0))
+        else {
+            continue;
+        };
+        // Sizes that grow with the staff size are given for MuseScore's standard staff space.
+        let dependent = flag(&k("FontSpatiumDependent")).unwrap_or(!kind.is_block());
+        if dependent {
+            size *= spatium / 1.764;
+        }
+        let bits = num(&k("FontStyle")).unwrap_or(0.0) as u32;
+        let align = match text(&k("Align")).and_then(|a| a.split(',').next()).map(str::trim) {
+            Some("left") => TextAlign::Left,
+            Some("right") => TextAlign::Right,
+            Some("center") => TextAlign::Center,
+            _ => kind.default_style().align,
+        };
+        score.text_styles.set(
+            kind,
+            TextStyle {
+                font: if sans_font(&face) {
+                    TextFont::Sans
+                } else {
+                    TextFont::Serif
+                },
+                size: ((size.clamp(4.0, 96.0) * 2.0).round() / 2.0) as f32,
+                bold: bits & 1 != 0,
+                italic: bits & 2 != 0,
+                align,
+            },
+        );
     }
 }

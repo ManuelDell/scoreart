@@ -239,6 +239,8 @@ pub struct ScoreApp {
     pub(crate) block_sel: Option<scoreart_model::BlockRef>,
     /// The "Fonts" window, when open.
     pub(crate) fonts: Option<texts::FontsWindow>,
+    /// The header and footer being edited, while the dialog is open.
+    pub(crate) header_footer: Option<texts::HeaderFooterEdit>,
     /// What surrounds the score: ribbon, side panel, both or the focus bar.
     pub surface: ribbon::Surface,
     pub ribbon: ribbon::RibbonState,
@@ -309,6 +311,7 @@ impl ScoreApp {
             block_drag: None,
             block_sel: None,
             fonts: None,
+            header_footer: None,
             surface,
             ribbon: Default::default(),
         }
@@ -428,6 +431,7 @@ impl ScoreApp {
         instruments::dialogs(self, &ctx);
         page::dialog(self, &ctx);
         texts::window(self, &ctx);
+        texts::header_footer_dialog(self, &ctx);
         midi::window(self, &ctx);
         if self.surface == ribbon::Surface::Focus {
             ribbon::focus_bar(self, &ctx);
@@ -451,6 +455,7 @@ impl ScoreApp {
             || self.dialog.is_some()
             || self.instruments.has_pending()
             || self.page_settings.is_some()
+            || self.header_footer.is_some()
         {
             return;
         }

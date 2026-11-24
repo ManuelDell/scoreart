@@ -436,12 +436,20 @@ fn natural_width(sys: &System, plans: &[MeasurePlan]) -> f32 {
     sys.indent + sys.header + body + 0.5
 }
 
-fn break_systems(score: &Score, plans: &[MeasurePlan], width: f32) -> Vec<System> {
+/// Breaks the measures into systems of `width`; `fill` is the share of the line under which
+/// the last system is not stretched, `first_indent` the extra indent of the first system.
+fn break_systems(
+    score: &Score,
+    plans: &[MeasurePlan],
+    width: f32,
+    fill: f32,
+    first_indent: f32,
+) -> Vec<System> {
     let mut systems = Vec::new();
     let mut m = 0usize;
     while m < plans.len() {
         let first = systems.is_empty();
-        let indent = name_indent(score, first);
+        let indent = name_indent(score, first) + if first { first_indent } else { 0.0 };
         let header = header_width(score, m);
         let avail = (width - indent - header).max(10.0);
         let mut ms = Vec::new();
@@ -492,7 +500,7 @@ fn break_systems(score: &Score, plans: &[MeasurePlan], width: f32) -> Vec<System
         };
         let last = m >= plans.len();
         let mut ragged = None;
-        if last && used < avail * 0.75 {
+        if last && used < avail * fill {
             stretch = 1.0;
             let repeats: f32 = ms
                 .iter()
@@ -568,7 +576,7 @@ impl<'a> Fonts<'a> {
     /// The size in sp of a text of `kind` that ScoreArt draws `nominal` sp big by default.
     fn size(&self, kind: TextKind, nominal: f32) -> f32 {
         let st = self.styles.get(kind);
-        let base = kind.default_style().size_sp(1.75);
+        let base = kind.reference_pt() * 0.3528 / 1.75;
         (nominal * st.size_sp(self.space) / base).clamp(0.3, 60.0)
     }
 
@@ -779,10 +787,91 @@ struct Ctx<'a> {
     system_ends: Vec<(usize, f32, f32)>,
 }
 
+/// One system placed on a page (before drawing): its page, top, staff tops and height, and
+/// the headings above it with their tops.
+struct Placed {
+    si: usize,
+    page: usize,
+    y: f32,
+    tops: Vec<(usize, usize, f32)>,
+    sys_h: f32,
+    blocks: Vec<(usize, f32)>,
+}
+
+/// The staves of a system one below the other: top of every staff relative to the system top,
+/// and the system's height.
+fn stack_staves(score: &Score, style: &Style, sys: &System) -> (Vec<(usize, usize, f32)>, f32) {
+    let mut tops: Vec<(usize, usize, f32)> = Vec::new();
+    let mut sy = 0.0f32;
+    let first_in_sys = sys.measures.first().copied();
+    let has_above = sys.measures.iter().any(|m| {
+        score.measures.get(*m).is_some_and(|i| {
+            // A rehearsal mark starting the system sits beside the clef; one moved below
+            // the staff needs no row above it.
+            let rehearsal_row = i.rehearsal.is_some()
+                && Some(*m) != first_in_sys
+                && !i.rehearsal_place.is_some_and(|p| p.below);
+            i.tempo.is_some()
+                || i.text.is_some()
+                || i.tempo_text.is_some()
+                || rehearsal_row
+                || !i.jumps.is_empty()
+        })
+    });
+    if has_above {
+        sy += 6.0;
+    }
+    if sys
+        .measures
+        .iter()
+        .any(|m| score.measures.get(*m).is_some_and(|i| i.volta.is_some()))
+    {
+        sy += 2.5;
+    }
+    for (pi, part) in score.parts.iter().enumerate() {
+        let visible: Vec<usize> = (0..part.staff_count()).filter(|s| shown(score, pi, *s)).collect();
+        for &s in &visible {
+            // Make room for notes (with stems and marks) far above or below the staff.
+            let (reach_up, reach_down) = staff_reach(score, pi, s, &sys.measures);
+            sy += (reach_up - 3.0).max(0.0);
+            tops.push((pi, s, sy));
+            sy += (reach_down - 3.0).max(0.0);
+            // One lyric line per verse used in this system.
+            let verses = sys
+                .measures
+                .iter()
+                .filter_map(|m| score.staff_measure(pi, s, *m))
+                .flat_map(|sm| sm.voices.iter())
+                .flat_map(|v| v.events.iter())
+                .map(|e| e.verse_count())
+                .max()
+                .unwrap_or(0);
+            sy += 4.0
+                + if visible.last().is_some_and(|l| s < *l) {
+                    style.staff_gap
+                } else {
+                    style.part_gap
+                };
+            if verses > 0 {
+                sy += 2.6 + lyric_line(&Fonts::of(score)) * (verses.saturating_sub(1)) as f32;
+            }
+        }
+    }
+    (tops, (sy - style.part_gap).max(4.0))
+}
+
 pub fn layout(score: &Score, style: &Style) -> Layout {
     let (mut pw, mut ph) = style.page_sp();
-    let [mt, mb, ml, mr] = style.margins_sp().map(|m| m.min(pw / 4.0).min(ph / 4.0));
-    let mut width = pw - ml - mr;
+    let first_number = style.page.first_page_number;
+    let fit = |m: [f32; 4], pw: f32, ph: f32| m.map(|v| v.min(pw / 4.0).min(ph / 4.0));
+    // Margins by page index: top, bottom, left, right.
+    let margins = |page: usize, pw: f32, ph: f32| {
+        fit(style.margins_of(first_number.saturating_add(page as i32)), pw, ph)
+    };
+    let [mt, mb, ml, mr] = margins(0, pw, ph);
+    // Systems are as wide as the narrower of the odd and even pages allows.
+    let [_, _, el, er] = margins(1, pw, ph);
+    let mut width = (pw - ml - mr).min(pw - el - er);
     let acc = accidentals(score);
     let plans = plan_measures(score, &acc, style);
     let systems = if style.view == View::Horizontal {
@@ -792,7 +881,13 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
         pw = ml + width + mr;
         vec![sys]
     } else {
-        break_systems(score, &plans, width)
+        break_systems(
+            score,
+            &plans,
+            width,
+            style.page.last_system_fill,
+            style.page.first_indent,
+        )
     };
     let endless = style.view != View::Page;
 
@@ -810,15 +905,15 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
         height: ph,
         items: Vec::new(),
     };
-    let mut page_index = 0usize;
 
     // Title block.
     let mut y = mt;
     let meta = &score.meta;
+    let mut titled = false;
     if style.view != View::Horizontal {
         let mut o = Out {
             page: &mut page,
-            page_index,
+            page_index: 0,
             hits: &mut out.hits,
             f: fonts,
         };
@@ -866,84 +961,32 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
         }
         if y > mt {
             y += 3.0;
-        }
-        if !endless && !meta.copyright.is_empty() {
-            // At the foot of the first page, in the bottom margin.
-            let h = block_height(&o.f, &frame, TextKind::Copyright, &meta.copyright);
-            let at = (ph - mb + 1.0).min(ph - h - 0.5).max(ph - mb - h);
-            draw_block(
-                &mut o,
-                &frame,
-                TextKind::Copyright,
-                &meta.copyright,
-                at,
-                fixed(TextKind::Copyright),
-            );
+            titled = true;
         }
     }
 
+    // Pass 1: every system (with the headings above it) placed on a page.
+    let mut placed: Vec<Placed> = Vec::with_capacity(systems.len());
+    let mut page_index = 0usize;
+    // Where the music may start on a page: below its header, and the first staff at least the
+    // music top margin below the top margin.
+    let page_top = |page: usize, above0: f32| -> f32 {
+        let [mt, ..] = margins(page, pw, ph);
+        let info = info_for(score, style, page, usize::MAX);
+        let header = header_height(&fonts, score, &info, false);
+        let header = if header > 0.0 {
+            header + style.page.header_offset.max(0.0) + 1.0
+        } else {
+            0.0
+        };
+        (mt + style.page.music_top - above0).max(mt + header)
+    };
     for (si, sys) in systems.iter().enumerate() {
-        // Vertical plan: top of every staff relative to the system top.
-        let mut tops: Vec<(usize, usize, f32)> = Vec::new();
-        let mut sy = 0.0f32;
-        let first_in_sys = sys.measures.first().copied();
-        let has_above = sys.measures.iter().any(|m| {
-            score.measures.get(*m).is_some_and(|i| {
-                // A rehearsal mark starting the system sits beside the clef; one moved below
-                // the staff needs no row above it.
-                let rehearsal_row = i.rehearsal.is_some()
-                    && Some(*m) != first_in_sys
-                    && !i.rehearsal_place.is_some_and(|p| p.below);
-                i.tempo.is_some()
-                    || i.text.is_some()
-                    || i.tempo_text.is_some()
-                    || rehearsal_row
-                    || !i.jumps.is_empty()
-            })
-        });
-        if has_above {
-            sy += 6.0;
-        }
-        if sys
-            .measures
-            .iter()
-            .any(|m| score.measures.get(*m).is_some_and(|i| i.volta.is_some()))
-        {
-            sy += 2.5;
-        }
-        for (pi, part) in score.parts.iter().enumerate() {
-            let visible: Vec<usize> = (0..part.staff_count()).filter(|s| shown(score, pi, *s)).collect();
-            for &s in &visible {
-                // Make room for notes (with stems and marks) far above or below the staff.
-                let (reach_up, reach_down) = staff_reach(score, pi, s, &sys.measures);
-                sy += (reach_up - 3.0).max(0.0);
-                tops.push((pi, s, sy));
-                sy += (reach_down - 3.0).max(0.0);
-                // One lyric line per verse used in this system.
-                let verses = sys
-                    .measures
-                    .iter()
-                    .filter_map(|m| score.staff_measure(pi, s, *m))
-                    .flat_map(|sm| sm.voices.iter())
-                    .flat_map(|v| v.events.iter())
-                    .map(|e| e.verse_count())
-                    .max()
-                    .unwrap_or(0);
-                let lyrics = verses > 0;
-                sy += 4.0
-                    + if visible.last().is_some_and(|l| s < *l) {
-                        style.staff_gap
-                    } else {
-                        style.part_gap
-                    };
-                if lyrics {
-                    sy += 2.6 + lyric_line(&Fonts::of(score)) * (verses.saturating_sub(1)) as f32;
-                }
-            }
-        }
-        let sys_h = (sy - style.part_gap).max(4.0);
-        // Headings and text blocks above this system.
-        let frame = Frame { ml, mr, pw };
+        let (tops, sys_h) = stack_staves(score, style, sys);
+        let above0 = tops.first().map_or(0.0, |t| t.2);
+        let last_top = tops.last().map_or(0.0, |t| t.2);
+        let [_, mbp, mlp, mrp] = margins(page_index, pw, ph);
+        let frame = Frame { ml: mlp, mr: mrp, pw };
         let above: Vec<(usize, &scoreart_model::TextBlock)> = if style.view == View::Horizontal {
             Vec::new()
         } else {
@@ -962,6 +1005,14 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             .iter()
             .map(|(_, b)| block_height(&fonts, &frame, b.kind, &b.text) + BLOCK_GAP)
             .sum();
+        if si == 0 {
+            // The first staff keeps the music top margin (below the titles, when any).
+            y = if titled {
+                y
+            } else {
+                y.max(page_top(0, above0) - blocks_h)
+            };
+        }
         // A page break set by the user after the previous system's last measure.
         let forced = si > 0
             && systems
@@ -969,41 +1020,156 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                 .and_then(|p| p.measures.last())
                 .and_then(|m| score.measures.get(*m))
                 .is_some_and(|i| i.page_break);
-        if !endless && (y + blocks_h + sys_h > ph - mb || forced) && !page.items.is_empty() && si > 0 {
+        // The system fits when its last staff keeps the music bottom margin and nothing of it
+        // runs into the bottom margin.
+        let bottom = ph - mbp;
+        let fits = y + blocks_h + last_top + 4.0 <= bottom - style.page.music_bottom
+            && y + blocks_h + sys_h <= bottom;
+        if !endless && (!fits || forced) && si > 0 {
+            page_index += 1;
+            y = page_top(page_index, above0) - blocks_h;
+        }
+        let [_, _, mlp, mrp] = margins(page_index, pw, ph);
+        let frame = Frame { ml: mlp, mr: mrp, pw };
+        let mut blocks = Vec::new();
+        for (i, b) in &above {
+            blocks.push((*i, y));
+            y += block_height(&fonts, &frame, b.kind, &b.text) + BLOCK_GAP;
+        }
+        placed.push(Placed {
+            si,
+            page: page_index,
+            y,
+            tops,
+            sys_h,
+            blocks,
+        });
+        y += sys_h + style.system_gap;
+    }
+
+    // Pass 2: pages filled down to the music bottom margin (not the last page): systems move
+    // apart up to the largest system distance; with vertical justification the staves inside
+    // the systems spread too.
+    if !endless {
+        let last_page = placed.last().map_or(0, |p| p.page);
+        for pg in 0..last_page {
+            let on: Vec<usize> = (0..placed.len()).filter(|k| placed[*k].page == pg).collect();
+            let Some(&last) = on.last() else { continue };
+            let [_, mbp, ..] = margins(pg, pw, ph);
+            let p = &placed[last];
+            let last_staff = p.y + p.tops.last().map_or(0.0, |t| t.2) + 4.0;
+            let room = (ph - mbp - style.page.music_bottom - last_staff)
+                .min(ph - mbp - (p.y + p.sys_h))
+                .max(0.0);
+            // A forced page break leaves the rest of its page as it is.
+            let forced = score
+                .measures
+                .get(systems[p.si].measures.last().copied().unwrap_or(0))
+                .is_some_and(|i| i.page_break);
+            let gaps = on.len().saturating_sub(1);
+            if room <= 0.0 || forced {
+                continue;
+            }
+            if style.page.vertical_justify {
+                let inner: usize = on.iter().map(|k| placed[*k].tops.len().saturating_sub(1)).sum();
+                let weight = gaps as f32 * style.page.spread_factor + inner as f32;
+                if weight <= 0.0 {
+                    continue;
+                }
+                let unit = room / weight;
+                let sys_extra = (unit * style.page.spread_factor)
+                    .min((style.page.max_system_spread - style.system_gap).max(0.0));
+                let staff_extra =
+                    unit.min((style.page.max_staff_spread - style.staff_gap.min(style.part_gap)).max(0.0));
+                let mut shift = 0.0;
+                for (n, k) in on.iter().enumerate() {
+                    let p = &mut placed[*k];
+                    if n > 0 {
+                        shift += sys_extra;
+                    }
+                    for (_, by) in &mut p.blocks {
+                        *by += shift;
+                    }
+                    p.y += shift;
+                    for (j, t) in p.tops.iter_mut().enumerate() {
+                        t.2 += staff_extra * j as f32;
+                    }
+                    let grow = staff_extra * p.tops.len().saturating_sub(1) as f32;
+                    p.sys_h += grow;
+                    shift += grow;
+                }
+            } else if gaps > 0 {
+                let extra = (room / gaps as f32).min((style.page.max_system_gap - style.system_gap).max(0.0));
+                for (n, k) in on.iter().enumerate() {
+                    let p = &mut placed[*k];
+                    let shift = extra * n as f32;
+                    p.y += shift;
+                    for (_, by) in &mut p.blocks {
+                        *by += shift;
+                    }
+                }
+            }
+        }
+    }
+
+    // Pass 3: drawing, page by page.
+    let mut page_index = 0usize;
+    for p in &placed {
+        if p.page != page_index {
             out.pages.push(std::mem::take(&mut page));
             page = Page {
                 width: pw,
                 height: ph,
                 items: Vec::new(),
             };
-            page_index += 1;
-            y = mt;
-            let mut o = Out {
-                page: &mut page,
-                page_index,
-                hits: &mut out.hits,
-                f: fonts,
-            };
-            page_furniture(&mut o, score, &frame, mt, ph, mb);
-            // Room for what stands above the first staff (it is measured from 3 sp above it).
-            y += 3.0;
+            page_index = p.page;
         }
-        if !above.is_empty() {
+        let [_, _, mlp, mrp] = margins(page_index, pw, ph);
+        let frame = Frame { ml: mlp, mr: mrp, pw };
+        if !p.blocks.is_empty() {
             let mut o = Out {
                 page: &mut page,
                 page_index,
                 hits: &mut out.hits,
                 f: fonts,
             };
-            for (i, b) in &above {
-                y += draw_block(&mut o, &frame, b.kind, &b.text, y, BlockRef::Added(*i)) + BLOCK_GAP;
+            for (i, by) in &p.blocks {
+                if let Some(b) = score.blocks.get(*i) {
+                    draw_block(&mut o, &frame, b.kind, &b.text, *by, BlockRef::Added(*i));
+                }
             }
         }
-        let top = y;
+        let Some(sys) = systems.get(p.si) else { continue };
         draw_system(
-            &mut ctx, &mut page, page_index, &mut out, sys, si, &plans, ml, width, top, &tops, sys_h,
+            &mut ctx, &mut page, page_index, &mut out, sys, p.si, &plans, mlp, width, p.y, &p.tops, p.sys_h,
         );
-        y += sys_h + style.system_gap;
+        y = p.y + p.sys_h + style.system_gap;
+    }
+    // Text after the last system (a poem at the end).
+    if style.view != View::Horizontal {
+        let n = score.measures.len();
+        for (i, b) in score.blocks.iter().enumerate().filter(|(_, b)| b.measure >= n) {
+            let [_, mbp, mlp, mrp] = margins(page_index, pw, ph);
+            let frame = Frame { ml: mlp, mr: mrp, pw };
+            let h = block_height(&fonts, &frame, b.kind, &b.text);
+            if !endless && y + h > ph - mbp && !page.items.is_empty() {
+                out.pages.push(std::mem::take(&mut page));
+                page = Page {
+                    width: pw,
+                    height: ph,
+                    items: Vec::new(),
+                };
+                page_index += 1;
+                y = margins(page_index, pw, ph)[0] + style.page.music_top;
+            }
+            let mut o = Out {
+                page: &mut page,
+                page_index,
+                hits: &mut out.hits,
+                f: fonts,
+            };
+            y += draw_block(&mut o, &frame, b.kind, &b.text, y, BlockRef::Added(i)) + BLOCK_GAP;
+        }
     }
     if endless {
         // The page ends below the last system.
@@ -1015,6 +1181,21 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
     draw_ties(&ctx, &mut out, &mut page, page_index);
     draw_spanners(&ctx, &mut out, &mut page, page_index);
     out.pages.push(page);
+    // Headers and footers, now that the number of pages is known.
+    if style.view == View::Page {
+        let pages = out.pages.len();
+        for (pi, pg) in out.pages.iter_mut().enumerate() {
+            let [mt, mb, ml, mr] = margins(pi, pw, ph);
+            let info = info_for(score, style, pi, pages);
+            let mut o = Out {
+                page: pg,
+                page_index: pi,
+                hits: &mut out.hits,
+                f: fonts,
+            };
+            draw_header_footer(&mut o, score, style, PageBox { mt, mb, ml, mr, ph }, pw, &info);
+        }
+    }
     out
 }
 
@@ -1065,7 +1246,7 @@ fn block_height(f: &Fonts, frame: &Frame, kind: TextKind, text: &str) -> f32 {
     if text.trim().is_empty() {
         return 0.0;
     }
-    let size = f.size(kind, kind.default_style().size_sp(1.75));
+    let size = f.size(kind, kind.reference_pt() * 0.3528 / 1.75);
     let n = block_lines(text, size, frame.width()).len().max(1) as f32;
     size + (n - 1.0) * line_height(size) + size * 0.25
 }
@@ -1083,7 +1264,7 @@ fn draw_block(o: &mut Out, frame: &Frame, kind: TextKind, text: &str, y: f32, bl
     };
     let (dx, dy) = (f32::from(score_offset.0) / 10.0, f32::from(score_offset.1) / 10.0);
     let st = o.f.styles.get(kind);
-    let size = o.f.size(kind, kind.default_style().size_sp(1.75));
+    let size = o.f.size(kind, kind.reference_pt() * 0.3528 / 1.75);
     let (x, align) = match st.align {
         scoreart_model::TextAlign::Left => (frame.ml, Align::Left),
         scoreart_model::TextAlign::Center => (frame.pw / 2.0, Align::Center),
@@ -1114,38 +1295,140 @@ fn draw_block(o: &mut Out, frame: &Frame, kind: TextKind, text: &str, y: f32, bl
     h
 }
 
-/// Page number, header and footer of every page after the first.
-fn page_furniture(o: &mut Out, score: &Score, frame: &Frame, mt: f32, ph: f32, mb: f32) {
-    let fixed = BlockRef::Fixed(TextKind::PageNumber);
-    if !score.hide_page_numbers {
-        let n = (o.page_index + 1).to_string();
-        let h = block_height(&o.f, frame, TextKind::PageNumber, &n);
-        draw_block(o, frame, TextKind::PageNumber, &n, (mt - 1.2 - h).max(0.3), fixed);
+/// The vertical frame of one page: margins and the page height, sp.
+#[derive(Clone, Copy)]
+struct PageBox {
+    mt: f32,
+    mb: f32,
+    ml: f32,
+    mr: f32,
+    ph: f32,
+}
+
+/// The text style of a header or footer field: the page number's or the copyright's when it
+/// holds only that, else the header's or footer's.
+fn field_kind(field: &str, footer: bool) -> TextKind {
+    match field.trim() {
+        "$p" | "$P" => TextKind::PageNumber,
+        "$C" | "$c" | "$:copyright:" => TextKind::Copyright,
+        _ if footer => TextKind::Footer,
+        _ => TextKind::Header,
     }
-    for (i, b) in score.blocks.iter().enumerate() {
-        let h = block_height(&o.f, frame, b.kind, &b.text);
-        match b.kind {
-            TextKind::Header => {
-                draw_block(
-                    o,
-                    frame,
-                    b.kind,
-                    &b.text,
-                    (mt - 1.2 - h).max(0.3),
-                    BlockRef::Added(i),
-                );
+}
+
+fn info_for<'a>(
+    score: &'a Score,
+    style: &Style,
+    page_index: usize,
+    pages: usize,
+) -> scoreart_model::PageInfo<'a> {
+    scoreart_model::PageInfo {
+        meta: &score.meta,
+        number: style.page.first_page_number.saturating_add(page_index as i32),
+        pages,
+        first: page_index == 0,
+        page_numbers: !score.hide_page_numbers,
+        page_number_first_page: score.header_footer.page_number_first_page,
+    }
+}
+
+/// The lines of the header (or footer) fields of a page, macros replaced: (field, kind, lines).
+fn header_lines(
+    score: &Score,
+    info: &scoreart_model::PageInfo,
+    footer: bool,
+) -> Vec<(usize, TextKind, Vec<String>)> {
+    let odd = info.number.rem_euclid(2) == 1;
+    let Some(fields) = score.header_footer.fields(footer, info.first, odd) else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| {
+            let text = scoreart_model::expand_macros(f, info);
+            let lines: Vec<String> = text.lines().map(str::to_string).collect();
+            (lines.iter().any(|l| !l.trim().is_empty())).then(|| (i, field_kind(f, footer), lines))
+        })
+        .collect()
+}
+
+/// Height of a page's header (or footer), sp; 0 when there is none.
+fn header_height(fonts: &Fonts, score: &Score, info: &scoreart_model::PageInfo, footer: bool) -> f32 {
+    header_lines(score, info, footer)
+        .iter()
+        .map(|(_, k, lines)| {
+            let size = fonts.size(*k, k.reference_pt() * 0.3528 / 1.75);
+            size + (lines.len().max(1) - 1) as f32 * line_height(size) + size * 0.25
+        })
+        .fold(0.0, f32::max)
+}
+
+/// Draws the header and footer of a page: three fields each (left, centre, right) at the top
+/// and bottom margin; they can be picked up and moved together.
+fn draw_header_footer(
+    o: &mut Out,
+    score: &Score,
+    style: &Style,
+    pb: PageBox,
+    pw: f32,
+    info: &scoreart_model::PageInfo,
+) {
+    for footer in [false, true] {
+        let kind = if footer {
+            TextKind::Footer
+        } else {
+            TextKind::Header
+        };
+        let (dx, dy) = score
+            .block_offsets
+            .get(&kind)
+            .map_or((0.0, 0.0), |(x, y)| (f32::from(*x) / 10.0, f32::from(*y) / 10.0));
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for (i, k, lines) in header_lines(score, info, footer) {
+            let size = o.f.size(k, k.reference_pt() * 0.3528 / 1.75);
+            let (x, align) = match i {
+                0 => (pb.ml, Align::Left),
+                1 => (pw / 2.0, Align::Center),
+                _ => (pw - pb.mr, Align::Right),
+            };
+            let x = x + dx;
+            let h = size + (lines.len().max(1) - 1) as f32 * line_height(size);
+            // Header: hanging from the top margin; footer: standing on the bottom margin.
+            let top = if footer {
+                pb.ph - pb.mb + style.page.footer_offset - h + dy
+            } else {
+                pb.mt + style.page.header_offset + dy
+            };
+            let mut by = top + size;
+            for l in &lines {
+                let w = text_width(l, size);
+                let lx = match align {
+                    Align::Left => x,
+                    Align::Center => x - w / 2.0,
+                    Align::Right => x - w,
+                };
+                x0 = x0.min(lx);
+                x1 = x1.max(lx + w);
+                if !l.trim().is_empty() {
+                    let sh = o.f.shape(k, l, x, by, size, align);
+                    o.push(sh, None);
+                }
+                by += line_height(size);
             }
-            TextKind::Footer => {
-                draw_block(
-                    o,
-                    frame,
-                    b.kind,
-                    &b.text,
-                    (ph - mb + 1.0).min(ph - h - 0.3),
-                    BlockRef::Added(i),
-                );
-            }
-            _ => {}
+            y0 = y0.min(top - 0.2);
+            y1 = y1.max(top + h + 0.3);
+        }
+        if x1 > x0 {
+            o.hit(
+                x0 - 0.3,
+                y0,
+                x1 + 0.3,
+                y1,
+                Target::Block {
+                    block: BlockRef::Fixed(kind),
+                },
+            );
         }
     }
 }

@@ -339,13 +339,17 @@ impl Session {
         Ok(())
     }
 
-    /// Serialises the score in the format given by `name`'s extension.
+    /// Serialises the score in the format given by `name`'s extension. MusicXML carries the
+    /// lines and pages of the page view, so other programs show the same layout.
     pub fn save_bytes(&self, name: &str) -> Result<Vec<u8>> {
         match Format::from_name(name) {
-            Some(Format::MusicXml) => Ok(scoreart_musicxml::to_string(&self.score).into_bytes()),
-            Some(Format::Mxl) => {
-                scoreart_musicxml::to_mxl(&self.score).map_err(|e| Error::File(e.to_string()))
-            }
+            Some(Format::MusicXml) => Ok(scoreart_musicxml::to_string_laid_out(
+                &self.score,
+                &system_starts(&self.score),
+            )
+            .into_bytes()),
+            Some(Format::Mxl) => scoreart_musicxml::to_mxl_laid_out(&self.score, &system_starts(&self.score))
+                .map_err(|e| Error::File(e.to_string())),
             Some(Format::Midi) => Ok(scoreart_midi::to_smf(&self.score)),
             Some(Format::Wav) => Ok(wav_with(&self.score, &self.sounds)),
             Some(Format::Stems) => stems(&self.score, &self.sounds),
@@ -607,4 +611,26 @@ pub fn stems(score: &Score, sounds: &[Arc<SoundBank>]) -> Result<Vec<u8>> {
         z.finish().map_err(|e| Error::File(e.to_string()))?;
     }
     Ok(buf.into_inner())
+}
+
+/// The first measure of every system after the first in the page view, and whether it starts a
+/// new page.
+pub fn system_starts(score: &Score) -> Vec<(usize, bool)> {
+    let layout = scoreart_engrave::layout(score, &Style::new(&score.page, scoreart_engrave::View::Page));
+    let mut first: std::collections::BTreeMap<usize, (usize, usize)> = std::collections::BTreeMap::new();
+    for b in &layout.staves {
+        let e = first.entry(b.system).or_insert((b.measure, b.page));
+        if b.measure < e.0 {
+            *e = (b.measure, b.page);
+        }
+    }
+    let mut out = Vec::new();
+    let mut prev_page = None;
+    for (sys, (m, page)) in first {
+        if sys > 0 && m > 0 {
+            out.push((m, prev_page.is_some_and(|p| p != page)));
+        }
+        prev_page = Some(page);
+    }
+    out
 }

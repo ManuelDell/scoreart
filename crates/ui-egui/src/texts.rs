@@ -106,9 +106,13 @@ fn sample(styles: &TextStyles, page: PageFormat) -> Score {
             0,
         ),
         block(TextKind::Heading, t("Second verse"), 4),
-        block(TextKind::Header, t("Ode to Joy · header"), 0),
-        block(TextKind::Footer, t("Footer"), 0),
     ];
+    // A header on the pages after the first; the footer as in a new score (page number and
+    // copyright).
+    s.header_footer.show_header = true;
+    for row in s.header_footer.header.iter_mut() {
+        row[1] = t("Ode to Joy · header").into();
+    }
     s
 }
 
@@ -484,8 +488,13 @@ pub(crate) struct BlockDialog {
     value: String,
 }
 
-/// Opens the dialog for a new heading, text block, header or footer.
+/// Opens the dialog for a new heading or text block (a header or footer opens the header and
+/// footer dialog).
 pub(crate) fn add_block(app: &mut ScoreApp, kind: TextKind) {
+    if matches!(kind, TextKind::Header | TextKind::Footer) {
+        open_header_footer(app);
+        return;
+    }
     app.dialog = Some(Dialog::Block(BlockDialog {
         block: None,
         kind,
@@ -497,8 +506,8 @@ pub(crate) fn add_block(app: &mut ScoreApp, kind: TextKind) {
 pub(crate) fn edit_block(app: &mut ScoreApp, block: BlockRef) {
     let score = &app.session.score;
     let (kind, value) = match block {
-        BlockRef::Fixed(TextKind::PageNumber) => {
-            open(app, TextKind::PageNumber);
+        BlockRef::Fixed(TextKind::PageNumber | TextKind::Header | TextKind::Footer) => {
+            open_header_footer(app);
             return;
         }
         BlockRef::Fixed(k) => (k, meta_text(score, k).unwrap_or_default().to_string()),
@@ -541,7 +550,6 @@ pub(crate) fn block_dialog(app: &mut ScoreApp, ctx: &egui::Context, mut d: Block
                 "Placed above the system with measure {}. Drag it to move it.",
                 &[&app.session.score.measure_number(measure).to_string()],
             )),
-            TextKind::Header | TextKind::Footer => Some(t("Shown on every page from page 2.").to_string()),
             _ => None,
         };
         if let Some(n) = note {
@@ -629,4 +637,158 @@ pub(crate) fn move_block(app: &mut ScoreApp, b: BlockRef, delta: (f32, f32)) {
 pub(crate) fn frame(painter: &egui::Painter, r: Rect, accent: Color32) {
     painter.rect_filled(r, 3.0, accent.linear_multiply(0.08));
     painter.rect_stroke(r, 3.0, Stroke::new(1.2, accent), egui::StrokeKind::Outside);
+}
+
+// ---------------------------------------------------------------- header and footer
+
+/// Opens the header and footer dialog with the score's settings.
+pub(crate) fn open_header_footer(app: &mut ScoreApp) {
+    app.header_footer = Some(HeaderFooterEdit {
+        hf: app.session.score.header_footer.clone(),
+        page_numbers: !app.session.score.hide_page_numbers,
+    });
+}
+
+/// The header and footer being edited.
+#[derive(Clone)]
+pub(crate) struct HeaderFooterEdit {
+    hf: scoreart_model::HeaderFooter,
+    page_numbers: bool,
+}
+
+fn apply_header_footer(app: &mut ScoreApp, e: &HeaderFooterEdit) {
+    let h = &e.hf;
+    app.run(
+        "page.header-footer",
+        json!({
+            "show_header": h.show_header, "header_first_page": h.header_first_page, "header_odd_even": h.header_odd_even,
+            "odd_header": h.header[0], "even_header": h.header[1],
+            "show_footer": h.show_footer, "footer_first_page": h.footer_first_page, "footer_odd_even": h.footer_odd_even,
+            "odd_footer": h.footer[0], "even_footer": h.footer[1],
+            "page_number_first_page": h.page_number_first_page,
+        }),
+    );
+    if e.page_numbers == app.session.score.hide_page_numbers {
+        app.run("page.numbers", json!({ "on": e.page_numbers }));
+    }
+}
+
+/// The macros a field can hold, and what they show.
+const MACROS: &[(&str, &str)] = &[
+    ("$p", "Page number, except on the first page"),
+    ("$P", "Page number, on every page"),
+    ("$n", "Number of pages"),
+    ("$C", "Copyright, on the first page only"),
+    ("$c", "Copyright, on every page"),
+    ("$:workTitle:", "Title"),
+    ("$:subtitle:", "Subtitle"),
+    ("$:composer:", "Composer"),
+    ("$:lyricist:", "Lyricist"),
+    ("$:copyright:", "Copyright"),
+    ("$$", "A dollar sign"),
+];
+
+pub(crate) fn header_footer_dialog(app: &mut ScoreApp, ctx: &egui::Context) {
+    let Some(mut e) = app.header_footer.take() else {
+        return;
+    };
+    let mut close = false;
+    let mut apply_now = false;
+    let resp = egui::Modal::new(egui::Id::unique("header-footer")).show(ctx, |ui| {
+        ui.set_width(620.0);
+        ui.heading(t("Header and footer"));
+        ui.label(
+            RichText::new(t("Three fields each, left, middle and right; macros such as $p (page number) are filled in on every page."))
+                .small(),
+        );
+        for footer in [false, true] {
+            ui.add_space(8.0);
+            let h = &mut e.hf;
+            let (show, first, odd_even, rows, title) = if footer {
+                (&mut h.show_footer, &mut h.footer_first_page, &mut h.footer_odd_even, &mut h.footer, t("Footer"))
+            } else {
+                (&mut h.show_header, &mut h.header_first_page, &mut h.header_odd_even, &mut h.header, t("Header"))
+            };
+            ui.horizontal(|ui| {
+                ui.checkbox(show, RichText::new(title).strong());
+                ui.add_enabled_ui(*show, |ui| {
+                    ui.checkbox(first, t("Show on first page"));
+                    ui.checkbox(odd_even, t("Different odd/even pages"));
+                });
+            });
+            let shown = *show;
+            let both = *odd_even;
+            ui.add_enabled_ui(shown, |ui| {
+                egui::Grid::new(("hf-grid", footer)).num_columns(4).spacing([8.0, 6.0]).show(ui, |ui| {
+                    ui.label("");
+                    for c in [t("Left"), t("Middle"), t("Right")] {
+                        ui.label(RichText::new(c).small());
+                    }
+                    ui.end_row();
+                    let [odd, even] = rows;
+                    for (label, row, on) in [
+                        (if both { t("Odd pages") } else { t("All pages") }, odd, true),
+                        (t("Even pages"), even, both),
+                    ] {
+                        if !on {
+                            continue;
+                        }
+                        ui.label(label);
+                        for f in row.iter_mut() {
+                            ui.add_sized([165.0, 22.0], egui::TextEdit::singleline(f));
+                        }
+                        ui.end_row();
+                    }
+                });
+            });
+        }
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut e.page_numbers, t("Show page numbers"));
+            ui.add_enabled_ui(e.page_numbers, |ui| {
+                ui.checkbox(&mut e.hf.page_number_first_page, t("also on the first page"));
+            });
+        });
+        egui::CollapsingHeader::new(t("Macros"))
+            .id_salt("hf-macros")
+            .show(ui, |ui| {
+                egui::Grid::new("hf-macros-grid").num_columns(2).spacing([16.0, 2.0]).show(ui, |ui| {
+                    for (m, what) in MACROS {
+                        ui.label(RichText::new(*m).monospace());
+                        ui.label(t(what));
+                        ui.end_row();
+                    }
+                });
+            });
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if ui.button(t("OK")).clicked() {
+                apply_now = true;
+                close = true;
+            }
+            if ui.button(t("Apply")).clicked() {
+                apply_now = true;
+            }
+            if ui.button(t("Cancel")).clicked() {
+                close = true;
+            }
+            if ui
+                .button(t("Defaults"))
+                .on_hover_text(t("As a new MuseScore 4 score: page number and copyright in the footer"))
+                .clicked()
+            {
+                e.hf = scoreart_model::HeaderFooter::default();
+                e.page_numbers = true;
+            }
+        });
+    });
+    if resp.should_close() {
+        close = true;
+    }
+    if apply_now {
+        apply_header_footer(app, &e);
+    }
+    if !close {
+        app.header_footer = Some(e);
+    }
 }

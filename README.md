@@ -90,6 +90,23 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   of the numbering. **Metronome marks** count any beat — ♪, ♩, ♩., 𝅗𝅥, 𝅗𝅥. (a new 6/8 score
   counts dotted quarters). **Volta labels** like "1.+3." and "2.4.5." are printed and played on
   those passes, also when the refrain closes the repeat (five verses, refrain after 2, 4 and 5).
+- **Page formatting as in MuseScore**: *Format → Page settings* has the paper size,
+  orientation, millimetres or inches, **two-sided** pages with margins of their own for odd and
+  even pages, the staff size and the **first page number**; the **music top and bottom margins**,
+  the distances between staves, instruments and systems (least and largest), **vertical
+  justification**, the **last system fill threshold** and the indent of the first system. Pages
+  before the last are filled down to the music bottom margin. *Format → Header & footer* has a
+  left, middle and right field for odd and even pages with MuseScore's macros (`$p`, `$P`, `$n`,
+  `$C`, `$c`, `$$`, `$:workTitle:`, `$:composer:`, `$:copyright:` …), shown on the first page or
+  not. A new score starts as a new MuseScore 4 score does (A4, margins 10 mm and 20 mm at the
+  bottom, page number and copyright in the footer, MuseScore's text sizes).
+- **MuseScore files keep their page layout**: `.mscz`/`.mscx` of MuseScore 3 and 4 open with their
+  page size, margins (odd/even), staff size, distances, vertical justification, fill threshold,
+  headers and footers and text styles — including MuseScore's own defaults for whatever the file
+  does not store; texts in frames after the title become headings and text blocks. MusicXML is
+  read and written with odd/even margins and the title page as credits, and ScoreArt writes where
+  each of its systems and pages starts, so MuseScore shows the same lines and pages (ScoreArt
+  itself keeps only the user's breaks when it opens such a file).
 - **Texts as tagged blocks**: title, subtitle, composer, lyricist, copyright (foot of the first
   page), **headings** and **text blocks** between the systems, **headers**, **footers** and page
   numbers (from page 2). Each is a block of its kind that the hand picks up and moves freely;

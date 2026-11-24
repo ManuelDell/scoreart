@@ -142,7 +142,25 @@ impl TextKind {
         self.group() != "In the music"
     }
 
-    /// The style a new score starts with (sizes as ScoreArt always drew them).
+    /// The size in points the engraver's own measures of this kind are made for (a text drawn
+    /// at its built-in size is this big); styles scale from it.
+    pub fn reference_pt(self) -> f32 {
+        match self {
+            TextKind::Title => 22.0,
+            TextKind::Subtitle => 12.0,
+            TextKind::Composer | TextKind::Lyricist => 9.5,
+            TextKind::Copyright | TextKind::Header | TextKind::Footer | TextKind::PageNumber => 8.0,
+            TextKind::Heading => 14.0,
+            TextKind::Text | TextKind::Tempo => 10.0,
+            TextKind::InstrumentName | TextKind::SystemText | TextKind::StaffText => 9.5,
+            TextKind::MeasureNumber => 7.0,
+            TextKind::Rehearsal | TextKind::ChordSymbol => 11.0,
+            TextKind::Lyrics => 9.0,
+            TextKind::Fingering => 8.0,
+        }
+    }
+
+    /// The style a new score starts with: as in a new MuseScore 4 score.
     pub fn default_style(self) -> TextStyle {
         let s = |size: f32, bold: bool, italic: bool, align: TextAlign| TextStyle {
             font: TextFont::Serif,
@@ -153,24 +171,24 @@ impl TextKind {
         };
         use TextAlign::*;
         match self {
-            TextKind::Title => s(22.0, false, false, Center),
-            TextKind::Subtitle => s(12.0, false, false, Center),
-            TextKind::Composer => s(9.5, false, false, Right),
-            TextKind::Lyricist => s(9.5, false, false, Left),
+            TextKind::Title => s(24.0, false, false, Center),
+            TextKind::Subtitle => s(14.0, false, false, Center),
+            TextKind::Composer => s(12.0, false, false, Right),
+            TextKind::Lyricist => s(12.0, false, false, Left),
             TextKind::Copyright => s(8.0, false, false, Center),
             TextKind::Heading => s(14.0, true, false, Left),
-            TextKind::Text => s(10.0, false, false, Left),
-            TextKind::Header => s(8.0, false, true, Center),
-            TextKind::Footer => s(8.0, false, true, Center),
+            TextKind::Text => s(12.0, false, false, Left),
+            TextKind::Header => s(8.0, false, false, Center),
+            TextKind::Footer => s(8.0, false, false, Center),
             TextKind::PageNumber => s(8.0, false, false, Right),
-            TextKind::InstrumentName => s(9.5, false, false, Right),
-            TextKind::MeasureNumber => s(7.0, false, true, Left),
-            TextKind::Tempo => s(10.0, true, false, Left),
-            TextKind::SystemText => s(9.5, true, false, Left),
-            TextKind::Rehearsal => s(11.0, true, false, Center),
-            TextKind::StaffText => s(9.5, false, true, Left),
-            TextKind::ChordSymbol => s(11.0, true, false, Left),
-            TextKind::Lyrics => s(9.0, false, false, Center),
+            TextKind::InstrumentName => s(12.0, false, false, Right),
+            TextKind::MeasureNumber => s(8.0, false, false, Left),
+            TextKind::Tempo => s(12.0, true, false, Left),
+            TextKind::SystemText => s(10.0, false, false, Left),
+            TextKind::Rehearsal => s(14.0, true, false, Center),
+            TextKind::StaffText => s(10.0, false, false, Left),
+            TextKind::ChordSymbol => s(12.0, false, false, Left),
+            TextKind::Lyrics => s(11.0, false, false, Center),
             TextKind::Fingering => s(8.0, false, false, Center),
         }
     }
@@ -248,6 +266,8 @@ pub struct TextSettings {
     pub offsets: BlockOffsets,
     #[serde(default)]
     pub hide_page_numbers: bool,
+    #[serde(default)]
+    pub header_footer: HeaderFooter,
 }
 
 impl TextSettings {
@@ -257,6 +277,7 @@ impl TextSettings {
             blocks: score.blocks.clone(),
             offsets: score.block_offsets.clone(),
             hide_page_numbers: score.hide_page_numbers,
+            header_footer: score.header_footer.clone(),
         }
     }
 
@@ -265,5 +286,149 @@ impl TextSettings {
         score.blocks = self.blocks;
         score.block_offsets = self.offsets;
         score.hide_page_numbers = self.hide_page_numbers;
+        score.header_footer = self.header_footer.clipped();
     }
+}
+
+/// Headers and footers as MuseScore has them: shown or not, on the first page or not, odd and
+/// even pages alike or different, each with a left, centre and right field. The fields may hold
+/// macros: `$p` page number (not on the first page), `$P` page number on every page, `$n` number
+/// of pages, `$C` copyright (first page only), `$c` copyright on every page, `$$` a dollar sign,
+/// `$:tag:` a score property (workTitle, subtitle, composer, lyricist, copyright …).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HeaderFooter {
+    pub show_header: bool,
+    pub header_first_page: bool,
+    pub header_odd_even: bool,
+    /// `[odd, even]` pages, each `[left, centre, right]`.
+    pub header: [[String; 3]; 2],
+    pub show_footer: bool,
+    pub footer_first_page: bool,
+    pub footer_odd_even: bool,
+    pub footer: [[String; 3]; 2],
+    /// `$p` also on the first page.
+    pub page_number_first_page: bool,
+}
+
+impl Default for HeaderFooter {
+    /// As in a new MuseScore 4 score: no header; the page number in the outer corner and the
+    /// copyright in the middle of the footer.
+    fn default() -> Self {
+        let s = |a: &str, b: &str, c: &str| [a.to_string(), b.to_string(), c.to_string()];
+        HeaderFooter {
+            show_header: false,
+            header_first_page: false,
+            header_odd_even: true,
+            header: [s("", "", ""), s("", "", "")],
+            show_footer: true,
+            footer_first_page: true,
+            footer_odd_even: true,
+            footer: [s("", "$:copyright:", "$p"), s("$p", "$:copyright:", "")],
+            page_number_first_page: false,
+        }
+    }
+}
+
+impl HeaderFooter {
+    /// The three fields of the header (`footer` false) or footer on a page; None when nothing
+    /// is shown there. `first` is the first page, `odd` whether its number is odd.
+    pub fn fields(&self, footer: bool, first: bool, odd: bool) -> Option<&[String; 3]> {
+        let (show, on_first, odd_even, rows) = if footer {
+            (
+                self.show_footer,
+                self.footer_first_page,
+                self.footer_odd_even,
+                &self.footer,
+            )
+        } else {
+            (
+                self.show_header,
+                self.header_first_page,
+                self.header_odd_even,
+                &self.header,
+            )
+        };
+        if !show || (first && !on_first) {
+            return None;
+        }
+        rows.get(if odd_even && !odd { 1 } else { 0 })
+            .filter(|r| r.iter().any(|f| !f.trim().is_empty()))
+    }
+
+    /// Clips every field (hostile files).
+    pub fn clipped(mut self) -> HeaderFooter {
+        for row in self.header.iter_mut().chain(self.footer.iter_mut()) {
+            for f in row.iter_mut() {
+                *f = crate::clip(f);
+            }
+        }
+        self
+    }
+}
+
+/// What a header or footer field shows on a page: its macros replaced.
+pub struct PageInfo<'a> {
+    pub meta: &'a crate::Meta,
+    /// The printed page number and the number of pages.
+    pub number: i32,
+    pub pages: usize,
+    pub first: bool,
+    /// Page numbers are shown at all (and also on the first page).
+    pub page_numbers: bool,
+    pub page_number_first_page: bool,
+}
+
+/// Replaces the macros of a header or footer field.
+pub fn expand_macros(field: &str, p: &PageInfo) -> String {
+    let mut out = String::with_capacity(field.len());
+    let mut chars = field.chars().peekable();
+    let number = |all: bool| {
+        if p.number >= 1 && p.page_numbers && (all || !p.first || p.page_number_first_page) {
+            p.number.to_string()
+        } else {
+            String::new()
+        }
+    };
+    while let Some(c) = chars.next() {
+        if c != '$' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('p') => out.push_str(&number(false)),
+            Some('P') => out.push_str(&number(true)),
+            Some('n' | 'N') => out.push_str(&p.pages.to_string()),
+            Some('C') if p.first => out.push_str(&p.meta.copyright),
+            Some('C') => {}
+            Some('c') => out.push_str(&p.meta.copyright),
+            Some('$') => out.push('$'),
+            Some(':') => {
+                let mut tag = String::new();
+                for t in chars.by_ref() {
+                    if t == ':' {
+                        break;
+                    }
+                    tag.push(t);
+                }
+                let m = p.meta;
+                out.push_str(match tag.as_str() {
+                    "workTitle" | "movementTitle" | "title" => &m.title,
+                    "subtitle" | "movementNumber" | "workNumber" => &m.subtitle,
+                    "composer" => &m.composer,
+                    "lyricist" | "poet" => &m.lyricist,
+                    "copyright" => &m.copyright,
+                    _ => "",
+                });
+            }
+            // Dates, file names and part names are not known here.
+            Some('d' | 'D' | 'm' | 'M' | 'f' | 'F' | 'i' | 'I') => {}
+            Some(other) => {
+                out.push('$');
+                out.push(other);
+            }
+            None => out.push('$'),
+        }
+    }
+    out
 }

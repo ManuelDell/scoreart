@@ -753,7 +753,7 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "Page settings",
             menu: &["Format"],
             shortcut: None,
-            params: "any of: size (A4, Letter, A3, A5, B4, Legal, Tabloid), orientation (portrait|landscape), width_mm, height_mm, margin_mm (all four), margin_top_mm, margin_bottom_mm, margin_left_mm, margin_right_mm, staff_space_mm (staff size), staff_gap, part_gap, system_gap (staff spaces), spacing (0.5…2), reset: true (defaults)",
+            params: "any of: size (A4, Letter, A3, A5, B4, Legal, Tabloid), orientation (portrait|landscape), width_mm, height_mm, margin_mm (all four), margin_top_mm, margin_bottom_mm, margin_left_mm, margin_right_mm (odd pages, or all pages when not two-sided), two_sided (true|false), even_margin_top_mm, even_margin_bottom_mm, even_margin_left_mm, even_margin_right_mm, staff_space_mm (staff size), staff_gap (staves of one instrument), part_gap (between instruments), system_gap (least system distance), max_system_gap, music_top, music_bottom (staff spaces from the margin), vertical_justify (true|false), max_system_spread, max_staff_spread, spread_factor, last_system_fill (0…1), first_page_number, first_indent (staff spaces, 0 = none), header_offset, footer_offset, spacing (0.5…2), reset: true (defaults)",
             enabled: always,
             run: |s, p| {
                 let num = |k: &str| -> Result<Option<f32>> {
@@ -811,9 +811,54 @@ pub fn commands() -> Vec<CommandSpec> {
                     ("part_gap", &mut f.part_gap),
                     ("system_gap", &mut f.system_gap),
                     ("spacing", &mut f.spacing),
+                    ("even_margin_top_mm", &mut f.even_margin_top_mm),
+                    ("even_margin_bottom_mm", &mut f.even_margin_bottom_mm),
+                    ("even_margin_left_mm", &mut f.even_margin_left_mm),
+                    ("even_margin_right_mm", &mut f.even_margin_right_mm),
+                    ("max_system_gap", &mut f.max_system_gap),
+                    ("music_top", &mut f.music_top),
+                    ("music_bottom", &mut f.music_bottom),
+                    ("max_system_spread", &mut f.max_system_spread),
+                    ("max_staff_spread", &mut f.max_staff_spread),
+                    ("spread_factor", &mut f.spread_factor),
+                    ("last_system_fill", &mut f.last_system_fill),
+                    ("first_indent", &mut f.first_indent),
+                    ("header_offset", &mut f.header_offset),
+                    ("footer_offset", &mut f.footer_offset),
                 ] {
                     if let Some(v) = num(k)? {
                         *slot = v;
+                    }
+                }
+                if let Some(v) = num("first_page_number")? {
+                    f.first_page_number = v.round() as i32;
+                }
+                for (k, slot) in [
+                    ("two_sided", &mut f.two_sided),
+                    ("vertical_justify", &mut f.vertical_justify),
+                ] {
+                    match p.get(k) {
+                        None | Some(Value::Null) => {}
+                        Some(Value::Bool(b)) => *slot = *b,
+                        Some(_) => return Err(Error::Param(format!("{k}: true or false"))),
+                    }
+                }
+                // Turning two-sided on starts the even pages with the odd pages' margins,
+                // mirrored (inside and outside).
+                if p.get("two_sided").and_then(Value::as_bool) == Some(true) && !s.score.page.two_sided {
+                    let even_given = [
+                        "even_margin_top_mm",
+                        "even_margin_bottom_mm",
+                        "even_margin_left_mm",
+                        "even_margin_right_mm",
+                    ]
+                    .iter()
+                    .any(|k| p.get(*k).is_some());
+                    if !even_given {
+                        f.even_margin_top_mm = f.margin_top_mm;
+                        f.even_margin_bottom_mm = f.margin_bottom_mm;
+                        f.even_margin_left_mm = f.margin_right_mm;
+                        f.even_margin_right_mm = f.margin_left_mm;
                     }
                 }
                 s.score.page = f.clamped();

@@ -183,6 +183,10 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         crate::texts::open(app, scoreart_model::TextKind::Title);
                         ui.close();
                     }
+                    if ui.button(t("Header & footer…")).clicked() {
+                        crate::texts::open_header_footer(app);
+                        ui.close();
+                    }
                     ui.menu_button(t("Add text"), |ui| {
                         for k in [
                             scoreart_model::TextKind::Heading,

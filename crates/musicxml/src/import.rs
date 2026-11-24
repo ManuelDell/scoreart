@@ -154,8 +154,213 @@ pub fn read(root: &Element) -> Result<Score, Error> {
     if let Some(d) = root.child("defaults") {
         score.page = read_defaults(d);
     }
+    read_layout(root, &mut score, ours);
+    read_credits(root, &mut score);
     score.normalize();
     Ok(score)
+}
+
+fn misc_field<'a>(root: &'a Element, name: &str) -> Option<&'a str> {
+    root.path(&["identification", "miscellaneous"])?
+        .children_named("miscellaneous-field")
+        .find(|f| f.attr("name") == Some(name))
+        .map(|f| f.text.trim())
+}
+
+/// ScoreArt's own page settings, and — in a file ScoreArt laid out — which of the written
+/// system and page starts are the user's breaks (the others only show ScoreArt's layout to
+/// other programs).
+fn read_layout(root: &Element, score: &mut Score, ours: bool) {
+    if let Some(page) =
+        misc_field(root, "scoreart-page").and_then(|j| serde_json::from_str::<PageFormat>(j).ok())
+    {
+        score.page = page.clamped();
+    }
+    if !ours {
+        return;
+    }
+    let Some(j) =
+        misc_field(root, "scoreart-breaks").and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+    else {
+        return;
+    };
+    let list = |k: &str| -> Vec<usize> {
+        j.get(k)
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_u64()).map(|v| v as usize).collect())
+            .unwrap_or_default()
+    };
+    let (lines, pages) = (list("line"), list("page"));
+    for (m, info) in score.measures.iter_mut().enumerate() {
+        info.system_break = lines.contains(&m);
+        info.page_break = pages.contains(&m);
+    }
+}
+
+/// The title page's texts from the credits of page 1 (as MuseScore writes them): what the
+/// work and creator elements did not give, and the font sizes as text styles. More title
+/// credits (titles of further pieces in the file) become headings above the system they stand
+/// over.
+fn read_credits(root: &Element, score: &mut Score) {
+    use scoreart_model::TextKind;
+    let defaults = root.child("defaults");
+    let page_h = defaults
+        .and_then(|d| d.path(&["page-layout", "page-height"]))
+        .and_then(|e| e.text.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0);
+    let top_margin = defaults
+        .and_then(|d| d.child("page-layout"))
+        .and_then(|p| {
+            p.children_named("page-margins")
+                .find(|m| m.attr("type") != Some("even"))
+        })
+        .and_then(|m| m.child_num("top-margin"))
+        .unwrap_or(0.0);
+    let mut credits: Vec<(usize, String, String, f64, String, Option<f64>)> = Vec::new();
+    for c in root.children_named("credit") {
+        let page = c.attr("page").and_then(|p| p.parse::<usize>().ok()).unwrap_or(1);
+        let ty = c.child_text("credit-type").unwrap_or_default().trim().to_string();
+        for w in c.children_named("credit-words") {
+            let text = clip(w.text.trim());
+            if text.is_empty() {
+                continue;
+            }
+            let y = w
+                .attr("default-y")
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            let justify = w.attr("justify").unwrap_or("").to_string();
+            let size = w
+                .attr("font-size")
+                .and_then(|v| v.parse::<f64>().ok())
+                .filter(|v| v.is_finite() && *v > 0.0);
+            credits.push((page, ty.clone(), text, y, justify, size));
+        }
+    }
+    if credits.is_empty() {
+        return;
+    }
+    // Credits without a type: guess from where they stand (MusicXML 3 files).
+    let guess = |ty: &str, y: f64, justify: &str| -> String {
+        if !ty.is_empty() {
+            return ty.to_string();
+        }
+        match (page_h, justify) {
+            (Some(h), _) if y < h * 0.15 => "rights".into(),
+            (_, "right") => "composer".into(),
+            (_, "left") => "lyricist".into(),
+            _ => "title".into(),
+        }
+    };
+    let mut titles = 0usize;
+    let mut extra: Vec<(usize, f64, String)> = Vec::new();
+    // Highest first on each page.
+    credits.sort_by(|a, b| a.0.cmp(&b.0).then(b.3.total_cmp(&a.3)));
+    for (page, ty, text, y, justify, size) in credits {
+        let ty = guess(&ty, y, &justify);
+        let (kind, slot) = match ty.as_str() {
+            "title" if page == 1 && titles == 0 => (TextKind::Title, Some(&mut score.meta.title)),
+            "title"
+                if page == 1
+                    && titles == 1
+                    && score.meta.subtitle.is_empty()
+                    && size.is_some_and(|s| s < 18.0) =>
+            {
+                (TextKind::Subtitle, Some(&mut score.meta.subtitle))
+            }
+            "title" => {
+                extra.push((page, y, text));
+                continue;
+            }
+            "subtitle" => (TextKind::Subtitle, Some(&mut score.meta.subtitle)),
+            "composer" | "arranger" => (TextKind::Composer, Some(&mut score.meta.composer)),
+            "lyricist" | "poet" => (TextKind::Lyricist, Some(&mut score.meta.lyricist)),
+            "rights" => (TextKind::Copyright, Some(&mut score.meta.copyright)),
+            _ => continue,
+        };
+        if kind == TextKind::Title || (kind == TextKind::Subtitle && titles == 1) {
+            titles += 1;
+        }
+        if let Some(slot) = slot
+            && slot.is_empty()
+        {
+            *slot = text;
+        }
+        if let Some(sz) = size {
+            let mut st = score.text_styles.get(kind);
+            st.size = ((sz.clamp(4.0, 96.0) * 2.0).round() / 2.0) as f32;
+            score.text_styles.set(kind, st);
+        }
+    }
+    if extra.is_empty() {
+        return;
+    }
+    // Where the systems stand: from the print elements of the first part (tenths below the
+    // top margin of their page).
+    let Some(part) = root.children_named("part").next() else {
+        return;
+    };
+    let staff_count: f64 = score
+        .parts
+        .iter()
+        .map(|p| p.staff_count() as f64)
+        .sum::<f64>()
+        .max(1.0);
+    let staff_dist = defaults
+        .and_then(|d| d.path(&["staff-layout", "staff-distance"]))
+        .and_then(|e| e.text.trim().parse::<f64>().ok())
+        .unwrap_or(65.0);
+    let sys_height = staff_count * 40.0 + (staff_count - 1.0) * staff_dist;
+    let mut systems: Vec<(usize, usize, f64)> = Vec::new(); // (page, first measure, top)
+    let (mut page, mut top) = (1usize, 0.0f64);
+    for (mi, m) in part.children_named("measure").enumerate() {
+        let Some(p) = m.child("print") else {
+            if mi == 0 {
+                systems.push((1, 0, 0.0));
+            }
+            continue;
+        };
+        let new_page = p.attr("new-page") == Some("yes");
+        let new_system = new_page || p.attr("new-system") == Some("yes") || mi == 0;
+        if !new_system {
+            continue;
+        }
+        let num = |k: &str| {
+            p.path(&["system-layout", k])
+                .and_then(|e| e.text.trim().parse::<f64>().ok())
+        };
+        if new_page {
+            page += 1;
+        }
+        top = match (
+            mi == 0 || new_page,
+            num("top-system-distance"),
+            num("system-distance"),
+        ) {
+            (true, Some(t), _) => t,
+            (true, None, _) => 0.0,
+            (false, _, d) => top + sys_height + d.unwrap_or(100.0),
+        };
+        systems.push((page, mi, top));
+    }
+    let n = score.measures.len();
+    for (pg, y, text) in extra {
+        let from_top = page_h.map_or(0.0, |h| h - y - top_margin);
+        let measure = systems
+            .iter()
+            .find(|(p, _, t)| *p == pg && *t > from_top)
+            .or_else(|| systems.iter().find(|(p, ..)| *p > pg))
+            .map_or(n, |s| s.1);
+        if score.blocks.len() < scoreart_model::limits::MAX_BLOCKS {
+            score.blocks.push(scoreart_model::TextBlock {
+                kind: TextKind::Heading,
+                text,
+                measure,
+                dx: 0,
+                dy: 0,
+            });
+        }
+    }
 }
 
 /// Page size, margins and distances from `<defaults>` (lengths in tenths of a staff space).
@@ -176,22 +381,43 @@ fn read_defaults(d: &Element) -> PageFormat {
         if let Some(h) = p.child_num("page-height") {
             f.height_mm = mm(h);
         }
-        // Odd (or both) pages' margins.
-        if let Some(m) = p
+        // Odd (or both) pages' margins, and the even pages' when they differ (two-sided).
+        let read = |m: &Element| -> [Option<f32>; 4] {
+            ["top-margin", "bottom-margin", "left-margin", "right-margin"].map(|k| m.child_num(k).map(&mm))
+        };
+        let odd = p
             .children_named("page-margins")
             .find(|m| m.attr("type") != Some("even"))
-        {
-            for (k, slot) in [
-                ("left-margin", &mut f.margin_left_mm),
-                ("right-margin", &mut f.margin_right_mm),
-                ("top-margin", &mut f.margin_top_mm),
-                ("bottom-margin", &mut f.margin_bottom_mm),
+            .map(read);
+        let even = p
+            .children_named("page-margins")
+            .find(|m| m.attr("type") == Some("even"))
+            .map(read);
+        if let Some([t, b, l, r]) = odd.or(even) {
+            for (v, slot) in [
+                (t, &mut f.margin_top_mm),
+                (b, &mut f.margin_bottom_mm),
+                (l, &mut f.margin_left_mm),
+                (r, &mut f.margin_right_mm),
             ] {
-                if let Some(v) = m.child_num(k) {
-                    *slot = mm(v);
+                if let Some(v) = v {
+                    *slot = v;
                 }
             }
         }
+        let [t, b, l, r] = f.margins_mm(1);
+        let [et, eb, el, er] = even.map_or([None; 4], |e| e);
+        (
+            f.even_margin_top_mm,
+            f.even_margin_bottom_mm,
+            f.even_margin_left_mm,
+            f.even_margin_right_mm,
+        ) = (et.unwrap_or(t), eb.unwrap_or(b), el.unwrap_or(l), er.unwrap_or(r));
+        let differ = |a: f32, b: f32| (a - b).abs() > 0.05;
+        f.two_sided = differ(f.even_margin_top_mm, t)
+            || differ(f.even_margin_bottom_mm, b)
+            || differ(f.even_margin_left_mm, l)
+            || differ(f.even_margin_right_mm, r);
     }
     if let Some(v) = d
         .path(&["system-layout", "system-distance"])
@@ -216,7 +442,7 @@ fn read_defaults(d: &Element) -> PageFormat {
         }
     }
     // Undo the rounding of the written tenths (15 mm stays 15 mm).
-    let r = |v: &mut f32| *v = (*v * 100.0).round() / 100.0;
+    let r = |v: &mut f32| *v = (*v * 1000.0).round() / 1000.0;
     for v in [
         &mut f.width_mm,
         &mut f.height_mm,
@@ -224,6 +450,10 @@ fn read_defaults(d: &Element) -> PageFormat {
         &mut f.margin_bottom_mm,
         &mut f.margin_left_mm,
         &mut f.margin_right_mm,
+        &mut f.even_margin_top_mm,
+        &mut f.even_margin_bottom_mm,
+        &mut f.even_margin_left_mm,
+        &mut f.even_margin_right_mm,
         &mut f.staff_space_mm,
         &mut f.staff_gap,
         &mut f.part_gap,

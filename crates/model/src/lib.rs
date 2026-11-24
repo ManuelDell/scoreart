@@ -25,7 +25,10 @@ pub use marks::{
     Anchor, Arpeggio, Articulation, Dynamic, Grace, Jump, NoteHead, Spanner, SpannerKind, Tremolo,
 };
 pub use pitch::{Accidental, Pitch, Step};
-pub use text::{BlockRef, TextAlign, TextBlock, TextFont, TextKind, TextSettings, TextStyle, TextStyles};
+pub use text::{
+    BlockRef, HeaderFooter, PageInfo, TextAlign, TextBlock, TextFont, TextKind, TextSettings, TextStyle,
+    TextStyles, expand_macros,
+};
 pub use time::{Duration, NoteValue, TPQ, Tuplet};
 
 use serde::{Deserialize, Serialize};
@@ -780,6 +783,9 @@ pub struct Score {
     pub block_offsets: text::BlockOffsets,
     #[serde(default)]
     pub hide_page_numbers: bool,
+    /// Headers and footers (with page numbers and copyright).
+    #[serde(default)]
+    pub header_footer: text::HeaderFooter,
 }
 
 /// How a score is played back (not printed): the room and a human touch.
@@ -826,22 +832,68 @@ pub struct PageFormat {
     pub system_gap: f32,
     /// Horizontal note spacing (1.0 = normal).
     pub spacing: f32,
+    /// Two-sided: even pages have margins of their own (`even_margin_*`); the odd page margins
+    /// are the `margin_*` ones.
+    pub two_sided: bool,
+    pub even_margin_top_mm: f32,
+    pub even_margin_bottom_mm: f32,
+    pub even_margin_left_mm: f32,
+    pub even_margin_right_mm: f32,
+    /// Least distance from the top margin to the first staff of a page, and from the last
+    /// staff to the bottom margin, staff spaces.
+    pub music_top: f32,
+    pub music_bottom: f32,
+    /// Systems may move apart up to this distance to fill a page, staff spaces.
+    pub max_system_gap: f32,
+    /// Vertical justification: staves inside systems spread too, up to these distances.
+    pub vertical_justify: bool,
+    pub max_system_spread: f32,
+    pub max_staff_spread: f32,
+    /// How much more a gap between systems takes of the extra room than one inside a system.
+    pub spread_factor: f32,
+    /// A last system filling less than this share of the line is not stretched (0…1).
+    pub last_system_fill: f32,
+    /// The number of the first page.
+    pub first_page_number: i32,
+    /// Extra indent of the first system, staff spaces (0 = none).
+    pub first_indent: f32,
+    /// Header moved down and footer moved down from the margin line, staff spaces.
+    pub header_offset: f32,
+    pub footer_offset: f32,
 }
 
 impl Default for PageFormat {
+    /// A new score: an A4 page laid out as MuseScore 4 lays out a new score.
     fn default() -> Self {
         PageFormat {
             width_mm: 210.0,
             height_mm: 297.0,
-            margin_top_mm: 15.0,
-            margin_bottom_mm: 15.0,
-            margin_left_mm: 15.0,
-            margin_right_mm: 15.0,
-            staff_space_mm: 1.75,
-            staff_gap: 6.0,
-            part_gap: 7.0,
-            system_gap: 9.0,
+            margin_top_mm: 10.0,
+            margin_bottom_mm: 20.0,
+            margin_left_mm: 10.0,
+            margin_right_mm: 10.0,
+            staff_space_mm: 1.764,
+            staff_gap: 6.5,
+            part_gap: 6.5,
+            system_gap: 8.5,
             spacing: 1.0,
+            two_sided: false,
+            even_margin_top_mm: 10.0,
+            even_margin_bottom_mm: 20.0,
+            even_margin_left_mm: 10.0,
+            even_margin_right_mm: 10.0,
+            music_top: 7.0,
+            music_bottom: 7.0,
+            max_system_gap: 15.0,
+            vertical_justify: false,
+            max_system_spread: 32.0,
+            max_staff_spread: 20.0,
+            spread_factor: 2.5,
+            last_system_fill: 0.3,
+            first_page_number: 1,
+            first_indent: 0.0,
+            header_offset: 0.0,
+            footer_offset: 5.0,
         }
     }
 }
@@ -891,6 +943,42 @@ impl PageFormat {
             part_gap: c(self.part_gap, 1.0, 40.0, d.part_gap),
             system_gap: c(self.system_gap, 1.0, 60.0, d.system_gap),
             spacing: c(self.spacing, 0.5, 2.0, d.spacing),
+            two_sided: self.two_sided,
+            even_margin_top_mm: c(self.even_margin_top_mm, 0.0, 100.0, d.even_margin_top_mm),
+            even_margin_bottom_mm: c(self.even_margin_bottom_mm, 0.0, 100.0, d.even_margin_bottom_mm),
+            even_margin_left_mm: c(self.even_margin_left_mm, 0.0, 100.0, d.even_margin_left_mm),
+            even_margin_right_mm: c(self.even_margin_right_mm, 0.0, 100.0, d.even_margin_right_mm),
+            music_top: c(self.music_top, 0.0, 60.0, d.music_top),
+            music_bottom: c(self.music_bottom, 0.0, 60.0, d.music_bottom),
+            max_system_gap: c(self.max_system_gap, 1.0, 100.0, d.max_system_gap),
+            vertical_justify: self.vertical_justify,
+            max_system_spread: c(self.max_system_spread, 1.0, 100.0, d.max_system_spread),
+            max_staff_spread: c(self.max_staff_spread, 1.0, 100.0, d.max_staff_spread),
+            spread_factor: c(self.spread_factor, 0.1, 20.0, d.spread_factor),
+            last_system_fill: c(self.last_system_fill, 0.0, 1.0, d.last_system_fill),
+            first_page_number: self.first_page_number.clamp(-9999, 9999),
+            first_indent: c(self.first_indent, 0.0, 60.0, d.first_indent),
+            header_offset: c(self.header_offset, -50.0, 50.0, d.header_offset),
+            footer_offset: c(self.footer_offset, -50.0, 50.0, d.footer_offset),
+        }
+    }
+
+    /// Margins of a page (by its number): top, bottom, left, right in mm.
+    pub fn margins_mm(&self, page_number: i32) -> [f32; 4] {
+        if self.two_sided && page_number.rem_euclid(2) == 0 {
+            [
+                self.even_margin_top_mm,
+                self.even_margin_bottom_mm,
+                self.even_margin_left_mm,
+                self.even_margin_right_mm,
+            ]
+        } else {
+            [
+                self.margin_top_mm,
+                self.margin_bottom_mm,
+                self.margin_left_mm,
+                self.margin_right_mm,
+            ]
         }
     }
 }
@@ -1219,9 +1307,30 @@ impl Score {
         let n = self.measures.len();
         self.blocks.truncate(limits::MAX_BLOCKS);
         for b in &mut self.blocks {
-            b.measure = b.measure.min(n - 1);
+            // `n`: after the last system (a text at the end of the score).
+            b.measure = b.measure.min(n);
             b.text = clip(&b.text);
         }
+        // Header and footer blocks of older files become the centre of the header or footer.
+        let mut hf = std::mem::take(&mut self.header_footer).clipped();
+        self.blocks.retain(|b| {
+            let footer = match b.kind {
+                TextKind::Header => false,
+                TextKind::Footer => true,
+                _ => return true,
+            };
+            let (show, rows) = if footer {
+                (&mut hf.show_footer, &mut hf.footer)
+            } else {
+                (&mut hf.show_header, &mut hf.header)
+            };
+            *show = true;
+            for row in rows.iter_mut() {
+                row[1] = b.text.clone();
+            }
+            false
+        });
+        self.header_footer = hf;
         let lens: Vec<u32> = (0..n).map(|m| self.measure_ticks(m)).collect();
         for part in &mut self.parts {
             if part.clefs.is_empty() {

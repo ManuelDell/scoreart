@@ -330,6 +330,14 @@ fn jump_words(j: Jump) -> Option<(&'static str, &'static str)> {
 }
 
 pub fn write(score: &Score) -> String {
+    write_laid_out(score, &[])
+}
+
+/// Writes the score with the systems and pages ScoreArt laid it out in: `starts` holds the first
+/// measure of every system after the first and whether it begins a new page. They are written
+/// as `<print new-system/new-page>`, so other programs show the same lines and pages; the
+/// user's own breaks are listed apart, so ScoreArt keeps only those when it opens the file.
+pub fn write_laid_out(score: &Score, starts: &[(usize, bool)]) -> String {
     let div = divisions(score);
     let per_tick = |t: u32| -> u32 { t * div / TPQ };
     let mut x = String::new();
@@ -379,11 +387,45 @@ pub fn write(score: &Score) -> String {
             esc(&j)
         );
     }
+    // Page settings MusicXML has no place for (music margins, vertical fill, …).
+    if score.page.clamped() != PageFormat::default()
+        && let Ok(j) = serde_json::to_string(&score.page.clamped())
+    {
+        let _ = write!(
+            misc,
+            "<miscellaneous-field name=\"scoreart-page\">{}</miscellaneous-field>",
+            esc(&j)
+        );
+    }
+    if !starts.is_empty() {
+        let user = |page: bool| -> Vec<usize> {
+            score
+                .measures
+                .iter()
+                .enumerate()
+                .filter(|(_, i)| {
+                    if page {
+                        i.page_break
+                    } else {
+                        i.system_break && !i.page_break
+                    }
+                })
+                .map(|(m, _)| m)
+                .collect()
+        };
+        let j = serde_json::json!({ "line": user(false), "page": user(true) });
+        let _ = write!(
+            misc,
+            "<miscellaneous-field name=\"scoreart-breaks\">{}</miscellaneous-field>",
+            esc(&j.to_string())
+        );
+    }
     if !misc.is_empty() {
         let _ = writeln!(x, "    <miscellaneous>{misc}</miscellaneous>");
     }
     x.push_str("  </identification>\n");
     write_defaults(&mut x, &score.page);
+    write_credits(&mut x, score);
     x.push_str("  <part-list>\n");
     for p in &score.parts {
         let _ = writeln!(x, "    <score-part id=\"{}\">", esc(&p.id));
@@ -441,14 +483,20 @@ pub fn write(score: &Score) -> String {
                 mi + 1,
                 if info.uncounted { " implicit=\"yes\"" } else { "" }
             );
-            // A line or page break after the previous measure.
-            if let Some(p) = prev_info
-                && (p.system_break || p.page_break)
-            {
+            // A new system or page: the user's break after the previous measure, or where the
+            // layout starts one.
+            let laid = starts.iter().find(|(m, _)| *m == mi && mi > 0).map(|s| s.1);
+            let user = prev_info
+                .filter(|p| p.system_break || p.page_break)
+                .map(|p| p.page_break);
+            if let Some(page) = match (laid, user) {
+                (Some(a), Some(b)) => Some(a || b),
+                (a, b) => a.or(b),
+            } {
                 let _ = writeln!(
                     x,
                     "      <print {}=\"yes\"/>",
-                    if p.page_break { "new-page" } else { "new-system" }
+                    if page { "new-page" } else { "new-system" }
                 );
             }
             // Left barline: forward repeat and the start of a volta.
@@ -719,6 +767,82 @@ fn fmt_tempo(q: f64) -> String {
     } else {
         format!("{r}")
     }
+}
+
+/// The texts of the title page as MusicXML credits on page 1 (title, subtitle, composer,
+/// lyricist, copyright), placed and sized as ScoreArt draws them, so other programs show them
+/// alike. Positions are in tenths from the lower left of the page.
+fn write_credits(x: &mut String, score: &Score) {
+    let f = score.page.clamped();
+    let t = |mm: f32| mm / f.staff_space_mm * 10.0;
+    let (pw, ph) = (t(f.width_mm), t(f.height_mm));
+    let [mt, mb, ml, mr] = f.margins_mm(1).map(t);
+    let m = &score.meta;
+    let st = |k: scoreart_model::TextKind| score.text_styles.get(k);
+    // Font size in points → tenths (1 pt = 0.3528 mm).
+    let pt = |size: f32| size * 0.3528 / f.staff_space_mm * 10.0;
+    let x_of = |a: scoreart_model::TextAlign| match a {
+        scoreart_model::TextAlign::Left => (ml, "left"),
+        scoreart_model::TextAlign::Center => (pw / 2.0, "center"),
+        scoreart_model::TextAlign::Right => (pw - mr, "right"),
+    };
+    let mut credit = |ty: &str, text: &str, k: scoreart_model::TextKind, y: f32, valign: &str| {
+        if text.trim().is_empty() {
+            return;
+        }
+        let s = st(k);
+        let (cx, justify) = x_of(s.align);
+        let weight = if s.bold { " font-weight=\"bold\"" } else { "" };
+        let italic = if s.italic { " font-style=\"italic\"" } else { "" };
+        let family = if s.font == scoreart_model::TextFont::Serif {
+            "serif"
+        } else {
+            "sans-serif"
+        };
+        let _ = writeln!(
+            x,
+            "  <credit page=\"1\"><credit-type>{ty}</credit-type><credit-words default-x=\"{cx:.2}\" default-y=\"{y:.2}\" justify=\"{justify}\" valign=\"{valign}\" font-family=\"{family}\" font-size=\"{:.1}\"{weight}{italic}>{}</credit-words></credit>",
+            s.size,
+            esc(text)
+        );
+    };
+    let mut y = ph - mt;
+    credit("title", &m.title, scoreart_model::TextKind::Title, y, "top");
+    if !m.title.is_empty() {
+        y -= pt(st(scoreart_model::TextKind::Title).size) * 1.3;
+    }
+    credit(
+        "subtitle",
+        &m.subtitle,
+        scoreart_model::TextKind::Subtitle,
+        y,
+        "top",
+    );
+    if !m.subtitle.is_empty() {
+        y -= pt(st(scoreart_model::TextKind::Subtitle).size) * 1.3;
+    }
+    let y_names = y - pt(st(scoreart_model::TextKind::Composer).size) * 1.2;
+    credit(
+        "composer",
+        &m.composer,
+        scoreart_model::TextKind::Composer,
+        y_names,
+        "bottom",
+    );
+    credit(
+        "lyricist",
+        &m.lyricist,
+        scoreart_model::TextKind::Lyricist,
+        y_names,
+        "bottom",
+    );
+    credit(
+        "rights",
+        &m.copyright,
+        scoreart_model::TextKind::Copyright,
+        mb * 0.5,
+        "bottom",
+    );
 }
 
 fn mark_xml(a: scoreart_model::Articulation) -> String {
@@ -1044,20 +1168,32 @@ fn write_defaults(x: &mut String, f: &PageFormat) {
         "    <scaling><millimeters>{:.4}</millimeters><tenths>40</tenths></scaling>",
         f.staff_space_mm * 4.0
     );
+    let margins = |ty: &str, [top, bottom, left, right]: [f32; 4]| {
+        format!(
+            "<page-margins type=\"{ty}\"><left-margin>{:.4}</left-margin><right-margin>{:.4}</right-margin><top-margin>{:.4}</top-margin><bottom-margin>{:.4}</bottom-margin></page-margins>",
+            t(left),
+            t(right),
+            t(top),
+            t(bottom)
+        )
+    };
+    // Two-sided: odd and even pages each with their margins (as MuseScore writes them).
+    let page_margins = if f.two_sided {
+        margins("even", f.margins_mm(2)) + &margins("odd", f.margins_mm(1))
+    } else {
+        margins("both", f.margins_mm(1))
+    };
     let _ = writeln!(
         x,
-        "    <page-layout><page-height>{:.4}</page-height><page-width>{:.4}</page-width><page-margins type=\"both\"><left-margin>{:.4}</left-margin><right-margin>{:.4}</right-margin><top-margin>{:.4}</top-margin><bottom-margin>{:.4}</bottom-margin></page-margins></page-layout>",
+        "    <page-layout><page-height>{:.4}</page-height><page-width>{:.4}</page-width>{page_margins}</page-layout>",
         t(f.height_mm),
         t(f.width_mm),
-        t(f.margin_left_mm),
-        t(f.margin_right_mm),
-        t(f.margin_top_mm),
-        t(f.margin_bottom_mm)
     );
     let _ = writeln!(
         x,
-        "    <system-layout><system-distance>{:.1}</system-distance></system-layout>",
-        f.system_gap * 10.0
+        "    <system-layout><system-margins><left-margin>0</left-margin><right-margin>0</right-margin></system-margins><system-distance>{:.1}</system-distance><top-system-distance>{:.1}</top-system-distance></system-layout>",
+        f.system_gap * 10.0,
+        f.music_top * 10.0
     );
     let _ = writeln!(
         x,

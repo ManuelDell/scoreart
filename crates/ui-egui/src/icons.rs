@@ -67,7 +67,6 @@ pub enum Ico {
     Heading,
     TextBlock,
     Header,
-    Footer,
     PageNumber,
 }
 
@@ -474,12 +473,14 @@ pub fn paint(p: &Painter, rect: Rect, ico: Ico, color: Color32) {
                 line(&[(4.0, y), (x1, y)]);
             }
         }
-        Ico::Header | Ico::Footer | Ico::PageNumber => {
+        Ico::Header | Ico::PageNumber => {
             rect_s(5.0, 2.5, 14.0, 19.0);
-            match ico {
-                Ico::Header => rect_f(7.5, 5.0, 9.0, 2.6),
-                Ico::Footer => rect_f(7.5, 16.4, 9.0, 2.6),
-                _ => text(14.5, 7.0, "2", 7.5),
+            if ico == Ico::Header {
+                // A page with its header and footer.
+                rect_f(7.5, 5.0, 9.0, 2.6);
+                rect_f(7.5, 16.4, 9.0, 2.6);
+            } else {
+                text(14.5, 7.0, "2", 7.5);
             }
             for y in [10.0, 12.5] {
                 line(&[(8.0, y), (16.0, y)]);

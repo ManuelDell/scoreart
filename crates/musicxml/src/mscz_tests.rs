@@ -613,3 +613,94 @@ fn reads_page_settings_from_the_style() {
         (2.0, 8.0, 5.0, 10.0)
     );
 }
+
+#[test]
+fn page_style_defaults_of_musescore_3_and_4() {
+    use scoreart_model::{TextFont, TextKind};
+    let v = |version: &str| {
+        MS_RHYTHMS.replacen(
+            &MS_RHYTHMS[MS_RHYTHMS.find("<museScore").unwrap()..MS_RHYTHMS.find("<Score>").unwrap()],
+            &format!("<museScore version=\"{version}\">\n  "),
+            1,
+        )
+    };
+    // MuseScore 4: margins 10 mm (bottom 20 mm), page number and copyright in the footer.
+    let s4 = from_bytes(v("4.20").as_bytes()).unwrap();
+    assert!((s4.page.margin_top_mm - 10.0).abs() < 0.01 && (s4.page.margin_bottom_mm - 20.0).abs() < 0.01);
+    assert!((s4.page.staff_space_mm - 1.764).abs() < 0.001);
+    assert!(!s4.header_footer.show_header);
+    assert_eq!(s4.header_footer.footer[0][2], "$p");
+    assert_eq!(s4.header_footer.footer[1][0], "$p");
+    assert_eq!(s4.text_styles.get(TextKind::Title).size, 24.0);
+    assert!(
+        !s4.text_styles.get(TextKind::StaffText).italic,
+        "MuseScore's staff text is upright"
+    );
+    assert_eq!(s4.page.music_top, 7.0);
+    assert_eq!((s4.page.system_gap, s4.page.max_system_gap), (8.5, 15.0));
+    // MuseScore 3: margins 15 mm, page numbers in the header, vertical justification.
+    let s3 = from_bytes(v("3.02").as_bytes()).unwrap();
+    assert!((s3.page.margin_top_mm - 15.0).abs() < 0.01 && (s3.page.margin_left_mm - 15.0).abs() < 0.01);
+    assert!(s3.header_footer.show_header && s3.page.vertical_justify);
+    assert_eq!(s3.header_footer.header[0][2], "$p");
+    assert_eq!(s3.text_styles.get(TextKind::Title).size, 22.0);
+    assert!(s3.page.first_indent > 0.0);
+    // A style overrides them: two-sided, music margins, fill threshold, header, fonts.
+    let styled = v("4.20").replace(
+        "<Score>",
+        "<Score><Style><pageWidth>8.27</pageWidth><pagePrintableWidth>7.0</pagePrintableWidth><pageOddLeftMargin>0.8</pageOddLeftMargin><pageEvenLeftMargin>0.47</pageEvenLeftMargin><pageTwosided>1</pageTwosided><staffUpperBorder>9</staffUpperBorder><lastSystemFillLimit>0.5</lastSystemFillLimit><showHeader>1</showHeader><oddHeaderC>$:workTitle:</oddHeaderC><titleFontSize>30</titleFontSize><titleFontStyle>1</titleFontStyle><staffFontFace>Arial</staffFontFace><staffFontStyle>2</staffFontStyle><measureSpacing>1.8</measureSpacing><footerOffset x=\"0\" y=\"3\"/></Style>",
+    );
+    let s = from_bytes(styled.as_bytes()).unwrap();
+    let p = s.page;
+    assert!(p.two_sided);
+    assert!((p.margin_left_mm - 20.32).abs() < 0.01 && (p.even_margin_left_mm - 11.94).abs() < 0.01);
+    assert!((p.margin_right_mm - (8.27 - 7.0 - 0.8) * 25.4).abs() < 0.01);
+    assert_eq!(
+        (p.music_top, p.last_system_fill, p.footer_offset),
+        (9.0, 0.5, 3.0)
+    );
+    assert!((p.spacing - 1.2).abs() < 0.001, "1.8 against MuseScore 4's 1.5");
+    assert!(s.header_footer.show_header && s.header_footer.header[0][1] == "$:workTitle:");
+    let title = s.text_styles.get(TextKind::Title);
+    assert_eq!((title.size, title.bold), (30.0, true));
+    let staff = s.text_styles.get(TextKind::StaffText);
+    assert_eq!((staff.font, staff.italic), (TextFont::Sans, true));
+}
+
+#[test]
+fn texts_of_later_frames_become_headings_and_text_blocks() {
+    let xml = MS_RHYTHMS.replacen(
+        "<Measure>",
+        "<VBox><Text><style>title</style><text>The title</text></Text></VBox><Measure>",
+        1,
+    );
+    // A frame before the second measure and one after the last.
+    let mut parts = xml.splitn(3, "<Measure>");
+    let (a, b, c) = (
+        parts.next().unwrap(),
+        parts.next().unwrap(),
+        parts.next().unwrap(),
+    );
+    let xml = format!(
+        "{a}<Measure>{b}<VBox><Text><style>Title</style><text>Second piece</text></Text></VBox><Measure>{c}"
+    );
+    let end = xml.rfind("</Staff>").unwrap();
+    let xml = format!(
+        "{}<VBox><Text><style>Frame</style><text>A poem\nin two lines</text></Text></VBox>{}",
+        &xml[..end],
+        &xml[end..]
+    );
+    let s = from_bytes(xml.as_bytes()).unwrap();
+    assert_eq!(s.meta.title, "The title");
+    let n = s.measures.len();
+    assert!(
+        s.blocks
+            .iter()
+            .any(|b| b.kind == TextKind::Heading && b.text == "Second piece" && b.measure == 1)
+    );
+    assert!(
+        s.blocks
+            .iter()
+            .any(|b| b.kind == TextKind::Text && b.text.starts_with("A poem") && b.measure == n)
+    );
+}

@@ -791,6 +791,10 @@ fn text_styles_and_blocks() {
     .unwrap();
     s.execute("block.add", &json!({ "kind": "footer", "text": "Footer" }))
         .unwrap();
+    // A footer text goes into the middle of the footer (as in MuseScore), not into a block.
+    assert!(s.score.header_footer.show_footer);
+    assert_eq!(s.score.header_footer.footer[0][1], "Footer");
+    assert_eq!(s.score.blocks.len(), 1);
     assert!(
         s.execute("block.add", &json!({ "kind": "title", "text": "x" }))
             .is_err()
@@ -859,10 +863,11 @@ fn text_styles_and_blocks() {
     t.open_bytes("x.musicxml", &bytes).unwrap();
     assert_eq!(t.score.blocks, s.score.blocks);
     assert_eq!(t.score.block_offsets, s.score.block_offsets);
+    assert_eq!(t.score.header_footer, s.score.header_footer);
     s.execute("block.remove", &json!({ "block": 0 })).unwrap();
-    assert_eq!(s.score.blocks.len(), 1);
+    assert_eq!(s.score.blocks.len(), 0);
     s.execute("edit.undo", &json!({})).unwrap();
-    assert_eq!(s.score.blocks.len(), 2);
+    assert_eq!(s.score.blocks.len(), 1);
 }
 
 #[test]
@@ -1068,7 +1073,12 @@ fn hymn_in_six_eight() {
             .count()
     };
     assert_eq!(rests_in(2), 1);
-    // The last system is short: it ends where its music ends.
+    // The last system is short: with the fill threshold above its share of the line, it ends
+    // where its music ends (MuseScore's "last system fill threshold").
+    s.execute("page.format", &json!({ "last_system_fill": 0.9 }))
+        .unwrap();
+    let l = s.layout();
+    let page = &l.pages[0];
     let last = l
         .staves
         .iter()
@@ -1150,4 +1160,139 @@ fn legato_by_default_slurs_join_staccato_when_written() {
             assert!(a.start + a.ticks < b.start || b.start < a.start);
         }
     }
+}
+
+/// Pages laid out as MuseScore lays them out: margins of odd and even pages, the music top
+/// margin, systems spread to fill a page, headers and footers with their macros.
+#[test]
+fn pages_like_musescore() {
+    use scoreart_engrave::{Align, Shape};
+    use scoreart_model::TextKind;
+    let mut s = Session::default();
+    s.execute(
+        "file.new",
+        &json!({ "instruments": ["piano"], "measures": 220, "title": "" }),
+    )
+    .unwrap();
+    s.execute("score.meta", &json!({ "title": "", "copyright": "© Test" }))
+        .unwrap();
+    let texts =
+        |l: &scoreart_engrave::Layout, page: usize| -> Vec<(String, Option<TextKind>, f32, f32, Align)> {
+            l.pages[page]
+                .items
+                .iter()
+                .filter_map(|it| match &it.shape {
+                    Shape::Text {
+                        text,
+                        kind,
+                        x,
+                        y,
+                        align,
+                        ..
+                    } => Some((text.clone(), *kind, *x, *y, *align)),
+                    _ => None,
+                })
+                .collect()
+        };
+    let l = s.layout();
+    assert!(l.pages.len() >= 3, "{} pages", l.pages.len());
+    let sp = s.score.page.staff_space_mm;
+    let (pw, ph) = (s.score.page.width_mm / sp, s.score.page.height_mm / sp);
+    // As in a new MuseScore 4 score: no page number on page 1, "2" bottom left on page 2,
+    // "3" bottom right on page 3; the copyright in the middle of every footer.
+    let has = |p: usize, t: &str| texts(&l, p).into_iter().find(|x| x.0 == t);
+    assert!(has(0, "1").is_none());
+    let two = has(1, "2").expect("page number 2");
+    assert_eq!((two.1, two.4), (Some(TextKind::PageNumber), Align::Left));
+    assert!(two.3 > ph * 0.9, "in the footer");
+    let three = has(2, "3").expect("page number 3");
+    assert_eq!(three.4, Align::Right);
+    for p in 0..3 {
+        let c = has(p, "© Test").expect("copyright");
+        assert!((c.2 - pw / 2.0).abs() < 0.01 && c.3 > ph * 0.9);
+    }
+    // The first staff of a page keeps the music top margin below the top margin.
+    let top_of = |l: &scoreart_engrave::Layout, page: usize| {
+        l.staves
+            .iter()
+            .filter(|b| b.page == page)
+            .map(|b| b.top)
+            .fold(f32::MAX, f32::min)
+    };
+    let mt = s.score.page.margin_top_mm / sp;
+    assert!(top_of(&l, 1) >= mt + s.score.page.music_top - 0.01);
+    // Pages before the last are filled: their last staff ends near the music bottom margin,
+    // systems no further apart than the largest system distance.
+    let bottom = ph - s.score.page.margin_bottom_mm / sp - s.score.page.music_bottom;
+    let last_staff = l
+        .staves
+        .iter()
+        .filter(|b| b.page == 0)
+        .map(|b| b.top + 4.0)
+        .fold(0.0f32, f32::max);
+    let tops: Vec<f32> = {
+        let mut t: Vec<f32> = l
+            .staves
+            .iter()
+            .filter(|b| b.page == 0 && b.staff == 0)
+            .map(|b| b.top)
+            .collect();
+        t.sort_by(f32::total_cmp);
+        t.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+        t
+    };
+    let spread_full = bottom - last_staff < 1.0;
+    let gaps_at_max = tops
+        .windows(2)
+        .all(|w| w[1] - w[0] <= 4.0 + 6.5 + 4.0 + 15.0 + 0.01);
+    assert!(
+        spread_full || gaps_at_max,
+        "page 1 is filled ({last_staff} of {bottom})"
+    );
+
+    // Two-sided with other even margins, page numbers from 5, a header with macros.
+    s.execute(
+        "page.format",
+        &json!({ "two_sided": true, "even_margin_left_mm": 30, "first_page_number": 5 }),
+    )
+    .unwrap();
+    s.execute(
+        "page.header-footer",
+        &json!({ "show_header": true, "header_first_page": true, "header_odd_even": false, "odd_header": ["$:workTitle:", "Seite $P von $n", "$$"] }),
+    )
+    .unwrap();
+    s.execute("score.meta", &json!({ "title": "Mein Stück" }))
+        .unwrap();
+    let l = s.layout();
+    let left = |l: &scoreart_engrave::Layout, page: usize| {
+        l.staves
+            .iter()
+            .filter(|b| b.page == page)
+            .map(|b| b.x0)
+            .fold(f32::MAX, f32::min)
+    };
+    // Page 1 is number 5 (odd margins), page 2 number 6 (even: 30 mm on the left).
+    assert!(left(&l, 1) - left(&l, 0) > (30.0 - 10.0) / sp - 0.5);
+    let pages = l.pages.len();
+    assert!(has_text(&l, 0, &format!("Seite 5 von {pages}")));
+    assert!(has_text(&l, 1, "Mein Stück") && has_text(&l, 1, "$"));
+    assert!(has_text(&l, 1, "6"), "the footer's $p on page 6");
+    // No page numbers at all.
+    s.execute("page.numbers", &json!({ "on": false })).unwrap();
+    let l = s.layout();
+    assert!(!has_text(&l, 1, "6"));
+    // Saved and opened again, all of it is still there.
+    let bytes = s.save_bytes("x.musicxml").unwrap();
+    let mut t = Session::default();
+    t.open_bytes("x.musicxml", &bytes).unwrap();
+    assert_eq!(t.score.page, s.score.page);
+    assert_eq!(t.score.header_footer, s.score.header_footer);
+    assert_eq!(t.score.hide_page_numbers, s.score.hide_page_numbers);
+}
+
+fn has_text(l: &scoreart_engrave::Layout, page: usize, t: &str) -> bool {
+    l.pages[page]
+        .items
+        .iter()
+        .any(|it| matches!(&it.shape, scoreart_engrave::Shape::Text { text, .. } if text == t))
 }

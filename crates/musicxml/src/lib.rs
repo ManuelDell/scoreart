@@ -50,11 +50,7 @@ pub fn from_bytes(bytes: &[u8]) -> Result<Score, Error> {
     if bytes.starts_with(b"PK") {
         // A MuseScore .mscz holds an .mscx; a compressed MusicXML (.mxl) a container.xml.
         if let Some((mscx, style)) = read_mscz(bytes)? {
-            let mut score = mscz::from_mscx(&mscx)?;
-            if let Some(mss) = style {
-                mscz::apply_style_file(&mut score, &mss);
-            }
-            return Ok(score);
+            return mscz::from_mscx_styled(&mscx, style.as_deref());
         }
         return from_str(&read_mxl(bytes)?);
     }
@@ -158,9 +154,19 @@ pub fn to_string(score: &Score) -> String {
     export::write(score)
 }
 
+/// Writes MusicXML with the layout's systems and pages (see [`export::write_laid_out`]).
+pub fn to_string_laid_out(score: &Score, starts: &[(usize, bool)]) -> String {
+    export::write_laid_out(score, starts)
+}
+
 /// Writes a compressed `.mxl` container.
 pub fn to_mxl(score: &Score) -> Result<Vec<u8>, Error> {
-    let xml = to_string(score);
+    to_mxl_laid_out(score, &[])
+}
+
+/// Writes a compressed `.mxl` container with the layout's systems and pages.
+pub fn to_mxl_laid_out(score: &Score, starts: &[(usize, bool)]) -> Result<Vec<u8>, Error> {
+    let xml = to_string_laid_out(score, starts);
     let mut buf = Cursor::new(Vec::new());
     {
         let mut zip = zip::ZipWriter::new(&mut buf);
