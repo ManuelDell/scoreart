@@ -801,6 +801,9 @@ struct Placed {
     tops: Vec<(usize, usize, f32)>,
     sys_h: f32,
     blocks: Vec<(usize, f32)>,
+    /// Below each staff: whether a fixed spacer sets the distance (the last: to the next system),
+    /// which filling the page leaves as it is.
+    fixed: Vec<bool>,
 }
 
 /// The staves of a system one below the other: top of every staff relative to the system top,
@@ -811,6 +814,8 @@ struct Stack {
     sys_h: f32,
     above: Option<f32>,
     below: Option<(f32, bool)>,
+    /// Below each staff: whether a fixed spacer sets the distance.
+    fixed: Vec<bool>,
 }
 
 fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
@@ -924,6 +929,7 @@ fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
         _ => 4.0,
     }
     .max(4.0);
+    let fixed = staves.iter().map(|st| st.sp_fixed.is_some()).collect();
     let above = staves.first().and_then(|st| st.sp_up);
     let below = staves
         .last()
@@ -933,6 +939,7 @@ fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
         sys_h,
         above,
         below,
+        fixed,
     }
 }
 
@@ -1065,6 +1072,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             sys_h,
             above: spacer_above,
             below: spacer_below,
+            fixed,
         } = stack_staves(score, style, sys);
         let above0 = tops.first().map_or(0.0, |t| t.2);
         let last_top = tops.last().map_or(0.0, |t| t.2);
@@ -1141,6 +1149,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             tops,
             sys_h,
             blocks,
+            fixed,
         });
         prev_staff_end = Some((page_index, y + last_top + 4.0, spacer_below));
         y += sys_h + style.system_gap;
@@ -1169,9 +1178,22 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             if room <= 0.0 || forced {
                 continue;
             }
+            // Gaps a fixed spacer sets stay as they are: between systems (after the system
+            // with the fixed spacer below its last staff) and between staves.
+            let after_fixed: Vec<bool> = on
+                .iter()
+                .map(|k| placed[*k].fixed.last().copied().unwrap_or(false))
+                .collect();
+            let free_gaps = after_fixed.iter().take(gaps).filter(|x| !**x).count();
             if style.page.vertical_justify {
-                let inner: usize = on.iter().map(|k| placed[*k].tops.len().saturating_sub(1)).sum();
-                let weight = gaps as f32 * style.page.spread_factor + inner as f32;
+                let inner: usize = on
+                    .iter()
+                    .map(|k| {
+                        let f = &placed[*k].fixed;
+                        f.iter().take(f.len().saturating_sub(1)).filter(|x| !**x).count()
+                    })
+                    .sum();
+                let weight = free_gaps as f32 * style.page.spread_factor + inner as f32;
                 if weight <= 0.0 {
                     continue;
                 }
@@ -1182,26 +1204,35 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                     unit.min((style.page.max_staff_spread - style.staff_gap.min(style.part_gap)).max(0.0));
                 let mut shift = 0.0;
                 for (n, k) in on.iter().enumerate() {
-                    let p = &mut placed[*k];
-                    if n > 0 {
+                    if n > 0 && !after_fixed.get(n - 1).copied().unwrap_or(false) {
                         shift += sys_extra;
                     }
+                    let p = &mut placed[*k];
                     for (_, by) in &mut p.blocks {
                         *by += shift;
                     }
                     p.y += shift;
-                    for (j, t) in p.tops.iter_mut().enumerate() {
-                        t.2 += staff_extra * j as f32;
+                    let mut grow = 0.0;
+                    for j in 0..p.tops.len() {
+                        if j > 0 && !p.fixed.get(j - 1).copied().unwrap_or(false) {
+                            grow += staff_extra;
+                        }
+                        if let Some(t) = p.tops.get_mut(j) {
+                            t.2 += grow;
+                        }
                     }
-                    let grow = staff_extra * p.tops.len().saturating_sub(1) as f32;
                     p.sys_h += grow;
                     shift += grow;
                 }
-            } else if gaps > 0 {
-                let extra = (room / gaps as f32).min((style.page.max_system_gap - style.system_gap).max(0.0));
+            } else if free_gaps > 0 {
+                let extra =
+                    (room / free_gaps as f32).min((style.page.max_system_gap - style.system_gap).max(0.0));
+                let mut shift = 0.0;
                 for (n, k) in on.iter().enumerate() {
+                    if n > 0 && !after_fixed.get(n - 1).copied().unwrap_or(false) {
+                        shift += extra;
+                    }
                     let p = &mut placed[*k];
-                    let shift = extra * n as f32;
                     p.y += shift;
                     for (_, by) in &mut p.blocks {
                         *by += shift;

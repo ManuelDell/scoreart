@@ -1545,3 +1545,55 @@ fn locked_text_blocks_stay_put_until_unlocked() {
     assert!(back.block_locked(BlockRef::Fixed(TextKind::Composer)));
     assert!(!back.block_locked(BlockRef::Fixed(TextKind::Title)));
 }
+
+/// Filling a page moves systems and staves apart, but never a distance a fixed spacer sets.
+#[test]
+fn filling_a_page_keeps_fixed_spacers() {
+    for justify in [false, true] {
+        let mut s = Session::default();
+        s.execute(
+            "file.new",
+            &json!({ "instruments": ["voice", "piano"], "measures": 60, "title": "" }),
+        )
+        .unwrap();
+        s.score.page.vertical_justify = justify;
+        // Below the voice in the first system, and below the left hand (to the next system).
+        s.execute("select.measure", &json!({ "part": 0, "staff": 0, "measure": 0 }))
+            .unwrap();
+        s.execute("staff.spacer", &json!({ "type": "fixed", "height": 5 }))
+            .unwrap();
+        s.execute("select.measure", &json!({ "part": 1, "staff": 1, "measure": 0 }))
+            .unwrap();
+        s.execute("staff.spacer", &json!({ "type": "fixed", "height": 6 }))
+            .unwrap();
+        let l = s.layout();
+        assert!(l.pages.len() > 1, "a full first page");
+        let first = l.staff_box(0, 0, 0).unwrap().clone();
+        let rh = l.staff_box(1, 0, 0).unwrap();
+        assert!(
+            (rh.top - first.top - 9.0).abs() < 0.01,
+            "justify {justify}: {}",
+            rh.top - first.top
+        );
+        let lh = l.staff_box(1, 1, 0).unwrap();
+        let next = l
+            .staves
+            .iter()
+            .find(|b| b.system == first.system + 1 && b.part == 0)
+            .unwrap();
+        assert_eq!(next.page, first.page);
+        assert!(
+            (next.top - lh.top - 10.0).abs() < 0.01,
+            "justify {justify}: {}",
+            next.top - lh.top
+        );
+        // The other systems on the page did move apart (the page is filled).
+        let later: Vec<f32> = l
+            .staves
+            .iter()
+            .filter(|b| b.page == 0 && b.part == 0 && b.system > first.system + 1)
+            .map(|b| b.top)
+            .collect();
+        assert!(!later.is_empty());
+    }
+}

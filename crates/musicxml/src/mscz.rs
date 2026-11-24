@@ -378,6 +378,9 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
 
     let mut lines: Vec<OpenLine> = Vec::new();
     let mut first_staff = true;
+    // Breaks on a frame belong to the measure before it (a collection of songs often ends
+    // each song with a section break on the frame between them).
+    let mut frame_breaks: Vec<(usize, &Element)> = Vec::new();
     for st in sc.children_named("Staff") {
         let Some(&(pi, si)) = st.attr("id").and_then(|id| staff_map.get(id)) else {
             continue;
@@ -390,6 +393,12 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
         let mut measures_before = 0usize;
         let mut title_frame_done = false;
         for c in &st.children {
+            if top_staff
+                && matches!(c.name.as_str(), "VBox" | "HBox" | "TBox")
+                && let Some(m) = measures_before.checked_sub(1)
+            {
+                frame_breaks.extend(c.children_named("LayoutBreak").map(|b| (m, b)));
+            }
             match c.name.as_str() {
                 "Measure" => measures_before += 1,
                 "VBox" | "TBox" => {
@@ -468,22 +477,9 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                 if m_el.has("startRepeat") {
                     info.repeat_start = true;
                 }
-                // Line and page breaks set in MuseScore.
+                // Line, page and section breaks set in MuseScore.
                 for b in m_el.children_named("LayoutBreak") {
-                    match b.child_text("subtype").map(str::trim) {
-                        Some("page") => info.page_break = true,
-                        Some("line") => info.system_break = true,
-                        Some("section") => {
-                            let flag = |k: &str| b.child_text(k).map(|v| v.trim() != "0");
-                            let d = scoreart_model::SectionBreak::default();
-                            info.section = Some(scoreart_model::SectionBreak {
-                                pause: b.child_num("pause").map_or(d.pause, |v| v as f32),
-                                long_names: flag("startWithLongNames").unwrap_or(d.long_names),
-                                restart_numbers: flag("startWithMeasureOne").unwrap_or(d.restart_numbers),
-                            });
-                        }
-                        _ => {}
-                    }
+                    layout_break(info, b);
                 }
                 if m_el.has("endRepeat") {
                     info.barline = Barline::RepeatEnd;
@@ -1063,6 +1059,11 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
             }
         }
     }
+    for (m, b) in frame_breaks {
+        if let Some(info) = score.measures.get_mut(m) {
+            layout_break(info, b);
+        }
+    }
     score.meta = meta;
     if let Some(last) = score.measures.last_mut()
         && last.barline == Barline::Regular
@@ -1198,6 +1199,24 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
 
 /// MuseScore's own values for the style settings ScoreArt reads, by major version (a score
 /// stores only what differs from them). Observed in style files saved by MuseScore 3 and 4.
+/// A `<LayoutBreak>` of MuseScore on the measure it ends: line, page or section break.
+fn layout_break(info: &mut MeasureInfo, b: &Element) {
+    match b.child_text("subtype").map(str::trim) {
+        Some("page") => info.page_break = true,
+        Some("line") => info.system_break = true,
+        Some("section") => {
+            let flag = |k: &str| b.child_text(k).map(|v| v.trim() != "0");
+            let d = scoreart_model::SectionBreak::default();
+            info.section = Some(scoreart_model::SectionBreak {
+                pause: b.child_num("pause").map_or(d.pause, |v| v as f32),
+                long_names: flag("startWithLongNames").unwrap_or(d.long_names),
+                restart_numbers: flag("startWithMeasureOne").unwrap_or(d.restart_numbers),
+            });
+        }
+        _ => {}
+    }
+}
+
 fn ms_defaults(major: u8) -> &'static [(&'static str, &'static str)] {
     const COMMON: &[(&str, &str)] = &[
         ("pageWidth", "8.27"),
@@ -1245,7 +1264,8 @@ fn ms_defaults(major: u8) -> &'static [(&'static str, &'static str)] {
         ("pageEvenTopMargin", "0.590551"),
         ("pageEvenBottomMargin", "0.590551"),
         ("spatium", "1.74978"),
-        ("enableVerticalSpread", "1"),
+        // Off: MuseScore 3.6 files store it only when it is switched on.
+        ("enableVerticalSpread", "0"),
         ("measureSpacing", "1.2"),
         ("enableIndentationOnFirstSystem", "1"),
         ("showHeader", "1"),

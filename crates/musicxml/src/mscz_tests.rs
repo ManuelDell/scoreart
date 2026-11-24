@@ -638,10 +638,16 @@ fn page_style_defaults_of_musescore_3_and_4() {
     );
     assert_eq!(s4.page.music_top, 7.0);
     assert_eq!((s4.page.system_gap, s4.page.max_system_gap), (8.5, 15.0));
-    // MuseScore 3: margins 15 mm, page numbers in the header, vertical justification.
+    // MuseScore 3: margins 15 mm, page numbers in the header, no vertical justification
+    // unless the file switches it on.
     let s3 = from_bytes(v("3.02").as_bytes()).unwrap();
     assert!((s3.page.margin_top_mm - 15.0).abs() < 0.01 && (s3.page.margin_left_mm - 15.0).abs() < 0.01);
-    assert!(s3.header_footer.show_header && s3.page.vertical_justify);
+    assert!(s3.header_footer.show_header && !s3.page.vertical_justify);
+    let spread = v("3.02").replace(
+        "<Score>",
+        "<Score><Style><enableVerticalSpread>1</enableVerticalSpread></Style>",
+    );
+    assert!(from_bytes(spread.as_bytes()).unwrap().page.vertical_justify);
     assert_eq!(s3.header_footer.header[0][2], "$p");
     assert_eq!(s3.text_styles.get(TextKind::Title).size, 22.0);
     assert!(s3.page.first_indent > 0.0);
@@ -744,4 +750,26 @@ fn reads_section_breaks_spacers_and_the_creation_date() {
     );
     assert_eq!(sm(2).spacer_fixed, Some(4.0));
     assert_eq!((sm(0).spacer_down, sm(3).spacer_fixed), (None, None));
+}
+
+#[test]
+fn a_break_on_a_frame_ends_the_measure_before_it() {
+    let mut parts = MS_RHYTHMS.splitn(3, "      <Measure>");
+    let (a, b, c) = (
+        parts.next().unwrap(),
+        parts.next().unwrap(),
+        parts.next().unwrap(),
+    );
+    let xml = format!(
+        "{a}      <Measure>{b}      <HBox><width>8</width><LayoutBreak><subtype>section</subtype></LayoutBreak></HBox>\n      <VBox><LayoutBreak><subtype>page</subtype></LayoutBreak></VBox>\n      <Measure>{c}"
+    );
+    let s = from_bytes(xml.as_bytes()).unwrap();
+    assert!(s.measures[0].section.is_some() && s.measures[0].page_break);
+    assert!(
+        s.measures
+            .iter()
+            .skip(1)
+            .all(|i| i.section.is_none() && !i.page_break)
+    );
+    assert_eq!(s.measure_number(1), 1);
 }
