@@ -242,7 +242,23 @@ pub fn sequence(score: &Score) -> Sequence {
     let mut stretches: Vec<timing::Stretch> = Vec::new();
     let mut pauses: Vec<timing::Pause> = Vec::new();
     let mut swing_on = false;
-    for &(m, mtick) in &played {
+    for (k, &(m, mtick)) in played.iter().enumerate() {
+        // The end of a section: silence before the next one (not after the last measure).
+        // The notes that reach the end stop before it, so the silence is a real one.
+        let mut section_end: Option<(u64, u64)> = None;
+        if let Some(sec) = score.measures.get(m).and_then(|i| i.section)
+            && sec.pause > 0.0
+            && k + 1 < played.len()
+        {
+            let end = mtick + u64::from(score.measure_ticks(m));
+            let g = (u64::from(TPQ) / 8).max(1);
+            pauses.push(timing::Pause {
+                from: end.saturating_sub(g),
+                to: end,
+                secs: f64::from(sec.pause),
+            });
+            section_end = Some((end, g));
+        }
         // Swing words anywhere in the measure (system text, tempo text or staff text).
         let info = score.measures.get(m);
         let mut texts: Vec<&str> = info
@@ -404,6 +420,11 @@ pub fn sequence(score: &Score) -> Sequence {
                                     secs,
                                 });
                             }
+                        }
+                        if let Some((end, g)) = section_end
+                            && t + d + g > end
+                        {
+                            cut = cut.max(g);
                         }
                         // How long the note sounds.
                         let short = ids.iter().any(|i| i.starts_with("staccat"));

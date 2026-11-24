@@ -55,6 +55,8 @@ pub struct Style {
     /// Everything else of the page format: two-sided margins, music margins, vertical fill,
     /// last-system fill, first page number, first-system indent, header and footer offsets.
     pub page: PageFormat,
+    /// File name, dates and part name for the macros of headers and footers.
+    pub doc: scoreart_model::DocInfo,
 }
 
 impl Default for Style {
@@ -81,6 +83,7 @@ impl Style {
             spacing: p.spacing,
             view,
             page: p,
+            doc: scoreart_model::DocInfo::default(),
         }
     }
 
@@ -305,6 +308,36 @@ pub struct Layout {
     pub pages: Vec<Page>,
     pub hits: Vec<Hit>,
     pub staves: Vec<StaffBox>,
+    /// Marks for the editor only (not printed): breaks and spacers.
+    pub marks: Vec<Mark>,
+}
+
+/// A mark the editor shows on the page but that is not printed (as MuseScore shows its layout
+/// breaks and spacers).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mark {
+    pub page: usize,
+    /// For a break: where its sign sits (above the end of the measure); for a spacer: the
+    /// staff line it starts from.
+    pub x: f32,
+    pub y: f32,
+    pub kind: MarkKind,
+    /// The measure (and staff of a spacer) it belongs to.
+    pub measure: usize,
+    pub part: usize,
+    pub staff: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MarkKind {
+    LineBreak,
+    PageBreak,
+    SectionBreak,
+    /// Spacers with their height in staff spaces: up from the top line, down from the
+    /// bottom line, fixed down from the bottom line.
+    SpacerUp(f32),
+    SpacerDown(f32),
+    SpacerFixed(f32),
 }
 
 impl Layout {

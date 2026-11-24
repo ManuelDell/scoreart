@@ -382,6 +382,57 @@ pub(crate) fn paint_shape(
     }
 }
 
+/// Paints a break or spacer sign of the layout in the accent colour.
+fn paint_layout_mark(
+    painter: &egui::Painter,
+    m: &scoreart_engrave::Mark,
+    map: &dyn Fn(f32, f32) -> Pos2,
+    zoom: f32,
+    accent: Color32,
+) {
+    use scoreart_engrave::MarkKind;
+    let stroke = Stroke::new((zoom * 0.12).clamp(1.0, 2.0), accent);
+    let arrow = |from: f32, to: f32| {
+        let (x, d) = (m.x, if to < from { -0.5 } else { 0.5 });
+        painter.line_segment([map(x, from), map(x, to)], stroke);
+        painter.line_segment([map(x - 0.5, to - d), map(x, to)], stroke);
+        painter.line_segment([map(x + 0.5, to - d), map(x, to)], stroke);
+    };
+    let bar = |y: f32| painter.line_segment([map(m.x - 0.8, y), map(m.x + 0.8, y)], stroke);
+    let size = (zoom * 2.0).clamp(13.0, 26.0);
+    match m.kind {
+        MarkKind::SpacerUp(h) => {
+            arrow(m.y, m.y - h);
+            bar(m.y - h);
+        }
+        MarkKind::SpacerDown(h) => {
+            arrow(m.y, m.y + h);
+            bar(m.y + h);
+        }
+        MarkKind::SpacerFixed(h) => {
+            painter.line_segment([map(m.x, m.y), map(m.x, m.y + h)], stroke);
+            bar(m.y);
+            bar(m.y + h);
+        }
+        MarkKind::LineBreak | MarkKind::PageBreak | MarkKind::SectionBreak => {
+            let sign = match m.kind {
+                MarkKind::LineBreak => "↵",
+                MarkKind::PageBreak => "⤓",
+                _ => "§",
+            };
+            let r = Rect::from_center_size(map(m.x, m.y), Vec2::splat(size * 1.1));
+            painter.rect_filled(r, 2.0, accent.linear_multiply(0.15));
+            painter.text(
+                r.center(),
+                egui::Align2::CENTER_CENTER,
+                sign,
+                egui::FontId::proportional(size * 0.8),
+                accent,
+            );
+        }
+    }
+}
+
 pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
     let zoom = app.zoom;
     let selected = app.session.selection;
@@ -725,6 +776,10 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     let r = Rect::from_min_max(map(h.x0 + d.delta.0, h.y0 + d.delta.1), map(h.x1 + d.delta.0, h.y1 + d.delta.1));
                     painter.rect_filled(r, 3.0, tk.accent.linear_multiply(0.12));
                     painter.rect_stroke(r, 3.0, Stroke::new(1.2, tk.accent), egui::StrokeKind::Outside);
+                }
+                // Breaks and spacers: editor-only signs, never printed.
+                for m in layout.marks.iter().filter(|m| m.page == pi) {
+                    paint_layout_mark(&painter, m, &map, zoom, tk.accent);
                 }
                 // Note-input cursor.
                 if input.active

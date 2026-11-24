@@ -339,6 +339,11 @@ pub fn write(score: &Score) -> String {
 /// user's own breaks are listed apart, so ScoreArt keeps only those when it opens the file.
 pub fn write_laid_out(score: &Score, starts: &[(usize, bool)]) -> String {
     let div = divisions(score);
+    // Sections that count from 1 again: the measures are numbered as printed.
+    let restarts = score
+        .measures
+        .iter()
+        .any(|i| i.section.is_some_and(|s| s.restart_numbers));
     let per_tick = |t: u32| -> u32 { t * div / TPQ };
     let mut x = String::new();
     x.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");
@@ -420,6 +425,43 @@ pub fn write_laid_out(score: &Score, starts: &[(usize, bool)]) -> String {
             esc(&j.to_string())
         );
     }
+    // Section breaks, spacers and the creation date (MusicXML has no place for them).
+    let sections: Vec<serde_json::Value> = score
+        .measures
+        .iter()
+        .enumerate()
+        .filter_map(|(m, i)| {
+            i.section.map(|s| {
+                serde_json::json!({ "measure": m, "pause": s.pause, "long_names": s.long_names, "restart_numbers": s.restart_numbers })
+            })
+        })
+        .collect();
+    let mut spacers: Vec<serde_json::Value> = Vec::new();
+    for (pi, p) in score.parts.iter().enumerate() {
+        for (m, pm) in p.measures.iter().enumerate() {
+            for (si, sm) in pm.staves.iter().enumerate() {
+                if sm.spacer_up.is_some() || sm.spacer_down.is_some() || sm.spacer_fixed.is_some() {
+                    spacers.push(serde_json::json!({ "part": pi, "staff": si, "measure": m, "up": sm.spacer_up, "down": sm.spacer_down, "fixed": sm.spacer_fixed }));
+                }
+            }
+        }
+    }
+    for (name, v) in [("scoreart-sections", sections), ("scoreart-spacers", spacers)] {
+        if !v.is_empty() {
+            let _ = write!(
+                misc,
+                "<miscellaneous-field name=\"{name}\">{}</miscellaneous-field>",
+                esc(&serde_json::Value::Array(v).to_string())
+            );
+        }
+    }
+    if !score.meta.created.is_empty() {
+        let _ = write!(
+            misc,
+            "<miscellaneous-field name=\"scoreart-created\">{}</miscellaneous-field>",
+            esc(&score.meta.created)
+        );
+    }
     if !misc.is_empty() {
         let _ = writeln!(x, "    <miscellaneous>{misc}</miscellaneous>");
     }
@@ -480,14 +522,18 @@ pub fn write_laid_out(score: &Score, starts: &[(usize, bool)]) -> String {
             let _ = writeln!(
                 x,
                 "    <measure number=\"{}\"{}>",
-                mi + 1,
+                if restarts {
+                    score.measure_number(mi)
+                } else {
+                    mi + 1
+                },
                 if info.uncounted { " implicit=\"yes\"" } else { "" }
             );
             // A new system or page: the user's break after the previous measure, or where the
             // layout starts one.
             let laid = starts.iter().find(|(m, _)| *m == mi && mi > 0).map(|s| s.1);
             let user = prev_info
-                .filter(|p| p.system_break || p.page_break)
+                .filter(|p| p.system_break || p.page_break || p.section.is_some())
                 .map(|p| p.page_break);
             if let Some(page) = match (laid, user) {
                 (Some(a), Some(b)) => Some(a || b),

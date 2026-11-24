@@ -1296,3 +1296,181 @@ fn has_text(l: &scoreart_engrave::Layout, page: usize, t: &str) -> bool {
         .iter()
         .any(|it| matches!(&it.shape, scoreart_engrave::Shape::Text { text, .. } if text == t))
 }
+
+#[test]
+fn spacers_set_the_distance_to_the_next_staff_and_system() {
+    let mut s = Session::default();
+    s.execute(
+        "file.new",
+        &json!({ "instruments": ["piano"], "measures": 24, "title": "" }),
+    )
+    .unwrap();
+    let gap = |s: &mut Session, a: (usize, usize), b: (usize, usize)| {
+        let l = s.layout();
+        l.staff_box(0, b.1, b.0).unwrap().top - l.staff_box(0, a.1, a.0).unwrap().top
+    };
+    let natural = gap(&mut s, (0, 0), (0, 1));
+    // Spacer down below the right hand of measure 1: more room to the left hand.
+    s.execute("select.measure", &json!({ "part": 0, "staff": 0, "measure": 0 }))
+        .unwrap();
+    s.execute("staff.spacer", &json!({ "type": "down", "height": 12 }))
+        .unwrap();
+    assert_eq!(s.score.staff_measure(0, 0, 0).unwrap().spacer_down, Some(12.0));
+    let wide = gap(&mut s, (0, 0), (0, 1));
+    assert!(
+        (wide - 16.0).abs() < 0.01,
+        "4 lines + 12 spaces: {wide} (natural {natural})"
+    );
+    // A fixed spacer replaces it and is exact, even when smaller than the natural gap.
+    s.execute("staff.spacer", &json!({ "type": "fixed", "height": 3 }))
+        .unwrap();
+    let sm = s.score.staff_measure(0, 0, 0).unwrap();
+    assert_eq!((sm.spacer_down, sm.spacer_fixed), (None, Some(3.0)));
+    assert!((gap(&mut s, (0, 0), (0, 1)) - 7.0).abs() < 0.01);
+    // Spacer up above the left hand: room above it.
+    s.execute("staff.spacer", &json!({ "type": "none" })).unwrap();
+    s.execute("select.measure", &json!({ "part": 0, "staff": 1, "measure": 0 }))
+        .unwrap();
+    s.execute("staff.spacer", &json!({ "type": "up", "height": 14 }))
+        .unwrap();
+    assert!((gap(&mut s, (0, 0), (0, 1)) - 18.0).abs() < 0.01);
+    s.execute("staff.spacer", &json!({ "type": "none" })).unwrap();
+    assert!((gap(&mut s, (0, 0), (0, 1)) - natural).abs() < 0.01);
+    // Below the last staff of a system: the next system on the page keeps that distance.
+    let l = s.layout();
+    let first = l.staff_box(0, 1, 0).unwrap().clone();
+    let next = l
+        .staves
+        .iter()
+        .find(|b| b.system == first.system + 1 && b.part == 0 && b.staff == 0)
+        .unwrap()
+        .clone();
+    assert_eq!(next.page, first.page);
+    s.execute("select.measure", &json!({ "part": 0, "staff": 1, "measure": 0 }))
+        .unwrap();
+    s.execute("staff.spacer", &json!({ "type": "fixed", "height": 20 }))
+        .unwrap();
+    let l = s.layout();
+    let a = l.staff_box(0, 1, 0).unwrap();
+    let b = l.staff_box(0, 0, next.measure).unwrap();
+    assert!((b.top - a.top - 24.0).abs() < 0.01, "{} → {}", a.top, b.top);
+    // The editor sees the spacer as a mark; nothing of it is printed.
+    assert!(
+        l.marks
+            .iter()
+            .any(|m| matches!(m.kind, scoreart_engrave::MarkKind::SpacerFixed(h) if h == 20.0))
+    );
+    let undo_to = s.score.clone();
+    s.execute("staff.spacer", &json!({ "type": "fixed", "height": 0 }))
+        .unwrap();
+    assert_eq!(s.score.staff_measure(0, 1, 0).unwrap().spacer_fixed, None);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.score, undo_to);
+}
+
+#[test]
+fn a_section_break_starts_a_new_section() {
+    let mut s = Session::default();
+    s.execute(
+        "file.new",
+        &json!({ "instruments": ["piano"], "measures": 8, "title": "" }),
+    )
+    .unwrap();
+    s.execute("input.toggle", &json!({})).unwrap();
+    s.execute("input.duration", &json!({ "value": "whole" })).unwrap();
+    for _ in 0..6 {
+        s.execute("note.enter", &json!({ "step": "c" })).unwrap();
+    }
+    s.execute("input.toggle", &json!({})).unwrap();
+    let before = scoreart_midi::sequence(&s.score);
+    s.execute("select.measure", &json!({ "part": 0, "staff": 0, "measure": 3 }))
+        .unwrap();
+    s.execute("measure.break", &json!({ "kind": "section" })).unwrap();
+    let sec = s.score.measures[3].section.unwrap();
+    assert_eq!(
+        (sec.pause, sec.long_names, sec.restart_numbers),
+        (3.0, true, true)
+    );
+    // Measure numbers count from 1 again after it.
+    let numbers: Vec<usize> = (0..8).map(|m| s.score.measure_number(m)).collect();
+    assert_eq!(numbers, [1, 2, 3, 4, 1, 2, 3, 4]);
+    // A new system starts after it, with the long instrument names.
+    let l = s.layout();
+    let (a, b) = (l.staff_box(0, 0, 3).unwrap(), l.staff_box(0, 0, 4).unwrap());
+    assert_ne!(a.system, b.system);
+    assert!(s.score.section_starts_with_long_names(4));
+    assert!(
+        l.marks
+            .iter()
+            .any(|m| m.measure == 3 && m.kind == scoreart_engrave::MarkKind::SectionBreak)
+    );
+    // Playback waits three seconds before the next section.
+    let tick = |m: u64| m * 4 * scoreart_model::TPQ as u64;
+    let after = scoreart_midi::sequence(&s.score);
+    let extra = after.seconds_at(tick(4)) - before.seconds_at(tick(4));
+    // (Three seconds of silence; the last 32nd of the measure is part of them.)
+    assert!((2.85..=3.0).contains(&extra), "pause {extra}");
+    let last = after
+        .notes
+        .iter()
+        .filter(|n| n.start < tick(4))
+        .map(|n| n.start + n.ticks)
+        .max()
+        .unwrap();
+    assert!(last < tick(4), "the last notes stop before the pause");
+    // Settings: no pause, keep counting, short names.
+    s.execute(
+        "measure.break",
+        &json!({ "kind": "section", "pause": 0, "long_names": false, "restart_numbers": false }),
+    )
+    .unwrap();
+    assert_eq!(s.score.measure_number(4), 5);
+    assert!(!s.score.section_starts_with_long_names(4));
+    let after = scoreart_midi::sequence(&s.score);
+    assert!((after.seconds_at(tick(4)) - before.seconds_at(tick(4))).abs() < 0.01);
+    // Toggling it off, or a line break in its place, removes it.
+    s.execute("measure.break", &json!({ "kind": "line" })).unwrap();
+    assert!(s.score.measures[3].section.is_none());
+    s.execute("measure.break", &json!({ "kind": "section" })).unwrap();
+    s.execute("measure.break", &json!({ "kind": "section" })).unwrap();
+    assert!(s.score.measures[3].section.is_none());
+}
+
+#[test]
+fn header_macros_for_dates_files_and_parts() {
+    // 2026-11-24 13:05 (local clock of the host).
+    let mut s = Session {
+        clock: Some(1_795_525_500),
+        ..Session::default()
+    };
+    s.execute(
+        "file.new",
+        &json!({ "instruments": ["piano"], "measures": 4, "title": "" }),
+    )
+    .unwrap();
+    assert_eq!(s.score.meta.created, "2026-11-24");
+    // A change stamps the time of the last change.
+    s.execute("score.meta", &json!({ "composer": "N. N." })).unwrap();
+    s.file_name = "Lied.musicxml".into();
+    s.file_path = "/home/a/Lied.musicxml".into();
+    let mut hf = s.score.header_footer.clone();
+    hf.header[0][0] = "$d|$D|$M|$m|$f|$F|[$i][$I][$:partName:]|$:creationDate:".into();
+    hf.show_header = true;
+    hf.header_first_page = true;
+    s.score.header_footer = hf;
+    let header = |s: &mut Session| -> Option<String> {
+        s.layout().pages[0].items.iter().find_map(|it| match &it.shape {
+            scoreart_engrave::Shape::Text { text, .. } if text.contains('|') => Some(text.clone()),
+            _ => None,
+        })
+    };
+    assert_eq!(
+        header(&mut s).unwrap(),
+        "2026-11-24|2026-11-24|2026-11-24|13:05|Lied.musicxml|/home/a/Lied.musicxml|[][][]|2026-11-24"
+    );
+    s.date_style = scoreart_model::DateStyle::German;
+    s.score.meta.created = "2025-03-01".into();
+    s.modified = None;
+    let h = header(&mut s).unwrap();
+    assert!(h.starts_with("24.11.2026|01.03.2025|01.03.2025||"), "{h}");
+}

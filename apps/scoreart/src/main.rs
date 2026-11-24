@@ -147,6 +147,33 @@ impl NativeHost {
     }
 }
 
+/// The local time zone's offset from UTC in seconds, asked once from the system's `date`
+/// command (`+0100` → 3600); zero (UTC) where it cannot be found, e.g. on Windows.
+fn local_offset_secs() -> i64 {
+    static OFFSET: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    *OFFSET.get_or_init(|| {
+        let out = std::process::Command::new("date").arg("+%z").output().ok();
+        out.and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|s| parse_offset(s.trim()))
+            .unwrap_or(0)
+    })
+}
+
+/// `+0130` / `-0500` → seconds east of UTC.
+fn parse_offset(s: &str) -> Option<i64> {
+    let (sign, digits) = match s.as_bytes().first()? {
+        b'+' => (1, s.get(1..)?),
+        b'-' => (-1, s.get(1..)?),
+        _ => return None,
+    };
+    if digits.len() != 4 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let h: i64 = digits.get(..2)?.parse().ok()?;
+    let m: i64 = digits.get(2..)?.parse().ok()?;
+    (h <= 14 && m < 60).then_some(sign * (h * 3600 + m * 60))
+}
+
 impl Host for NativeHost {
     fn audio_rate(&self) -> u32 {
         self.audio_rate
@@ -179,6 +206,18 @@ impl Host for NativeHost {
 
     fn take_opened(&mut self) -> Option<(String, Vec<u8>)> {
         self.opened.take()
+    }
+
+    fn now_secs(&self) -> Option<u64> {
+        let utc = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs();
+        Some(utc.saturating_add_signed(local_offset_secs()))
+    }
+
+    fn file_path(&self) -> Option<String> {
+        self.path.as_ref().map(|p| p.display().to_string())
     }
 
     fn tick(&mut self) {
@@ -472,4 +511,17 @@ fn main() -> eframe::Result<()> {
             }))
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn time_zone_offsets() {
+        assert_eq!(super::parse_offset("+0100"), Some(3600));
+        assert_eq!(super::parse_offset("-0530"), Some(-19800));
+        assert_eq!(super::parse_offset("+0000"), Some(0));
+        for bad in ["", "0100", "+01", "+01:00", "+9900", "CET"] {
+            assert_eq!(super::parse_offset(bad), None, "{bad}");
+        }
+    }
 }

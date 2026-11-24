@@ -1151,6 +1151,12 @@ pub(crate) fn open_measure_length(app: &mut ScoreApp) {
     });
 }
 
+/// The section break after the focused measure, if it has one.
+pub(crate) fn section_at_focus(app: &ScoreApp) -> Option<scoreart_model::SectionBreak> {
+    let m = app.session.focus().2;
+    app.session.score.measures.get(m).and_then(|i| i.section)
+}
+
 pub(crate) fn key_label(f: i32) -> String {
     match f {
         0 => "♮".into(),
@@ -1632,6 +1638,43 @@ pub fn dialogs(app: &mut ScoreApp, ctx: &egui::Context) {
                 close = true;
             } else {
                 app.dialog = Some(Dialog::MeasureLength { length, counted });
+            }
+        }
+        Dialog::Section(mut sec) => {
+            let resp = egui::Modal::new(egui::Id::unique("section_dialog")).show(ctx, |ui| {
+                ui.set_width(380.0);
+                ui.heading(t("Section break"));
+                ui.horizontal(|ui| {
+                    ui.label(t("Pause in playback"));
+                    ui.add(
+                        egui::DragValue::new(&mut sec.pause)
+                            .range(0.0..=60.0)
+                            .speed(0.1)
+                            .suffix(" s"),
+                    );
+                });
+                ui.checkbox(&mut sec.long_names, t("Next system shows long instrument names"));
+                ui.checkbox(&mut sec.restart_numbers, t("Measure numbers start again at 1"));
+                ui.add_space(6.0);
+                ui.horizontal(|ui| (ui.button(t("OK")).clicked(), ui.button(t("Cancel")).clicked()))
+                    .inner
+            });
+            let (ok, cancel) = resp.inner;
+            if ok {
+                app.run(
+                    "measure.break",
+                    json!({
+                        "kind": "section",
+                        "pause": sec.pause,
+                        "long_names": sec.long_names,
+                        "restart_numbers": sec.restart_numbers,
+                    }),
+                );
+                close = true;
+            } else if cancel || resp.should_close() {
+                close = true;
+            } else {
+                app.dialog = Some(Dialog::Section(sec));
             }
         }
         Dialog::Shortcuts => {

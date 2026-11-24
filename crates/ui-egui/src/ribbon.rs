@@ -1678,6 +1678,73 @@ fn tab_measures(app: &mut ScoreApp, ui: &mut Ui) {
                 "measure.break",
                 json!({ "kind": "page" }),
             );
+            cmd_small(
+                app,
+                ui,
+                Some(Ico::SectionBreak),
+                t("Section break"),
+                t(
+                    "Section break after the measure: new system, pause in playback, measure numbers start again (toggle)",
+                ),
+                "measure.break",
+                json!({ "kind": "section" }),
+            );
+        });
+        column(ui, |ui| {
+            for (ico, label, tip, kind) in [
+                (
+                    Ico::SpacerUp,
+                    t("Spacer up"),
+                    t("More room above the staff in the selected measures"),
+                    "up",
+                ),
+                (
+                    Ico::SpacerDown,
+                    t("Spacer down"),
+                    t("More room below the staff in the selected measures"),
+                    "down",
+                ),
+                (
+                    Ico::SpacerFixed,
+                    t("Fixed spacer"),
+                    t("Exact distance below the staff in the selected measures"),
+                    "fixed",
+                ),
+            ] {
+                cmd_small(
+                    app,
+                    ui,
+                    Some(ico),
+                    label,
+                    tip,
+                    "staff.spacer",
+                    json!({ "type": kind }),
+                );
+            }
+        });
+        column(ui, |ui| {
+            cmd_small(
+                app,
+                ui,
+                None,
+                t("Remove spacers"),
+                t("Remove all spacers of the selected measures"),
+                "staff.spacer",
+                json!({ "type": "none" }),
+            );
+            let sec = crate::panels::section_at_focus(app);
+            if small(
+                ui,
+                None,
+                t("Section…"),
+                false,
+                sec.is_some(),
+                t("Settings of the section break: pause, instrument names, measure numbers"),
+            )
+            .clicked()
+            {
+                app.dialog = sec.map(Dialog::Section);
+            }
         });
     });
 }
@@ -2163,6 +2230,73 @@ fn tab_format(app: &mut ScoreApp, ui: &mut Ui) {
                 "measure.break",
                 json!({ "kind": "page" }),
             );
+            cmd_small(
+                app,
+                ui,
+                Some(Ico::SectionBreak),
+                t("Section break"),
+                t(
+                    "Section break after the measure: new system, pause in playback, measure numbers start again (toggle)",
+                ),
+                "measure.break",
+                json!({ "kind": "section" }),
+            );
+        });
+        column(ui, |ui| {
+            for (ico, label, tip, kind) in [
+                (
+                    Ico::SpacerUp,
+                    t("Spacer up"),
+                    t("More room above the staff in the selected measures"),
+                    "up",
+                ),
+                (
+                    Ico::SpacerDown,
+                    t("Spacer down"),
+                    t("More room below the staff in the selected measures"),
+                    "down",
+                ),
+                (
+                    Ico::SpacerFixed,
+                    t("Fixed spacer"),
+                    t("Exact distance below the staff in the selected measures"),
+                    "fixed",
+                ),
+            ] {
+                cmd_small(
+                    app,
+                    ui,
+                    Some(ico),
+                    label,
+                    tip,
+                    "staff.spacer",
+                    json!({ "type": kind }),
+                );
+            }
+        });
+        column(ui, |ui| {
+            cmd_small(
+                app,
+                ui,
+                None,
+                t("Remove spacers"),
+                t("Remove all spacers of the selected measures"),
+                "staff.spacer",
+                json!({ "type": "none" }),
+            );
+            let sec = crate::panels::section_at_focus(app);
+            if small(
+                ui,
+                None,
+                t("Section…"),
+                false,
+                sec.is_some(),
+                t("Settings of the section break: pause, instrument names, measure numbers"),
+            )
+            .clicked()
+            {
+                app.dialog = sec.map(Dialog::Section);
+            }
         });
     });
 }

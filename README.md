@@ -97,8 +97,14 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   justification**, the **last system fill threshold** and the indent of the first system. Pages
   before the last are filled down to the music bottom margin. *Format → Header & footer* has a
   left, middle and right field for odd and even pages with MuseScore's macros (`$p`, `$P`, `$n`,
-  `$C`, `$c`, `$$`, `$:workTitle:`, `$:composer:`, `$:copyright:` …), shown on the first page or
-  not. A new score starts as a new MuseScore 4 score does (A4, margins 10 mm and 20 mm at the
+  `$C`, `$c`, `$$`, `$:workTitle:`, `$:composer:`, `$:copyright:`, the dates `$d` (today),
+  `$D` (created), `$M`/`$m` (date and time of the last change), the file `$f`/`$F` and the part
+  name `$i`/`$I`, empty in the full score as in MuseScore …), shown on the first page or not.
+  **Spacers** (*Format → Breaks*: up, down, fixed) give one staff of the selected measures more
+  room above or below, or an exact distance to the next staff or system. A **section break**
+  starts a new system with the long instrument names, counts the measures from 1 again and
+  pauses playback (3 s; each can be changed in *Section…*). Breaks and spacers show as signs in
+  the accent colour on screen, never in print. A new score starts as a new MuseScore 4 score does (A4, margins 10 mm and 20 mm at the
   bottom, page number and copyright in the footer, MuseScore's text sizes).
 - **MuseScore files keep their page layout**: `.mscz`/`.mscx` of MuseScore 3 and 4 open with their
   page size, margins (odd/even), staff size, distances, vertical justification, fill threshold,
@@ -128,7 +134,7 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   instrument that holds several lines (Women → Soprano) asks whether to **merge** them, **split**
   one off into the new instrument (the alto stays in Women) or **keep only one**; any line can
   also get an instrument of its own. **Instrument changes inside a part**
-  ("To Flute", played and exported to MIDI); show or hide instruments; line and page breaks;
+  ("To Flute", played and exported to MIDI); show or hide instruments; line, page and section breaks;
   **lyrics with several verses and hyphens**; transpose; score properties; unlimited undo/redo.
 
 ![The Instruments tab, and the question when Women (two staves) changes to Soprano](docs/images/instruments.png)

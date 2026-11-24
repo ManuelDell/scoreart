@@ -176,7 +176,63 @@ fn read_layout(root: &Element, score: &mut Score, ours: bool) {
     {
         score.page = page.clamped();
     }
+    if let Some(c) = misc_field(root, "scoreart-created") {
+        score.meta.created = clip(c);
+    }
+    let json = |name: &str| -> Vec<serde_json::Value> {
+        misc_field(root, name)
+            .and_then(|j| serde_json::from_str::<Vec<serde_json::Value>>(j).ok())
+            .unwrap_or_default()
+    };
+    let sections = json("scoreart-sections");
+    let n = |v: &serde_json::Value, k: &str| v.get(k).and_then(serde_json::Value::as_u64).map(|x| x as usize);
+    let f = |v: &serde_json::Value, k: &str| v.get(k).and_then(serde_json::Value::as_f64).map(|x| x as f32);
+    let b = |v: &serde_json::Value, k: &str| v.get(k).and_then(serde_json::Value::as_bool);
+    for v in &sections {
+        if let Some(info) = n(v, "measure").and_then(|m| score.measures.get_mut(m)) {
+            let d = scoreart_model::SectionBreak::default();
+            info.section = Some(scoreart_model::SectionBreak {
+                pause: f(v, "pause").unwrap_or(d.pause),
+                long_names: b(v, "long_names").unwrap_or(d.long_names),
+                restart_numbers: b(v, "restart_numbers").unwrap_or(d.restart_numbers),
+            });
+            info.system_break = false;
+        }
+    }
+    for v in json("scoreart-spacers") {
+        if let (Some(p), Some(s), Some(m)) = (n(&v, "part"), n(&v, "staff"), n(&v, "measure"))
+            && let Some(sm) = score
+                .parts
+                .get_mut(p)
+                .and_then(|pt| pt.measures.get_mut(m))
+                .and_then(|pm| pm.staves.get_mut(s))
+        {
+            sm.spacer_up = f(&v, "up");
+            sm.spacer_down = f(&v, "down");
+            sm.spacer_fixed = f(&v, "fixed");
+        }
+    }
     if !ours {
+        // Another program numbering a measure 1 again after counted ones: a new section.
+        if let Some(part) = root.children_named("part").next() {
+            let mut prev: Option<u64> = None;
+            for (mi, m) in part.children_named("measure").enumerate() {
+                let num = m.attr("number").and_then(|v| v.trim().parse::<u64>().ok());
+                if num == Some(1)
+                    && prev.is_some_and(|p| p > 1)
+                    && let Some(info) = mi.checked_sub(1).and_then(|i| score.measures.get_mut(i))
+                {
+                    info.section = Some(scoreart_model::SectionBreak {
+                        pause: 0.0,
+                        ..scoreart_model::SectionBreak::default()
+                    });
+                    info.system_break = false;
+                }
+                if num.is_some() {
+                    prev = num;
+                }
+            }
+        }
         return;
     }
     let Some(j) =
@@ -1560,6 +1616,7 @@ fn read_part(
                 voices: Vec::new(),
                 clef: clef_changes.get(&s).copied(),
                 measure_repeat: repeat_staves.get(s).copied().unwrap_or(false),
+                ..StaffMeasure::default()
             };
             let mut numbers: Vec<u32> = raws.iter().filter(|r| r.staff == s).map(|r| r.voice).collect();
             numbers.sort_unstable();

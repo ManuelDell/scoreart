@@ -209,3 +209,57 @@ fn laid_out_systems_round_trip_without_fixing_them() {
     assert_eq!(breaks, vec![4], "only the user's break");
     assert_eq!(back.page, s.page.clamped());
 }
+
+/// Sections, spacers and the creation date survive a round trip; other programs' scores
+/// that count measures from 1 again get a section break there.
+#[test]
+fn sections_and_spacers_round_trip() {
+    let mut s = from_str(SMALL).unwrap();
+    let extra = s.measures[1].clone();
+    for _ in 0..4 {
+        s.measures.push(extra.clone());
+        for p in &mut s.parts {
+            let m = p.measures[1].clone();
+            p.measures.push(m);
+        }
+    }
+    s.measures[1].barline = Barline::Regular;
+    s.measures[2].section = Some(SectionBreak {
+        pause: 1.5,
+        long_names: false,
+        restart_numbers: true,
+    });
+    s.meta.created = "2024-02-03".into();
+    if let Some(sm) = s.staff_measure_mut(0, 0, 1) {
+        sm.spacer_down = Some(5.0);
+        sm.spacer_up = Some(1.5);
+    }
+    if let Some(sm) = s.staff_measure_mut(0, 0, 4) {
+        sm.spacer_fixed = Some(9.0);
+    }
+    s.normalize();
+    let xml = to_string(&s);
+    // Measure numbers as printed: 1 2 3 | 1 2 3.
+    assert!(xml.contains("<measure number=\"3\">") && xml.matches("<measure number=\"1\">").count() == 2);
+    let back = from_str(&xml).unwrap();
+    assert_eq!(back.measures[2].section, s.measures[2].section);
+    assert_eq!(back.meta.created, "2024-02-03");
+    for m in 0..6 {
+        assert_eq!(
+            back.staff_measure(0, 0, m),
+            s.staff_measure(0, 0, m),
+            "measure {m}"
+        );
+    }
+    // Another program's file: the numbers start again, nothing else says why.
+    let foreign = xml
+        .replace("<software>ScoreArt", "<software>Other")
+        .lines()
+        .filter(|l| !l.contains("scoreart-"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let other = from_str(&foreign).unwrap();
+    let sec = other.measures[2].section.expect("section from the numbering");
+    assert_eq!((sec.pause, sec.restart_numbers), (0.0, true));
+    assert_eq!(other.measure_number(3), 1);
+}

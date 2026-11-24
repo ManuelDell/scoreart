@@ -367,9 +367,75 @@ impl HeaderFooter {
     }
 }
 
+/// What headers and footers can show about the document besides the score: its file, dates
+/// already written out for the reader, and the part's name (empty in the full score).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DocInfo {
+    pub file_name: String,
+    pub file_path: String,
+    /// `$d`: today; `$D`: the creation date; `$M` and `$m`: the last change's date and time.
+    pub today: String,
+    pub created: String,
+    pub modified_date: String,
+    pub modified_time: String,
+    /// `$i`, `$I`, `$:partName:`.
+    pub part_name: String,
+}
+
+/// How dates are written.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DateStyle {
+    /// 2026-11-24
+    #[default]
+    Iso,
+    /// 24.11.2026
+    German,
+}
+
+impl DateStyle {
+    /// A date (year, month, day) in this style.
+    pub fn date(self, (y, m, d): (i64, u32, u32)) -> String {
+        match self {
+            DateStyle::Iso => format!("{y:04}-{m:02}-{d:02}"),
+            DateStyle::German => format!("{d:02}.{m:02}.{y:04}"),
+        }
+    }
+
+    /// An ISO date ("2026-11-24", maybe with a time after it) in this style; other text as it is.
+    pub fn iso(self, s: &str) -> String {
+        let p: Vec<&str> = s.get(..10).unwrap_or("").split('-').collect();
+        match (
+            p.first().and_then(|v| v.parse().ok()),
+            p.get(1).and_then(|v| v.parse().ok()),
+            p.get(2).and_then(|v| v.parse().ok()),
+        ) {
+            (Some(y), Some(m), Some(d)) if s.len() >= 10 => self.date((y, m, d)),
+            _ => s.to_string(),
+        }
+    }
+}
+
+/// The civil date and time (UTC) of seconds since 1970: (year, month, day), (hour, minute).
+pub fn civil(secs: u64) -> ((i64, u32, u32), (u32, u32)) {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    // Days to civil date (proleptic Gregorian calendar).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    ((y, m, d), ((rem / 3600) as u32, (rem % 3600 / 60) as u32))
+}
+
 /// What a header or footer field shows on a page: its macros replaced.
 pub struct PageInfo<'a> {
     pub meta: &'a crate::Meta,
+    pub doc: &'a DocInfo,
     /// The printed page number and the number of pages.
     pub number: i32,
     pub pages: usize,
@@ -402,6 +468,17 @@ pub fn expand_macros(field: &str, p: &PageInfo) -> String {
             Some('C') if p.first => out.push_str(&p.meta.copyright),
             Some('C') => {}
             Some('c') => out.push_str(&p.meta.copyright),
+            Some('d') => out.push_str(&p.doc.today),
+            Some('D') if !p.doc.created.is_empty() => out.push_str(&p.doc.created),
+            Some('D') => out.push_str(&p.meta.created),
+            Some('M') => out.push_str(&p.doc.modified_date),
+            Some('m') => out.push_str(&p.doc.modified_time),
+            Some('f') => out.push_str(&p.doc.file_name),
+            Some('F') if !p.doc.file_path.is_empty() => out.push_str(&p.doc.file_path),
+            Some('F') => out.push_str(&p.doc.file_name),
+            Some('i') if !p.first => out.push_str(&p.doc.part_name),
+            Some('i') => {}
+            Some('I') => out.push_str(&p.doc.part_name),
             Some('$') => out.push('$'),
             Some(':') => {
                 let mut tag = String::new();
@@ -418,11 +495,11 @@ pub fn expand_macros(field: &str, p: &PageInfo) -> String {
                     "composer" => &m.composer,
                     "lyricist" | "poet" => &m.lyricist,
                     "copyright" => &m.copyright,
+                    "creationDate" => &m.created,
+                    "partName" => &p.doc.part_name,
                     _ => "",
                 });
             }
-            // Dates, file names and part names are not known here.
-            Some('d' | 'D' | 'm' | 'M' | 'f' | 'F' | 'i' | 'I') => {}
             Some(other) => {
                 out.push('$');
                 out.push(other);

@@ -43,6 +43,17 @@ static SOUNDS: OnceLock<Vec<Arc<SoundBank>>> = OnceLock::new();
 fn new_session() -> Session {
     let mut s = Session::default();
     s.sounds = SOUNDS.get().cloned().unwrap_or_default();
+    // The date macros of headers and footers: SOURCE_DATE_EPOCH for reproducible output,
+    // else the current time (UTC).
+    s.clock = std::env::var("SOURCE_DATE_EPOCH")
+        .ok()
+        .and_then(|v| v.trim().parse().ok())
+        .or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_secs())
+        });
     s
 }
 
@@ -53,6 +64,7 @@ fn load(input: &str) -> Result<Session, String> {
     let bytes = std::fs::read(input).map_err(|e| format!("{input}: {e}"))?;
     let mut s = new_session();
     s.open_bytes(input, &bytes).map_err(|e| format!("{input}: {e}"))?;
+    s.file_path = input.to_string();
     Ok(s)
 }
 

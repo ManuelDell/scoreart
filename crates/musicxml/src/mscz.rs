@@ -292,6 +292,7 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
             Some("lyricist") | Some("poet") => meta.lyricist = v,
             Some("copyright") => meta.copyright = v,
             Some("subtitle") => meta.subtitle = v,
+            Some("creationDate") => meta.created = v,
             _ => {}
         }
     }
@@ -470,7 +471,16 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                 for b in m_el.children_named("LayoutBreak") {
                     match b.child_text("subtype").map(str::trim) {
                         Some("page") => info.page_break = true,
-                        Some("line" | "section") => info.system_break = true,
+                        Some("line") => info.system_break = true,
+                        Some("section") => {
+                            let flag = |k: &str| b.child_text(k).map(|v| v.trim() != "0");
+                            let d = scoreart_model::SectionBreak::default();
+                            info.section = Some(scoreart_model::SectionBreak {
+                                pause: b.child_num("pause").map_or(d.pause, |v| v as f32),
+                                long_names: flag("startWithLongNames").unwrap_or(d.long_names),
+                                restart_numbers: flag("startWithMeasureOne").unwrap_or(d.restart_numbers),
+                            });
+                        }
                         _ => {}
                     }
                 }
@@ -1027,6 +1037,15 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                 }
                 pm_staff.voices.push(voice);
             }
+            // Spacers of this staff (staff spaces).
+            let spacer = |k: &str| {
+                m_el.child_num(k)
+                    .filter(|v| v.is_finite() && *v > 0.0)
+                    .map(|v| v as f32)
+            };
+            pm_staff.spacer_up = spacer("vspacerUp");
+            pm_staff.spacer_down = spacer("vspacerDown");
+            pm_staff.spacer_fixed = spacer("vspacerFixed");
             // Drop trailing empty secondary voices so normalize keeps the measure tidy.
             if let Some(p) = score.parts.get_mut(pi) {
                 while p.measures.len() <= mi {

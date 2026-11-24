@@ -704,3 +704,44 @@ fn texts_of_later_frames_become_headings_and_text_blocks() {
             .any(|b| b.kind == TextKind::Text && b.text.starts_with("A poem") && b.measure == n)
     );
 }
+
+#[test]
+fn reads_section_breaks_spacers_and_the_creation_date() {
+    let xml = MS_RHYTHMS
+        .replacen(
+            "<Division>480</Division>",
+            "<Division>480</Division><metaTag name=\"creationDate\">2020-05-21</metaTag>",
+            1,
+        )
+        .replacen(
+            "<Measure>\n        <voice>\n          <TimeSig><sigN>5",
+            "<Measure>\n        <vspacerDown>6.5</vspacerDown><vspacerUp>2</vspacerUp>\n        <voice>\n          <TimeSig><sigN>5",
+            1,
+        )
+        .replacen(
+            "</voice>\n      </Measure>\n      <Measure>\n        <voice>\n          <TimeSig><sigN>4",
+            "</voice>\n        <LayoutBreak><subtype>section</subtype><pause>2</pause><startWithLongNames>0</startWithLongNames><startWithMeasureOne>1</startWithMeasureOne></LayoutBreak>\n      </Measure>\n      <Measure>\n        <vspacerFixed>4</vspacerFixed>\n        <voice>\n          <TimeSig><sigN>4",
+            1,
+        );
+    let s = from_bytes(xml.as_bytes()).unwrap();
+    assert_eq!(s.meta.created, "2020-05-21");
+    let sec = s.measures[1].section.expect("section break after measure 2");
+    assert_eq!(
+        (sec.pause, sec.long_names, sec.restart_numbers),
+        (2.0, false, true)
+    );
+    assert!(
+        s.measures
+            .iter()
+            .enumerate()
+            .all(|(m, i)| (m == 1) == i.section.is_some())
+    );
+    assert_eq!(s.measure_number(2), 1);
+    let sm = |m: usize| s.staff_measure(0, 0, m).unwrap();
+    assert_eq!(
+        (sm(1).spacer_down, sm(1).spacer_up, sm(1).spacer_fixed),
+        (Some(6.5), Some(2.0), None)
+    );
+    assert_eq!(sm(2).spacer_fixed, Some(4.0));
+    assert_eq!((sm(0).spacer_down, sm(3).spacer_fixed), (None, None));
+}

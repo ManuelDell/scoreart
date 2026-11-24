@@ -93,6 +93,7 @@ pub fn commands() -> Vec<CommandSpec> {
                     measures,
                 );
                 score.meta.composer = clip(p_str(p, "composer").unwrap_or(""));
+                score.meta.created = s.today_iso().unwrap_or_default();
                 if let Some(Value::Array(names)) = p.get("names") {
                     for (part, n) in score.parts.iter_mut().zip(names) {
                         if let Some(n) = n.as_str().filter(|n| !n.trim().is_empty()) {
@@ -119,6 +120,8 @@ pub fn commands() -> Vec<CommandSpec> {
                 *s = Session {
                     view,
                     sounds,
+                    clock: s.clock,
+                    date_style: s.date_style,
                     ..Session::new(score)
                 };
                 s.dirty = true;
@@ -590,7 +593,7 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "Line or page break",
             menu: &[],
             shortcut: None,
-            params: "kind: line|page|none, measure? (default: the selection) — a new system or page starts after the measure",
+            params: "kind: line|page|section|none (toggles), measure? (default: the selection) — a new system or page starts after the measure; a section also: pause? (seconds before the next section, default 3), long_names? (true: the next system shows the long instrument names), restart_numbers? (true: measures count from 1 again); given with an existing section break they change it",
             enabled: always,
             run: |s, p| {
                 let (_, last) = target_measures(s);
@@ -605,16 +608,101 @@ pub fn commands() -> Vec<CommandSpec> {
                     "line" => {
                         info.system_break = !info.system_break;
                         info.page_break = false;
+                        info.section = None;
                     }
                     "page" => {
                         info.page_break = !info.page_break;
+                        info.system_break = false;
+                        info.section = None;
+                    }
+                    "section" => {
+                        let settings = ["pause", "long_names", "restart_numbers"]
+                            .iter()
+                            .any(|k| p.get(*k).is_some());
+                        let mut sec = match info.section {
+                            // Toggled off, unless the call only changes its settings.
+                            Some(_) if !settings => {
+                                info.section = None;
+                                return Ok(Value::Null);
+                            }
+                            Some(sec) => sec,
+                            None => scoreart_model::SectionBreak::default(),
+                        };
+                        if let Some(v) = p.get("pause").and_then(Value::as_f64).filter(|v| v.is_finite()) {
+                            sec.pause = v.clamp(0.0, 60.0) as f32;
+                        }
+                        if let Some(v) = p.get("long_names").and_then(Value::as_bool) {
+                            sec.long_names = v;
+                        }
+                        if let Some(v) = p.get("restart_numbers").and_then(Value::as_bool) {
+                            sec.restart_numbers = v;
+                        }
+                        info.section = Some(sec);
                         info.system_break = false;
                     }
                     "none" => {
                         info.system_break = false;
                         info.page_break = false;
+                        info.section = None;
                     }
-                    other => return Err(Error::Param(format!("kind: line, page or none, not {other}"))),
+                    other => {
+                        return Err(Error::Param(format!(
+                            "kind: line, page, section or none, not {other}"
+                        )));
+                    }
+                }
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "staff.spacer",
+            label: "Spacer",
+            menu: &[],
+            shortcut: None,
+            params: "type: up|down|fixed (least room above / below the staff, or exactly this much below it) or none (removes all three), height? (staff spaces, default 3; 0 removes that spacer) — on the selected measures of the selected staff",
+            enabled: has_parts,
+            run: |s, p| {
+                let ty = need_str(p, "type")?;
+                let height = p
+                    .get("height")
+                    .and_then(Value::as_f64)
+                    .filter(|v| v.is_finite())
+                    .map_or(3.0, |v| v.clamp(0.0, 100.0) as f32);
+                let (part, staff, _) = s.focus();
+                let (first, last) = target_measures(s);
+                for m in first..=last {
+                    let Some(sm) = s
+                        .score
+                        .parts
+                        .get_mut(part)
+                        .and_then(|pt| pt.measures.get_mut(m))
+                        .and_then(|pm| pm.staves.get_mut(staff))
+                    else {
+                        return Err(Error::Param("no such staff".into()));
+                    };
+                    let v = (height > 0.0).then_some(height);
+                    match ty {
+                        "up" => sm.spacer_up = v,
+                        "down" => {
+                            sm.spacer_down = v;
+                            sm.spacer_fixed = None;
+                        }
+                        "fixed" => {
+                            sm.spacer_fixed = v;
+                            sm.spacer_down = None;
+                        }
+                        "none" => {
+                            sm.spacer_up = None;
+                            sm.spacer_down = None;
+                            sm.spacer_fixed = None;
+                        }
+                        other => {
+                            return Err(Error::Param(format!(
+                                "type: up, down, fixed or none, not {other}"
+                            )));
+                        }
+                    }
                 }
                 Ok(Value::Null)
             },

@@ -40,6 +40,10 @@ pub enum Ico {
     MeasureMinus,
     LineBreak,
     PageBreak,
+    SectionBreak,
+    SpacerUp,
+    SpacerDown,
+    SpacerFixed,
     PageSetup,
     Spacing,
     Transpose,
@@ -351,6 +355,25 @@ pub fn paint(p: &Painter, rect: Rect, ico: Ico, color: Color32) {
             line(&[(5.0, 21.0), (5.0, 15.0), (19.0, 15.0), (19.0, 21.0)]);
             for x in [3.0, 7.0, 11.0, 15.0, 19.0] {
                 line(&[(x, 12.0), (x + 2.0, 12.0)]);
+            }
+        }
+        Ico::SectionBreak => {
+            line(&[(20.0, 4.0), (20.0, 12.0), (6.0, 12.0)]);
+            line(&[(10.0, 8.0), (6.0, 12.0), (10.0, 16.0)]);
+            line(&[(4.0, 20.0), (20.0, 20.0)]);
+            line(&[(4.0, 4.0), (4.0, 20.0)]);
+        }
+        Ico::SpacerUp | Ico::SpacerDown | Ico::SpacerFixed => {
+            line(&[(4.0, 3.0), (20.0, 3.0)]);
+            line(&[(4.0, 21.0), (20.0, 21.0)]);
+            line(&[(12.0, 5.0), (12.0, 19.0)]);
+            match ico {
+                Ico::SpacerUp => line(&[(8.0, 9.0), (12.0, 5.0), (16.0, 9.0)]),
+                Ico::SpacerDown => line(&[(8.0, 15.0), (12.0, 19.0), (16.0, 15.0)]),
+                _ => {
+                    line(&[(8.0, 9.0), (12.0, 5.0), (16.0, 9.0)]);
+                    line(&[(8.0, 15.0), (12.0, 19.0), (16.0, 15.0)]);
+                }
             }
         }
         Ico::PageSetup => {

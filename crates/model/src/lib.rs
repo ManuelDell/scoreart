@@ -26,8 +26,8 @@ pub use marks::{
 };
 pub use pitch::{Accidental, Pitch, Step};
 pub use text::{
-    BlockRef, HeaderFooter, PageInfo, TextAlign, TextBlock, TextFont, TextKind, TextSettings, TextStyle,
-    TextStyles, expand_macros,
+    BlockRef, DateStyle, DocInfo, HeaderFooter, PageInfo, TextAlign, TextBlock, TextFont, TextKind,
+    TextSettings, TextStyle, TextStyles, expand_macros,
 };
 pub use time::{Duration, NoteValue, TPQ, Tuplet};
 
@@ -450,6 +450,14 @@ pub struct StaffMeasure {
     /// Shown as a one-measure repeat sign (and played like the previous measure).
     #[serde(default)]
     pub measure_repeat: bool,
+    /// Spacers of this staff in this measure, staff spaces: at least this much room above it
+    /// or below it, or exactly this much below it.
+    #[serde(default)]
+    pub spacer_up: Option<f32>,
+    #[serde(default)]
+    pub spacer_down: Option<f32>,
+    #[serde(default)]
+    pub spacer_fixed: Option<f32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -718,6 +726,31 @@ pub struct MeasureInfo {
     /// Where the rehearsal mark was moved to (None = default place above the staff).
     #[serde(default)]
     pub rehearsal_place: Option<Placement>,
+    /// A section ends after this measure (a new system follows; see [`SectionBreak`]).
+    #[serde(default)]
+    pub section: Option<SectionBreak>,
+}
+
+/// The end of a section (a movement, a song): the next measure starts a new system and, as
+/// set, counts from 1 again and shows the long instrument names; playback pauses.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SectionBreak {
+    /// Seconds of silence before the next section.
+    pub pause: f32,
+    pub long_names: bool,
+    pub restart_numbers: bool,
+}
+
+impl Default for SectionBreak {
+    /// As MuseScore makes them: a pause of 3 s, long names, numbering from 1.
+    fn default() -> Self {
+        SectionBreak {
+            pause: 3.0,
+            long_names: true,
+            restart_numbers: true,
+        }
+    }
 }
 
 /// A text moved from its default place: offset in tenths of a staff space (y downwards), and
@@ -756,6 +789,9 @@ pub struct Meta {
     pub composer: String,
     pub lyricist: String,
     pub copyright: String,
+    /// When the score was created (ISO date, "2026-11-24"; empty if unknown).
+    #[serde(default)]
+    pub created: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -1228,14 +1264,33 @@ impl Score {
             .unwrap_or_else(|| self.time_at(measure).measure_ticks())
     }
 
-    /// The number printed for a measure (uncounted measures are skipped).
+    /// The number printed for a measure (uncounted measures are skipped; a section that says
+    /// so counts from 1 again).
     pub fn measure_number(&self, measure: usize) -> usize {
+        let from = self
+            .measures
+            .iter()
+            .take(measure)
+            .rposition(|i| i.section.is_some_and(|s| s.restart_numbers))
+            .map_or(0, |p| p + 1);
         1 + self
             .measures
             .iter()
             .take(measure)
+            .skip(from)
             .filter(|i| !i.uncounted)
             .count()
+    }
+
+    /// Whether a system starting at `measure` begins a section that shows the long instrument
+    /// names (the first measure, or one after a section break that asks for them).
+    pub fn section_starts_with_long_names(&self, measure: usize) -> bool {
+        measure == 0
+            || measure
+                .checked_sub(1)
+                .and_then(|m| self.measures.get(m))
+                .and_then(|i| i.section)
+                .is_some_and(|s| s.long_names)
     }
 
     /// The clef in effect for `staff` of `part` at the start of `measure`.
@@ -1305,6 +1360,29 @@ impl Score {
             first.key.get_or_insert_with(KeySig::default);
         }
         let n = self.measures.len();
+        // Spacers and section pauses in range (hostile files).
+        let fit = |v: &mut Option<f32>| {
+            *v = v.filter(|x| x.is_finite()).map(|x| x.clamp(0.0, 100.0));
+        };
+        for part in &mut self.parts {
+            for pm in &mut part.measures {
+                for sm in &mut pm.staves {
+                    fit(&mut sm.spacer_up);
+                    fit(&mut sm.spacer_down);
+                    fit(&mut sm.spacer_fixed);
+                }
+            }
+        }
+        for info in &mut self.measures {
+            if let Some(sec) = &mut info.section {
+                sec.pause = if sec.pause.is_finite() {
+                    sec.pause.clamp(0.0, 60.0)
+                } else {
+                    3.0
+                };
+            }
+        }
+        self.meta.created = clip(&self.meta.created);
         self.blocks.truncate(limits::MAX_BLOCKS);
         for b in &mut self.blocks {
             // `n`: after the last system (a text at the end of the score).

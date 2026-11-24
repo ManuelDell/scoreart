@@ -7,7 +7,7 @@ use scoreart_model::{
 };
 
 use crate::glyphs as g;
-use crate::{Align, Hit, Item, Layout, Page, Shape, StaffBox, Style, Target, View};
+use crate::{Align, Hit, Item, Layout, Mark, MarkKind, Page, Shape, StaffBox, Style, Target, View};
 use scoreart_model::BlockRef;
 
 /// Key into the accidental table: (part, staff, measure, voice, event, note).
@@ -89,6 +89,8 @@ struct System {
     /// A last system too short to fill the line ends where its music ends (width from its
     /// indent); None: it fills the line.
     ragged: Option<f32>,
+    /// It shows the long instrument names (the first system, or a section's first).
+    long_names: bool,
 }
 
 /// Displayed accidentals for every note, following key, measure-scoped carry and ties.
@@ -418,6 +420,7 @@ fn one_system(score: &Score, plans: &[MeasurePlan]) -> System {
         indent: name_indent(score, true),
         header: header_width(score, 0),
         ragged: None,
+        long_names: true,
     }
 }
 
@@ -448,7 +451,8 @@ fn break_systems(
     let mut systems = Vec::new();
     let mut m = 0usize;
     while m < plans.len() {
-        let first = systems.is_empty();
+        // The first system of the score or of a section that asks for long names.
+        let first = systems.is_empty() || score.section_starts_with_long_names(m);
         let indent = name_indent(score, first) + if first { first_indent } else { 0.0 };
         let header = header_width(score, m);
         let avail = (width - indent - header).max(10.0);
@@ -474,7 +478,7 @@ fn break_systems(
             if score
                 .measures
                 .get(m - 1)
-                .is_some_and(|i| i.system_break || i.page_break)
+                .is_some_and(|i| i.system_break || i.page_break || i.section.is_some())
             {
                 break;
             }
@@ -515,6 +519,7 @@ fn break_systems(
             indent,
             header,
             ragged,
+            long_names: first,
         });
     }
     systems
@@ -799,9 +804,16 @@ struct Placed {
 }
 
 /// The staves of a system one below the other: top of every staff relative to the system top,
-/// and the system's height.
-fn stack_staves(score: &Score, style: &Style, sys: &System) -> (Vec<(usize, usize, f32)>, f32) {
-    let mut tops: Vec<(usize, usize, f32)> = Vec::new();
+/// the system's height, and its spacers towards the systems around it: the least distance
+/// above its first staff, and the least (or, fixed, the exact) distance below its last staff.
+struct Stack {
+    tops: Vec<(usize, usize, f32)>,
+    sys_h: f32,
+    above: Option<f32>,
+    below: Option<(f32, bool)>,
+}
+
+fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
     let mut sy = 0.0f32;
     let first_in_sys = sys.measures.first().copied();
     let has_above = sys.measures.iter().any(|m| {
@@ -828,36 +840,100 @@ fn stack_staves(score: &Score, style: &Style, sys: &System) -> (Vec<(usize, usiz
     {
         sy += 2.5;
     }
+    // Every drawn staff: (part, staff, reach up, reach down, lyrics height, gap after it,
+    // spacers up, down and fixed in this system).
+    struct St {
+        pi: usize,
+        s: usize,
+        up: f32,
+        down: f32,
+        lyrics: f32,
+        gap: f32,
+        sp_up: Option<f32>,
+        sp_down: Option<f32>,
+        sp_fixed: Option<f32>,
+    }
+    let mut staves: Vec<St> = Vec::new();
     for (pi, part) in score.parts.iter().enumerate() {
         let visible: Vec<usize> = (0..part.staff_count()).filter(|s| shown(score, pi, *s)).collect();
         for &s in &visible {
             // Make room for notes (with stems and marks) far above or below the staff.
             let (reach_up, reach_down) = staff_reach(score, pi, s, &sys.measures);
-            sy += (reach_up - 3.0).max(0.0);
-            tops.push((pi, s, sy));
-            sy += (reach_down - 3.0).max(0.0);
-            // One lyric line per verse used in this system.
-            let verses = sys
+            let sms: Vec<&scoreart_model::StaffMeasure> = sys
                 .measures
                 .iter()
                 .filter_map(|m| score.staff_measure(pi, s, *m))
+                .collect();
+            // One lyric line per verse used in this system.
+            let verses = sms
+                .iter()
                 .flat_map(|sm| sm.voices.iter())
                 .flat_map(|v| v.events.iter())
                 .map(|e| e.verse_count())
                 .max()
                 .unwrap_or(0);
-            sy += 4.0
-                + if visible.last().is_some_and(|l| s < *l) {
+            let lyrics = if verses > 0 {
+                2.6 + lyric_line(&Fonts::of(score)) * (verses.saturating_sub(1)) as f32
+            } else {
+                0.0
+            };
+            let most = |f: fn(&scoreart_model::StaffMeasure) -> Option<f32>| {
+                sms.iter()
+                    .filter_map(|sm| f(sm))
+                    .fold(None, |a: Option<f32>, v| Some(a.map_or(v, |a| a.max(v))))
+            };
+            staves.push(St {
+                pi,
+                s,
+                up: (reach_up - 3.0).max(0.0),
+                down: (reach_down - 3.0).max(0.0),
+                lyrics,
+                gap: if visible.last().is_some_and(|l| s < *l) {
                     style.staff_gap
                 } else {
                     style.part_gap
-                };
-            if verses > 0 {
-                sy += 2.6 + lyric_line(&Fonts::of(score)) * (verses.saturating_sub(1)) as f32;
-            }
+                },
+                sp_up: most(|sm| sm.spacer_up),
+                sp_down: most(|sm| sm.spacer_down),
+                sp_fixed: most(|sm| sm.spacer_fixed),
+            });
         }
     }
-    (tops, (sy - style.part_gap).max(4.0))
+    let mut tops: Vec<(usize, usize, f32)> = Vec::with_capacity(staves.len());
+    for (k, st) in staves.iter().enumerate() {
+        let top = match k.checked_sub(1).and_then(|p| staves.get(p)) {
+            None => sy + st.up,
+            Some(prev) => {
+                let prev_bottom = tops.last().map_or(0.0, |t| t.2) + 4.0;
+                // Bottom line of the staff above to the top line of this one: what the notes
+                // need, at least what a spacer asks, or exactly what a fixed spacer says.
+                let natural = prev.down + prev.lyrics + prev.gap + st.up;
+                let d = match prev.sp_fixed {
+                    Some(f) => f,
+                    None => natural
+                        .max(prev.sp_down.unwrap_or(0.0))
+                        .max(st.sp_up.unwrap_or(0.0)),
+                };
+                prev_bottom + d
+            }
+        };
+        tops.push((st.pi, st.s, top));
+    }
+    let sys_h = match (tops.last(), staves.last()) {
+        (Some(t), Some(st)) => t.2 + 4.0 + st.down + st.lyrics,
+        _ => 4.0,
+    }
+    .max(4.0);
+    let above = staves.first().and_then(|st| st.sp_up);
+    let below = staves
+        .last()
+        .and_then(|st| st.sp_fixed.map(|f| (f, true)).or(st.sp_down.map(|d| (d, false))));
+    Stack {
+        tops,
+        sys_h,
+        above,
+        below,
+    }
 }
 
 pub fn layout(score: &Score, style: &Style) -> Layout {
@@ -981,8 +1057,15 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
         };
         (mt + style.page.music_top - above0).max(mt + header)
     };
+    // The last staff line of the previous system and its spacer below (same page only).
+    let mut prev_staff_end: Option<(usize, f32, Option<(f32, bool)>)> = None;
     for (si, sys) in systems.iter().enumerate() {
-        let (tops, sys_h) = stack_staves(score, style, sys);
+        let Stack {
+            tops,
+            sys_h,
+            above: spacer_above,
+            below: spacer_below,
+        } = stack_staves(score, style, sys);
         let above0 = tops.first().map_or(0.0, |t| t.2);
         let last_top = tops.last().map_or(0.0, |t| t.2);
         let [_, mbp, mlp, mrp] = margins(page_index, pw, ph);
@@ -1020,6 +1103,21 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                 .and_then(|p| p.measures.last())
                 .and_then(|m| score.measures.get(*m))
                 .is_some_and(|i| i.page_break);
+        // Spacers between this system and the one before: at least the room they ask for, or
+        // exactly that for a fixed spacer below.
+        if let Some((pg, line, below)) = prev_staff_end
+            && pg == page_index
+        {
+            let (need, exact) = match below {
+                Some((f, true)) => (Some(f), true),
+                Some((d, false)) => (Some(d.max(spacer_above.unwrap_or(0.0))), false),
+                None => (spacer_above, false),
+            };
+            if let Some(d) = need {
+                let at = line + d - above0 - blocks_h;
+                y = if exact { at } else { y.max(at) };
+            }
+        }
         // The system fits when its last staff keeps the music bottom margin and nothing of it
         // runs into the bottom margin.
         let bottom = ph - mbp;
@@ -1044,6 +1142,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             sys_h,
             blocks,
         });
+        prev_staff_end = Some((page_index, y + last_top + 4.0, spacer_below));
         y += sys_h + style.system_gap;
     }
 
@@ -1145,6 +1244,57 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
         );
         y = p.y + p.sys_h + style.system_gap;
     }
+    // Breaks and spacers, for the editor.
+    let mut marks = Vec::new();
+    let mut last_of: HashMap<usize, (usize, f32, f32)> = HashMap::new();
+    for b in &out.staves {
+        let e = last_of.entry(b.measure).or_insert((b.page, b.x1, b.top));
+        e.2 = e.2.min(b.top);
+        let Some(sm) = score.staff_measure(b.part, b.staff, b.measure) else {
+            continue;
+        };
+        let mark = |kind, y: f32| Mark {
+            page: b.page,
+            x: b.x0 + 1.0,
+            y,
+            kind,
+            measure: b.measure,
+            part: b.part,
+            staff: b.staff,
+        };
+        if let Some(h) = sm.spacer_up {
+            marks.push(mark(MarkKind::SpacerUp(h), b.top));
+        }
+        if let Some(h) = sm.spacer_down {
+            marks.push(mark(MarkKind::SpacerDown(h), b.top + 4.0));
+        }
+        if let Some(h) = sm.spacer_fixed {
+            marks.push(mark(MarkKind::SpacerFixed(h), b.top + 4.0));
+        }
+    }
+    for (m, info) in score.measures.iter().enumerate() {
+        let kind = if info.section.is_some() {
+            MarkKind::SectionBreak
+        } else if info.page_break {
+            MarkKind::PageBreak
+        } else if info.system_break {
+            MarkKind::LineBreak
+        } else {
+            continue;
+        };
+        if let Some(&(page, x1, top)) = last_of.get(&m) {
+            marks.push(Mark {
+                page,
+                x: x1 - 1.2,
+                y: top - 2.0,
+                kind,
+                measure: m,
+                part: 0,
+                staff: 0,
+            });
+        }
+    }
+    out.marks = marks;
     // Text after the last system (a poem at the end).
     if style.view != View::Horizontal {
         let n = score.measures.len();
@@ -1318,12 +1468,13 @@ fn field_kind(field: &str, footer: bool) -> TextKind {
 
 fn info_for<'a>(
     score: &'a Score,
-    style: &Style,
+    style: &'a Style,
     page_index: usize,
     pages: usize,
 ) -> scoreart_model::PageInfo<'a> {
     scoreart_model::PageInfo {
         meta: &score.meta,
+        doc: &style.doc,
         number: style.page.first_page_number.saturating_add(page_index as i32),
         pages,
         first: page_index == 0,
@@ -1498,8 +1649,12 @@ fn draw_system(
             let bx = x_start - if ensemble { 2.6 } else { 1.4 };
             draw_brace(&mut o, bx, pt, pb);
         }
-        let name = if si == 0 { &part.name } else { &part.abbreviation };
-        if si == 0 || shown_parts(score) > 1 {
+        let name = if sys.long_names {
+            &part.name
+        } else {
+            &part.abbreviation
+        };
+        if sys.long_names || shown_parts(score) > 1 {
             let nx = x_start - if multi { 3.0 } else { 1.0 } - if ensemble { 1.4 } else { 0.0 };
             o.styled(
                 TextKind::InstrumentName,
@@ -1541,8 +1696,8 @@ fn draw_system(
     let content_x = x_start + sys.header.max(hx - x_start);
     ctx.system_ends.push((page_index, x_end, content_x));
 
-    // Measure number at the start of every system but the first.
-    if first_m > 0 {
+    // Measure number at the start of every system but the first (not a section's "1").
+    if first_m > 0 && score.measure_number(first_m) > 1 {
         o.styled(
             TextKind::MeasureNumber,
             &score.measure_number(first_m).to_string(),

@@ -363,6 +363,13 @@ impl Host for WebHost {
         self.inbox.borrow_mut().pop()
     }
 
+    fn now_secs(&self) -> Option<u64> {
+        let d = js_sys::Date::new_0();
+        // getTimezoneOffset is minutes west of UTC.
+        let local = d.get_time() / 1000.0 - d.get_timezone_offset() * 60.0;
+        (local.is_finite() && local >= 0.0).then_some(local as u64)
+    }
+
     fn request_sounds(&mut self, _folder: bool) {
         let inbox = self.sounds.clone();
         let ctx = self.ctx.clone();

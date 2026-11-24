@@ -157,19 +157,8 @@ pub fn required_keys() -> BTreeSet<String> {
             add(s);
         }
     }
-    for k in [
-        "Page number, except on the first page",
-        "Page number, on every page",
-        "Number of pages",
-        "Copyright, on the first page only",
-        "Copyright, on every page",
-        "Title",
-        "Subtitle",
-        "Composer",
-        "Lyricist",
-        "A dollar sign",
-    ] {
-        add(k);
+    for (_, what) in crate::texts::MACROS {
+        add(what);
     }
     for k in [
         "Eighth",

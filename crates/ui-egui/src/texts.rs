@@ -674,7 +674,7 @@ fn apply_header_footer(app: &mut ScoreApp, e: &HeaderFooterEdit) {
 }
 
 /// The macros a field can hold, and what they show.
-const MACROS: &[(&str, &str)] = &[
+pub(crate) const MACROS: &[(&str, &str)] = &[
     ("$p", "Page number, except on the first page"),
     ("$P", "Page number, on every page"),
     ("$n", "Number of pages"),
@@ -685,6 +685,19 @@ const MACROS: &[(&str, &str)] = &[
     ("$:composer:", "Composer"),
     ("$:lyricist:", "Lyricist"),
     ("$:copyright:", "Copyright"),
+    ("$d", "Today's date"),
+    ("$D", "Creation date of the score"),
+    ("$M", "Date of the last change"),
+    ("$m", "Time of the last change"),
+    ("$f", "File name"),
+    ("$F", "File path and name"),
+    (
+        "$i",
+        "Part name, except on the first page (empty in the full score)",
+    ),
+    ("$I", "Part name, on every page (empty in the full score)"),
+    ("$:partName:", "Part name"),
+    ("$:creationDate:", "Creation date of the score"),
     ("$$", "A dollar sign"),
 ];
 

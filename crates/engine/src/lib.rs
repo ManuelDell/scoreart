@@ -122,9 +122,17 @@ pub struct Session {
     pub status: String,
     /// Sound libraries loaded for playback and audio export (not part of the score).
     pub sounds: Vec<Arc<SoundBank>>,
+    /// The time now (seconds since 1970, UTC), kept up to date by the host; None when unknown.
+    pub clock: Option<u64>,
+    /// How headers and footers write dates.
+    pub date_style: scoreart_model::DateStyle,
+    /// The full path of the open file, when the host knows it.
+    pub file_path: String,
+    /// When the score was last changed in this session.
+    pub modified: Option<u64>,
     undo: Vec<Score>,
     redo: Vec<Score>,
-    layout: Option<(u64, std::sync::Arc<Layout>)>,
+    layout: Option<(u64, scoreart_model::DocInfo, std::sync::Arc<Layout>)>,
 }
 
 const UNDO_LIMIT: usize = 200;
@@ -150,6 +158,10 @@ impl Session {
             last_pitch: None,
             status: String::new(),
             sounds: Vec::new(),
+            clock: None,
+            date_style: scoreart_model::DateStyle::default(),
+            file_path: String::new(),
+            modified: None,
             undo: Vec::new(),
             redo: Vec::new(),
             layout: None,
@@ -214,6 +226,38 @@ impl Session {
     pub fn touch(&mut self) {
         self.dirty = true;
         self.revision = self.revision.wrapping_add(1);
+        self.modified = self.clock.or(self.modified);
+    }
+
+    /// Today's date as an ISO date ("2026-11-24"), if the clock is known.
+    pub fn today_iso(&self) -> Option<String> {
+        self.clock
+            .map(|c| scoreart_model::DateStyle::Iso.date(scoreart_model::text::civil(c).0))
+    }
+
+    /// What headers and footers show about the document: file, dates, part name.
+    pub fn doc_info(&self) -> scoreart_model::DocInfo {
+        let ds = self.date_style;
+        let (modified_date, modified_time) = match self.modified {
+            Some(t) => {
+                let (d, (h, m)) = scoreart_model::text::civil(t);
+                (ds.date(d), format!("{h:02}:{m:02}"))
+            }
+            None => (ds.iso(&self.score.meta.created), String::new()),
+        };
+        scoreart_model::DocInfo {
+            file_name: self.file_name.clone(),
+            file_path: self.file_path.clone(),
+            today: self
+                .clock
+                .map(|c| ds.date(scoreart_model::text::civil(c).0))
+                .unwrap_or_default(),
+            created: ds.iso(&self.score.meta.created),
+            modified_date,
+            modified_time,
+            // The full score has no part name (only a part shows its own).
+            part_name: String::new(),
+        }
     }
 
     pub fn can_undo(&self) -> bool {
@@ -295,16 +339,21 @@ impl Session {
 
     /// Engraving settings: the score's page format in the current view.
     pub fn style(&self) -> Style {
-        Style::new(&self.score.page, self.view)
+        Style {
+            doc: self.doc_info(),
+            ..Style::new(&self.score.page, self.view)
+        }
     }
 
     /// The engraved layout of the current score (cached per revision).
     pub fn layout(&mut self) -> std::sync::Arc<Layout> {
+        // Also again when what headers show changes (the date, the file name).
+        let doc = self.doc_info();
         match &self.layout {
-            Some((r, l)) if *r == self.revision => l.clone(),
+            Some((r, d, l)) if *r == self.revision && *d == doc => l.clone(),
             _ => {
                 let l = std::sync::Arc::new(scoreart_engrave::layout(&self.score, &self.style()));
-                self.layout = Some((self.revision, l.clone()));
+                self.layout = Some((self.revision, doc, l.clone()));
                 l
             }
         }
@@ -326,6 +375,8 @@ impl Session {
             file_name,
             view: self.view,
             sounds: std::mem::take(&mut self.sounds),
+            clock: self.clock,
+            date_style: self.date_style,
             ..Session::new(score)
         };
         let lower = self.file_name.to_ascii_lowercase();

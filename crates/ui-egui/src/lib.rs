@@ -58,6 +58,15 @@ pub trait Host {
     fn audio_stop(&mut self) {}
     /// Called once per frame (e.g. to feed an audio queue).
     fn tick(&mut self) {}
+    /// The local wall-clock time in seconds since 1970 (for the date macros of headers and
+    /// footers), if the host knows it.
+    fn now_secs(&self) -> Option<u64> {
+        None
+    }
+    /// Where the open score lives (for the `$F` macro), if the host knows it.
+    fn file_path(&self) -> Option<String> {
+        None
+    }
     /// Seconds of the current synth played so far; `None` when nothing is playing.
     fn audio_position(&mut self) -> Option<f64> {
         None
@@ -200,6 +209,8 @@ pub(crate) enum Dialog {
         length: String,
         counted: bool,
     },
+    /// The settings of the section break after the selected measure.
+    Section(scoreart_model::SectionBreak),
 }
 
 pub struct ScoreApp {
@@ -387,6 +398,12 @@ impl ScoreApp {
             return;
         }
         let ctx = ui.ctx().clone();
+        self.session.clock = self.host.now_secs();
+        self.session.file_path = self.host.file_path().unwrap_or_default();
+        self.session.date_style = match i18n::lang() {
+            i18n::Lang::De => scoreart_model::DateStyle::German,
+            _ => scoreart_model::DateStyle::Iso,
+        };
         if let Some((name, bytes)) = self.host.take_opened() {
             self.open_bytes(&name, &bytes);
         }
