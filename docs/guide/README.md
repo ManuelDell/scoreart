@@ -14,6 +14,6 @@ knowledge of notation software is needed — if you can read notes, you can star
 9. [Keyboard shortcuts](09-keyboard.md)
 
 The interface speaks **English and German** (*View → Language*); this guide uses the English
-names.
+names. Auf Deutsch: [Handbuch](de/README.md).
 
 ![ScoreArt with the German interface](../images/app-de.png)

@@ -41,6 +41,14 @@ Schiller, 1785).
 | `docs/images/header-footer.png` | ScoreArt contributors | screenshot of ScoreArt itself (its header and footer dialog over its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
 | `docs/images/breaks.png` | ScoreArt contributors | screenshot of ScoreArt itself (a section break and a spacer in its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
 | `docs/images/text-lock.png` | ScoreArt contributors | screenshot of ScoreArt itself (a locked text block of its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
+| `docs/images/de/note-input.png` | ScoreArt contributors | screenshot of ScoreArt itself in German (note input with the pen, over its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
+| `docs/images/de/notation-tab.png` | ScoreArt contributors | screenshot of ScoreArt itself in German (the Notation tab of its ribbon, over its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
+| `docs/images/de/page-settings.png` | ScoreArt contributors | screenshot of ScoreArt itself in German (its page settings dialog, over its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
+| `docs/images/de/header-footer.png` | ScoreArt contributors | screenshot of ScoreArt itself in German (its header and footer dialog, over its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
+| `docs/images/de/breaks.png` | ScoreArt contributors | screenshot of ScoreArt itself in German (a section break and a spacer, over its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
+| `docs/images/de/text-lock.png` | ScoreArt contributors | screenshot of ScoreArt itself in German (a locked text block, over its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
+| `docs/images/de/focus.png` | ScoreArt contributors | screenshot of ScoreArt itself in German (its focus layout, over its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
+| `docs/images/de/mixer.png` | ScoreArt contributors | screenshot of ScoreArt itself in German (its mixer, over its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
 | `docs/images/fonts.png` | ScoreArt contributors | screenshot of ScoreArt | MIT OR Apache-2.0 | Shows the Fonts window; texts in Crimson Text (OFL), music in Bravura (OFL) |
 | `docs/images/ode-to-joy.svg` | ScoreArt contributors | rendered by `scoreart-cli convert sample` | MIT OR Apache-2.0 | Engraved with Bravura (OFL) outlines |
 | `docs/images/notation-showcase.svg` | ScoreArt contributors | rendered by `scoreart-cli convert` from a score written for this repository | MIT OR Apache-2.0 | Shows the notation marks; engraved with Bravura (OFL) outlines |

@@ -42,7 +42,8 @@ every other notation program understands.
 2. **Start it** — a sample song opens, so you can look around and press **Space** to listen.
 3. **Make your own score**: *File → New*, choose your instruments, and start writing.
 
-The [**user guide**](docs/guide/README.md) walks you through everything, with pictures:
+The [**user guide**](docs/guide/README.md) walks you through everything, with pictures —
+also in German: [**Handbuch auf Deutsch**](docs/guide/de/README.md).
 
 | | |
 |---|---|
