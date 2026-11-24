@@ -106,7 +106,7 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   pauses playback (3 s; each can be changed in *Section…*). Breaks and spacers show as signs in
   the accent colour on screen, never in print. A new score starts as a new MuseScore 4 score does (A4, margins 10 mm and 20 mm at the
   bottom, page number and copyright in the footer, MuseScore's text sizes).
-- **MuseScore files keep their page layout**: `.mscz`/`.mscx` of MuseScore 3 and 4 open with their
+- **MuseScore files keep their page layout**: `.mscz`/`.mscx` of MuseScore 2, 3 and 4 open with their
   page size, margins (odd/even), staff size, distances, vertical justification, fill threshold,
   headers and footers and text styles — including MuseScore's own defaults for whatever the file
   does not store; texts in frames after the title become headings and text blocks. MusicXML is
@@ -119,7 +119,9 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   across both piano staves, cue and hidden playback notes, rounded tuplet durations, longa,
   128th and 256th notes, four dots, graces after a note (a trill's turn, also from MuseScore
   files), lines placed with `<offset>`; the system starts of the file are kept, squeezing a
-  line a little rather than breaking it again.
+  line a little rather than breaking it again. MuseScore 2 files (voices by track, lines
+  ended by `endSpanner`, text styles as blocks) are brought into the layout of MuseScore 3
+  files when they are opened.
 - **Texts as tagged blocks**: title, subtitle, composer, lyricist, copyright (foot of the first
   page), **headings** and **text blocks** between the systems, **headers**, **footers** and page
   numbers (from page 2). Each is a block of its kind that the hand picks up and moves freely;
@@ -173,7 +175,7 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
 
 - **Files**: **MusicXML 4.0** is the native format (`.musicxml` and compressed `.mxl`, read and
   write — exchange scores with MuseScore, Dorico, Sibelius, Finale), **MuseScore files**
-  (`.mscz`, `.mscx` of MuseScore 3 and 4, checked against files saved by MuseScore Studio 4.7)
+  (`.mscz`, `.mscx` of MuseScore 2, 3 and 4, checked against files saved by MuseScore Studio 4.7)
   open directly with notes, marks, lines, chord symbols, repeats and jumps (saving writes
   MusicXML), **MIDI** import (each beat quantised to the simplest fitting grid: down to 64ths, triplets,
   quintuplets, septuplets; MuseScore's one-track-per-staff

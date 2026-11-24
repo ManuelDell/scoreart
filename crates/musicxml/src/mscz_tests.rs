@@ -229,6 +229,7 @@ fn hostile_musescore_files_do_not_panic() {
     for junk in [
         "<museScore/>",
         "<museScore version=\"2.06\"><Score/></museScore>",
+        "<museScore version=\"2.06\"><Score><Division>0</Division><Part><Staff id=\"1\"/></Part><Staff id=\"1\"><Measure len=\"0/0\"><Tuplet id=\"1\"><normalNotes>0</normalNotes><actualNotes>-3</actualNotes></Tuplet><tick>-99999999999</tick><endSpanner id=\"9\"/><HairPin id=\"9\"/><Chord><Tuplet>1</Tuplet><track>-7</track><dots>99</dots><durationType>long</durationType><Slur type=\"stop\" id=\"x\"/><Note><pitch>9999</pitch></Note></Chord><Rest><durationType>measure</durationType><duration z=\"5\" n=\"0\"/></Rest><tick>99999999999999999999</tick><Chord><durationType>quarter</durationType><Slur type=\"start\" id=\"x\"/></Chord></Measure></Staff></Score></museScore>",
         "<museScore version=\"4\"><Score><Part/><Staff id=\"1\"><Measure><voice><Chord><durationType>measure</durationType><duration>9/0</duration><Note><pitch>999</pitch><tpc>-500</tpc></Note></Chord><location><fractions>99999999/1</fractions></location><Spanner type=\"Slur\"><next><location><measures>-99</measures><fractions>-7/3</fractions></location></next></Spanner></voice></Measure></Staff></Score></museScore>",
     ] {
         let _ = from_bytes(junk.as_bytes());
@@ -785,4 +786,86 @@ fn graces_after_a_note_in_musescore_files() {
     let g = &s.voice(0, 0, 0, 0).unwrap().events[0].grace;
     assert_eq!(g.len(), 1);
     assert!(g[0].after && g[0].value == scoreart_model::NoteValue::N16th);
+}
+
+/// Written for this repository in the layout of MuseScore 2 files (observed in the OpenScore
+/// corpus): two voices by <track> and <tick>, a tuplet, a slur, a hairpin ended by
+/// <endSpanner>, a measure rest with z/n, title frame and text styles.
+const MS2: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<museScore version="2.06">
+  <Score>
+    <Division>480</Division>
+    <Style>
+      <TextStyle><name>Movement Title</name><family>FreeSerif</family><size>24</size></TextStyle>
+      <TextStyle><name>Work Title</name><family>FreeSerif</family><size>14</size><italic>1</italic></TextStyle>
+    </Style>
+    <Part>
+      <Staff id="1"/>
+      <trackName>Piano</trackName>
+      <Instrument><longName>Piano</longName><Channel><program value="0"/></Channel></Instrument>
+    </Part>
+    <Staff id="1">
+      <VBox>
+        <Text><style>Movement Title</style><text>2. A Song</text></Text>
+        <Text><style>Work Title</style><text>Songs, Op.1</text></Text>
+      </VBox>
+      <Measure number="1">
+        <TimeSig><sigN>4</sigN><sigD>4</sigD></TimeSig>
+        <Tuplet id="1"><normalNotes>2</normalNotes><actualNotes>3</actualNotes><baseNote>eighth</baseNote></Tuplet>
+        <Slur id="2"></Slur>
+        <HairPin id="3"><subtype>0</subtype></HairPin>
+        <Chord><Tuplet>1</Tuplet><durationType>eighth</durationType><Slur type="start" id="2"/><Note><pitch>72</pitch><tpc>14</tpc></Note></Chord>
+        <Chord><Tuplet>1</Tuplet><durationType>eighth</durationType><Note><pitch>74</pitch><tpc>16</tpc></Note></Chord>
+        <Chord><Tuplet>1</Tuplet><durationType>eighth</durationType><Slur type="stop" id="2"/><Note><pitch>76</pitch><tpc>18</tpc></Note></Chord>
+        <Chord><durationType>quarter</durationType><Note><pitch>77</pitch><tpc>13</tpc></Note></Chord>
+        <endSpanner id="3"/>
+        <Chord><durationType>half</durationType><Note><pitch>79</pitch><tpc>15</tpc></Note></Chord>
+        <tick>480</tick>
+        <Chord><track>1</track><durationType>quarter</durationType><Note><track>1</track><pitch>60</pitch><tpc>14</tpc></Note></Chord>
+      </Measure>
+      <Measure number="2">
+        <Rest><durationType>measure</durationType><duration z="4" n="4"/></Rest>
+      </Measure>
+    </Staff>
+  </Score>
+</museScore>
+"#;
+
+#[test]
+fn reads_musescore_2_files() {
+    use scoreart_model::{EventKind, SpannerKind, TPQ, TextKind};
+    let s = from_bytes(MS2.as_bytes()).unwrap();
+    assert_eq!(
+        (s.meta.title.as_str(), s.meta.subtitle.as_str()),
+        ("2. A Song", "Songs, Op.1")
+    );
+    assert_eq!(s.text_styles.get(TextKind::Title).size, 24.0);
+    let sub = s.text_styles.get(TextKind::Subtitle);
+    assert_eq!((sub.size, sub.italic), (14.0, true));
+    assert_eq!(s.measures.len(), 2);
+    let v0 = s.voice(0, 0, 0, 0).unwrap();
+    assert_eq!(v0.events.len(), 5);
+    assert!(v0.events[0].duration.tuplet.is_some());
+    assert_eq!(v0.ticks(), 4 * TPQ);
+    // The second voice starts on beat 2 (after <tick>480</tick>).
+    let v1 = s.voice(0, 0, 0, 1).unwrap();
+    let onsets: Vec<(u32, bool)> = v1
+        .onsets()
+        .into_iter()
+        .zip(&v1.events)
+        .map(|(t, e)| (t, matches!(e.kind, EventKind::Chord(_))))
+        .collect();
+    assert!(onsets.contains(&(TPQ, true)), "{onsets:?}");
+    // Slur over the triplet, hairpin from the start to beat 2.
+    let slur = s.spanners.iter().find(|x| x.kind == SpannerKind::Slur).unwrap();
+    assert_eq!((slur.start.tick, slur.end.tick), (0, 2 * TPQ / 3));
+    let hp = s
+        .spanners
+        .iter()
+        .find(|x| x.kind == SpannerKind::Crescendo)
+        .unwrap();
+    assert_eq!((hp.start.measure, hp.end.measure), (0, 0));
+    assert!(hp.end.tick >= TPQ);
+    // The measure rest fills measure 2.
+    assert_eq!(s.voice(0, 0, 1, 0).unwrap().ticks(), 4 * TPQ);
 }

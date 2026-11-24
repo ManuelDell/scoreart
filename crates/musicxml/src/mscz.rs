@@ -264,19 +264,24 @@ pub fn from_mscx(xml: &str) -> Result<Score, Error> {
 /// Reads an `.mscx`; `mss` is the `score_style.mss` of an `.mscz`, which holds the style in
 /// MuseScore 4 files.
 pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
-    let root = dom::parse(xml)?;
+    let mut root = dom::parse(xml)?;
     if root.name != "museScore" {
         return Err(Error::Unsupported(format!(
             "root element <{}> (expected a MuseScore file)",
             root.name
         )));
     }
-    let version = root.attr("version").unwrap_or("4");
-    if version.starts_with('1') || version.starts_with('2') {
+    let version = root.attr("version").unwrap_or("4").to_string();
+    if version.starts_with('1') {
         return Err(Error::Unsupported(format!(
             "MuseScore {version} files; open and save it in MuseScore 3 or 4 first, or export MusicXML"
         )));
     }
+    // MuseScore 2: brought into the layout of MuseScore 3 first.
+    if version.starts_with('2') {
+        crate::mscz2::upgrade(&mut root);
+    }
+    let root = root;
     let sc = root
         .child("Score")
         .ok_or_else(|| Error::Invalid("no <Score>".into()))?;
@@ -1184,7 +1189,12 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
     }
     // The style: MuseScore's defaults for the file's version, the score's own style, and the
     // style file of an .mscz, in that order.
-    let major = if version.starts_with('3') { 3 } else { 4 };
+    // MuseScore 2 files get MuseScore 3's defaults (the closest ones known).
+    let major = if version.starts_with('3') || version.starts_with('2') {
+        3
+    } else {
+        4
+    };
     let mut style: BTreeMap<String, String> = ms_defaults(major)
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))

@@ -13,6 +13,7 @@ mod dom;
 mod export;
 mod import;
 pub mod mscz;
+mod mscz2;
 
 use std::io::{Cursor, Read, Write};
 
