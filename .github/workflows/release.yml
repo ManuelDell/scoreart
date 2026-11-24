@@ -1,9 +1,11 @@
 name: Release
-# Builds ScoreArt for Windows, macOS, Linux and the web when a version tag (v0.1.0 …) is pushed,
-# and attaches the downloads to the GitHub release of that tag.
+# Builds ScoreArt for Windows, macOS, Linux and the web when a version tag (v0.1.0 …) is pushed
+# or a release is published on GitHub, and attaches the downloads to the release of that tag.
 on:
   push:
     tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
