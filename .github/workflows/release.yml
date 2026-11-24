@@ -1,0 +1,92 @@
+name: Release
+# Builds ScoreArt for Windows, macOS, Linux and the web when a version tag (v0.1.0 …) is pushed,
+# and attaches the downloads to the GitHub release of that tag.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux
+          - os: macos-latest
+            name: macos
+          - os: windows-latest
+            name: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p scoreart -p scoreart-cli
+      - name: Package (Linux, macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          dir="scoreart-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          mkdir "$dir"
+          cp target/release/scoreart target/release/scoreart-cli "$dir/"
+          cp README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "$dir/"
+          tar czf "$dir.tar.gz" "$dir"
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = "scoreart-$env:GITHUB_REF_NAME-windows"
+          New-Item -ItemType Directory $dir | Out-Null
+          Copy-Item target/release/scoreart.exe, target/release/scoreart-cli.exe $dir
+          Copy-Item README.md, CHANGELOG.md, LICENSE-MIT, LICENSE-APACHE, NOTICE, ATTRIBUTION.md $dir
+          Compress-Archive -Path $dir -DestinationPath "$dir.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: scoreart-*.*z*
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+      - run: cd apps/scoreart-web && trunk build --release
+      - run: |
+          dir="scoreart-${GITHUB_REF_NAME}-web"
+          cp -r dist/web "$dir"
+          cp README.md LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "$dir/"
+          zip -r "$dir.zip" "$dir"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: scoreart-*-web.zip
+
+  release:
+    needs: [desktop, web]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Release notes from the changelog
+        run: awk '/^## /{n++} n==1' CHANGELOG.md > notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: notes.md
+          files: out/*

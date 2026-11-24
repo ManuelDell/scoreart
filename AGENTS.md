@@ -58,12 +58,12 @@ People trust ScoreArt with their music; a crash loses their work. This outranks 
 - Never use the ArtCraft or MuseScore names, logos or icons for ScoreArt (names may appear only
   descriptively, e.g. "opens MusicXML exported from MuseScore").
 
-## Architecture (see [`docs/architecture.md`](docs/architecture.md))
+## Architecture (see [`docs/technical/architecture.md`](docs/technical/architecture.md))
 | Layer | Crate | Job |
 |---|---|---|
 | L1 | `model` | score model + edit primitives |
-| L2 | `musicxml`, `midi`, `engrave` | MusicXML I/O; MIDI export; layout to a display list |
-| L3 | `render` | SVG export (Bravura outlines) |
+| L2 | `musicxml`, `midi`, `engrave` | MusicXML and MuseScore I/O; playback sequence and MIDI; layout to a display list |
+| L3 | `render`, `synth` | SVG export (Bravura outlines); sound engine, samplers, mixer |
 | L4 | `engine` | `Session`, undo, **command registry**, samples, I/O dispatch |
 | L6 | `ui-egui` | egui front end (swappable) |
 | apps | `apps/scoreart`, `apps/scoreart-cli`, `apps/scoreart-web` | binaries |

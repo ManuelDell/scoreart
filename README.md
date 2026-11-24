@@ -5,295 +5,112 @@
 <h1 align="center">ScoreArt</h1>
 
 <p align="center">
-  <b>An open-source music notation editor, built in pure Rust.</b><br>
-  Write, engrave and share sheet music — natively on Linux, macOS and Windows, and in the browser via WebAssembly.
+  <b>Write, print and play sheet music — free and open source.</b><br>
+  For Windows, macOS, Linux and the web browser.
 </p>
 
 <p align="center">
-  <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-7048e8?style=flat-square&logo=rust&logoColor=white">
-  <img alt="Runs on desktop and the web" src="https://img.shields.io/badge/runs%20on-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows%20%C2%B7%20Web-7048e8?style=flat-square">
-  <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-7048e8?style=flat-square">
-  <img alt="Status: early alpha" src="https://img.shields.io/badge/status-early%20alpha-orange?style=flat-square">
+  <img alt="Version 0.1" src="https://img.shields.io/badge/version-0.1-7048e8?style=flat-square">
+  <img alt="Runs on Windows, macOS, Linux and the web" src="https://img.shields.io/badge/runs%20on-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Web-7048e8?style=flat-square">
+  <img alt="Free: MIT or Apache-2.0" src="https://img.shields.io/badge/free-MIT%20%2F%20Apache--2.0-7048e8?style=flat-square">
+  <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-orange?style=flat-square">
 </p>
 
-![ScoreArt with the ribbon on the Notation tab and the side panel on the palettes, showing the Ode to Joy sample](docs/images/app.png)
+![ScoreArt showing the song "Ode to Joy" for voice and piano](docs/images/app.png)
 
-ScoreArt is a scorewriter in the spirit of MuseScore, written from scratch. It follows the
-engineering conventions of the ArtCraft apps (Rust only, egui, one command registry for UI,
-CLI and agents, WebAssembly build, strict clean-room rules) — but it is an **independent
-project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group.**
+## What is ScoreArt?
 
-## What works today
+ScoreArt is a program for writing music the way it is printed: notes on staves, with lyrics,
+dynamics, chord symbols and everything else a score needs. You type or click the notes in,
+ScoreArt sets them beautifully on the page, plays them back to you, and saves them in a format
+every other notation program understands.
 
-- **Four interface layouts**, switched in the title bar (or *View → Interface*) and remembered:
-  - **Ribbon**: tabs of grouped buttons, as in the ArtCraft office apps;
-  - **Side panel**: menus, a toolbar and the MuseScore-like side panel;
-  - **Both** (the default);
-  - **Focus**: only the score and a floating input bar.
+- 🎼 **Write music quickly** — type `C D E`, click with the mouse, or play on a MIDI keyboard.
+- 🖨️ **Pages that look printed** — clean spacing, page numbers, headers and footers, title
+  pages, exactly like in professional engraving programs.
+- 🔊 **Hear what you write** — built-in sounds, or free sample libraries for real instruments.
+- 🔄 **Open what you already have** — files from **MuseScore** (2, 3 and 4), **Sibelius**,
+  **Finale**, **Dorico** and other programs (via MusicXML), and MIDI files.
+- 🌍 **English and German** interface.
+- 💸 **Free forever**, no account, no subscription, no tracking.
 
-  The ribbon tabs are ordered by how often they are needed:
-  - *Home*: note input, durations, accidentals, voices, editing and playback;
-  - *Notation*: the everyday marks (articulation, dynamics, slurs and hairpins, breath, grace notes);
-  - *More symbols*: the rare marks (ornaments, techniques, octave and pedal lines, tremolos,
-    noteheads …);
-  - then *Measures*, *Text*, *Instruments*, *Format* and *View*.
+## Get started
 
-  Buttons that cannot act on the current selection are greyed out, and their tooltip says why.
-  Double-clicking a tab or pressing Ctrl+F1 folds the ribbon.
+1. **Download** ScoreArt for your computer from the
+   [Releases page](https://github.com/ManuelDell/scoreart/releases) (Windows, macOS, Linux), or
+   use the **web version** from the same page in your browser.
+2. **Start it** — a sample song opens, so you can look around and press **Space** to listen.
+3. **Make your own score**: *File → New*, choose your instruments, and start writing.
 
-  ![Focus mode: only the score and a floating input bar](docs/images/focus.png)
+The [**user guide**](docs/guide/README.md) walks you through everything, with pictures:
 
-- **Engraving** with the SMuFL reference font Bravura: clefs, key and time signatures, notes,
-  chords (with seconds displaced), rests and whole-measure rests, accidentals (key- and
-  measure-aware), dots, ledger lines, stems, flags, **beams** (grouped by beat, sloped, with
-  secondary beams and beamlets), **ties** (also across systems), lyrics, tempo marks, tuplet
-  numbers, barlines, braces and brackets, instrument names, measure numbers, title block —
-  with automatic spacing, justified system breaks and page breaks.
-- **The full set of notation marks** (at least what MuseScore's palettes offer), each one
-  displayed, editable, saved and read back through MusicXML:
-  - 12 **articulations** (accent, staccato, staccatissimo ×3, tenuto, portato, marcato, stress,
-    unstress, soft accent, laissez vibrer) and 7 **fermatas** (normal, short, long, very short,
-    very long, Henze long/short);
-  - **breaths and pauses** (4 breath marks, 4 caesuras), 19 **ornaments** (trill, short trill,
-    mordent, tremblement, prall-mordent, up/down prall, up/down mordent, prall up/down, turns,
-    shake, schleifer, Haydn), **techniques** (up/down bow, harmonic, thumb position, open,
-    stopped, half open, snap and left-hand pizzicato) and **jazz slides** (scoop, plop, doit, fall);
-  - 30 **dynamics** from pppppp to ffffff with sf, sfz, sffz, sfp, rfz, fz, fp, pf, n …;
-  - **lines**: slurs, crescendo/diminuendo hairpins and cresc./dim. lines, 8va/8vb/15ma/15mb/
-    22ma/22mb (notes are displaced on screen, sound at pitch), pedal, trill and vibrato lines,
-    let ring, palm mute, straight and wavy glissandos — drawn across system breaks;
-  - **grace notes** (acciaccatura, appoggiatura, 16th, 32nd; before or after the note), single-note **tremolos** (1–4
-    strokes, buzz roll), **arpeggios** (normal, up, down, bracket), **noteheads** (x, diamond,
-    slash, triangle, circle-x, cross, circled, parenthesised);
-  - **repeats and jumps**: voltas, segno, coda, varied coda, Fine, To Coda, D.C., D.S. and their
-    al Fine/al Coda forms, one-measure repeat sign; **rehearsal marks**, **tempo markings**,
-    **chord symbols**, **fingerings**, **staff text** and system text.
-- **Note input** the way scorewriter users expect: `N` toggles note input, `A`–`G` enter
-  pitches (octave nearest the previous note, key signature applied), `1`–`8` pick durations
-  (5 = quarter), `.` dots, `0` rests, `Shift+A`–`G` add chord notes, `↑`/`↓` semitones,
-  `Ctrl+↑/↓` octaves, `T` ties, `Del` deletes, notes crossing a barline are split and tied,
-  four voices, mouse input with a ghost note. **Drag notes with the mouse**: up or down changes
-  the pitch step by step along the staff, sideways (or into another measure or staff) moves the
-  note to that beat — a rest takes its old place, its marks and lyrics go along; a preview
-  notehead shows where it lands.
-- **Two tools, pen and hand** (in the ribbon, the toolbar and the focus bar): with the **pen**
-  (`N`) a click writes a note where the ghost note shows; with the **hand** (`Esc`) a click
-  selects and a drag moves — notes (a preview notehead shows where they land), **staff texts and
-  dynamics**, and **lines** (hairpins, slurs, 8va, pedal, trill and other lines): drag a line up
-  or down or along the notes, or pull one of its ends onto another note; pull a hairpin's open end up or
-  down to open it wider or narrower. Moved places are kept
-  in MusicXML (`relative-x`/`relative-y`); MuseScore offsets of texts and dynamics are read.
-  Double-clicking a staff text edits it. The mouse pointer shows a hand over anything that can
-  be picked up.
-- **Pickups and odd measures**: *Measures → Length / pickup…* gives a measure its own length
-  (an upbeat of one eighth, a short first ending); a first measure that is shorter is left out
-  of the numbering. **Metronome marks** count any beat — ♪, ♩, ♩., 𝅗𝅥, 𝅗𝅥. (a new 6/8 score
-  counts dotted quarters). **Volta labels** like "1.+3." and "2.4.5." are printed and played on
-  those passes, also when the refrain closes the repeat (five verses, refrain after 2, 4 and 5).
-- **Page formatting as in MuseScore**: *Format → Page settings* has the paper size,
-  orientation, millimetres or inches, **two-sided** pages with margins of their own for odd and
-  even pages, the staff size and the **first page number**; the **music top and bottom margins**,
-  the distances between staves, instruments and systems (least and largest), **vertical
-  justification**, the **last system fill threshold** and the indent of the first system. Pages
-  before the last are filled down to the music bottom margin. *Format → Header & footer* has a
-  left, middle and right field for odd and even pages with MuseScore's macros (`$p`, `$P`, `$n`,
-  `$C`, `$c`, `$$`, `$:workTitle:`, `$:composer:`, `$:copyright:`, the dates `$d` (today),
-  `$D` (created), `$M`/`$m` (date and time of the last change), the file `$f`/`$F` and the part
-  name `$i`/`$I`, empty in the full score as in MuseScore …), shown on the first page or not.
-  **Spacers** (*Format → Breaks*: up, down, fixed) give one staff of the selected measures more
-  room above or below, or an exact distance to the next staff or system. A **section break**
-  starts a new system with the long instrument names, counts the measures from 1 again and
-  pauses playback (3 s; each can be changed in *Section…*). Breaks and spacers show as signs in
-  the accent colour on screen, never in print. A new score starts as a new MuseScore 4 score does (A4, margins 10 mm and 20 mm at the
-  bottom, page number and copyright in the footer, MuseScore's text sizes).
-- **MuseScore files keep their page layout**: `.mscz`/`.mscx` of MuseScore 2, 3 and 4 open with their
-  page size, margins (odd/even), staff size, distances, vertical justification, fill threshold,
-  headers and footers and text styles — including MuseScore's own defaults for whatever the file
-  does not store; texts in frames after the title become headings and text blocks. MusicXML is
-  read and written with odd/even margins and the title page as credits, and ScoreArt writes where
-  each of its systems and pages starts, so MuseScore shows the same lines and pages (ScoreArt
-  itself keeps only the user's breaks when it opens such a file).
-- **MusicXML of other programs** — Finale, Sibelius, Dorico, MuseScore, Noteflight, music21 and
-  the MusicXML test suite, checked note by note on several hundred files: composite time
-  signatures (3/8+2/8+3/4), overfull measures (they grow instead of losing notes), chords
-  across both piano staves, cue and hidden playback notes, rounded tuplet durations, longa,
-  128th and 256th notes, four dots, graces after a note (a trill's turn, also from MuseScore
-  files), lines placed with `<offset>`; the system starts of the file are kept, squeezing a
-  line a little rather than breaking it again. MuseScore 2 files (voices by track, lines
-  ended by `endSpanner`, text styles as blocks) are brought into the layout of MuseScore 3
-  files when they are opened.
-- **Texts as tagged blocks**: title, subtitle, composer, lyricist, copyright (foot of the first
-  page), **headings** and **text blocks** between the systems, **headers**, **footers** and page
-  numbers (from page 2). Each is a block of its kind that the hand picks up and moves freely;
-  double-click edits it, `Delete` removes the picked one (*Format → Texts*). **Lock position**
-  holds the picked block where it is (a padlock shows on it; the hand no longer drags it) until
-  it is unlocked again; *Lock all texts* / *Unlock all texts* do it for every block at once. The
-  lock is saved with the score.
-- **Fonts** (*Format → Fonts*): one clear list of every kind of text that is not a note —
-  title page, between the systems, every page, in the music (instrument names, measure numbers,
-  tempo, rehearsal marks, staff and system text, chord symbols, lyrics, fingering) — each with
-  font (Crimson Text serif or sans-serif), size in points, bold, italic and, for blocks, the
-  alignment. Next to it a **live preview** of the sample song shows every change at once, the
-  chosen kind highlighted; clicking a text in the preview picks its kind. Styles and blocks are
-  saved in MusicXML.
-
-![The Fonts window: kinds of text, their style, and the live preview](docs/images/fonts.png)
-- **Side panel** like MuseScore's: a strip of tabs on the left — **Palettes**, **Instruments**,
-  **Properties**, **Sounds** — switches what the panel shows; clicking the open tab folds it away.
-- **Editing**: selection of notes, rests, note ranges (`Shift+click`, `Shift+→`) and measure ranges; palettes for every mark above; add/insert/delete measures; add,
-  rename, **change**, reorder and remove instruments (20 built-in, including Women, Men and SATB
-  choir) in the **Instruments** tab (`I`). Changing an
-  instrument that holds several lines (Women → Soprano) asks whether to **merge** them, **split**
-  one off into the new instrument (the alto stays in Women) or **keep only one**; any line can
-  also get an instrument of its own. **Instrument changes inside a part**
-  ("To Flute", played and exported to MIDI); show or hide instruments; line, page and section breaks;
-  **lyrics with several verses and hyphens**; transpose; score properties; unlimited undo/redo.
-
-![The Instruments tab, and the question when Women (two staves) changes to Soprano](docs/images/instruments.png)
-
-- **Views and page format**: page view, continuous view (one endless system) and continuous
-  vertical view; **Format → Page settings**: paper size (A4, Letter, A3 …), portrait or
-  landscape, all four margins, staff size, distances between staves, instruments and systems,
-  note spacing. Saved in the file (MusicXML `<defaults>`), read from MuseScore styles.
+| | |
+|---|---|
+| [Getting started](docs/guide/01-getting-started.md) | The window, the ribbon and the side panel, your first score |
+| [Writing music](docs/guide/02-writing-music.md) | Notes, rests, chords, voices, lyrics — with keyboard, mouse or MIDI keyboard |
+| [Marks and lines](docs/guide/03-marks-and-lines.md) | Dynamics, articulation, slurs, hairpins, repeats, chord symbols |
+| [Pages and layout](docs/guide/04-pages-and-layout.md) | Paper size, margins, breaks, spacing, headers and footers |
+| [Texts](docs/guide/05-texts.md) | Title, composer, headings, fonts, moving and locking texts |
+| [Instruments](docs/guide/06-instruments.md) | Adding, changing and arranging instruments |
+| [Playback and sounds](docs/guide/07-playback-and-sounds.md) | Listening, the mixer, free sound libraries, audio export |
+| [Files](docs/guide/08-files.md) | Opening MuseScore, MusicXML and MIDI files; saving and exporting |
+| [Keyboard shortcuts](docs/guide/09-keyboard.md) | Every key at a glance |
 
 <p>
-  <img src="docs/images/page-settings.png" width="44%" alt="Page settings: paper size, orientation, margins, staff size, distances, note spacing">
-  <img src="docs/images/continuous-view.png" width="54%" alt="Continuous view: the whole piece in one endless system">
+  <img src="docs/images/note-input.png" width="49%" alt="Writing notes with the pen: a ghost note shows where the next note goes">
+  <img src="docs/images/page-settings.png" width="49%" alt="Page settings: paper, margins, staff size and distances">
 </p>
 
-- **Languages**: the whole interface in **English and German** (*View → Language*; the
-  system or browser language is used at first and the choice is remembered). Every text has
-  to have a German translation: a test fails otherwise (`crates/ui-egui/src/i18n_de.rs`).
+## Good to know
 
-![The interface in German: the Measures tab of the ribbon and the Properties tab of the side panel](docs/images/app-de.png)
+- ScoreArt is **young** (version 0.1, alpha). It already writes, prints and plays real
+  scores, but some things are still missing — among them PDF export, tuplet input, parts and
+  multi-measure rests. See the [roadmap](ROADMAP.md).
+- Your scores are saved as **MusicXML**, the open exchange format of music notation. Any
+  other notation program can open them, so your music is never locked in.
+- ScoreArt is an **independent project**. It is not made by, affiliated with or endorsed by
+  MuseScore / Muse Group, Avid (Sibelius), MakeMusic (Finale), Steinberg (Dorico) or
+  ArtCraft / storytold. Those names appear only to say which files ScoreArt can open.
 
-- **MIDI keyboard input** (desktop and browser): connect a device, play notes and chords into
-  the score; **every key and controller can be given its own action** (note value, rest, tie,
-  undo, play …) by clicking it on the keyboard picture or with *Learn*. Bindings are kept.
+---
 
-![MIDI input: the device, the keyboard picture with a key bound to Rest, the sustain pedal bound to Tie](docs/images/midi-input.png)
+## For developers
 
-- **Files**: **MusicXML 4.0** is the native format (`.musicxml` and compressed `.mxl`, read and
-  write — exchange scores with MuseScore, Dorico, Sibelius, Finale), **MuseScore files**
-  (`.mscz`, `.mscx` of MuseScore 2, 3 and 4, checked against files saved by MuseScore Studio 4.7)
-  open directly with notes, marks, lines, chord symbols, repeats and jumps (saving writes
-  MusicXML), **MIDI** import (each beat quantised to the simplest fitting grid: down to 64ths, triplets,
-  quintuplets, septuplets; MuseScore's one-track-per-staff
-  files become parts with their staves) and export,
-  **SVG** export with real glyph outlines, **WAV** export.
-- **Web build** with a `?host=parent` `postMessage` bridge (`scoreart:ready/open/save/dirty`) so
-  a same-origin page — for example a Nextcloud app — can open and save scores in it.
-- **Playback** with ScoreArt's own built-in synthesizer (no soundfont needed): `Space` plays
-  from the selection with a moving playhead, notes sound while you enter them. **Everything
-  printed is heard**:
-  - repeats with first/second/third endings, D.C., D.S., al Fine, al Coda;
-  - fermatas, breath marks and caesuras;
-  - accel., rit., allargando and a tempo as gradual tempo changes;
-  - swing;
-  - trills, mordents, turns and other ornaments, tremolos and glissandos;
-  - octave lines, pedal and let ring;
-  - hairpins as real swells, also on held notes.
-
-  Each instrument family plays its own way: slurred notes bind, staccato is shorter for bows
-  and winds than for keys. **Every note lives**: it grows into its sound, rounds and lets go
-  (staccato quickly, accents with a push, slurred notes carrying on, long notes in a slow
-  arch). All of this is **sound optimisation**, on by default and switched off with
-  *Instruments → Sound optimization*. Desktop audio via cpal, Web Audio in the browser; **WAV** export.
-  How it works: [docs/playback.md](docs/playback.md).
-- **Sample playback and a mixer** (`F10`): load free sample libraries — **SoundFont** (`.sf2`)
-  and **SFZ** (`.sfz` with WAV/FLAC samples, also as a folder or zip), e.g. VSCO 2 CE (CC0),
-  Salamander Grand Piano, GeneralUser GS. **Every instrument is its own track** with its own
-  sound (library and preset), volume, pan, mute, solo and level meter; the choice is saved in
-  the score. **Audio per instrument** export writes one WAV per instrument (stems).
-
-  **The notation picks the samples**: with a library like VSCO 2 CE, staccato notes play its
-  spiccato or staccato sound, "pizz." its pizzicato, tremolo strokes its tremolo, "con sord."
-  its muted sound. Every sound is measured once and brought to a common loudness. A room
-  (reverb) and a subtle human touch are added; both can be set in the mixer and are saved with
-  the score.
-  **Free sound libraries** can be fetched from inside ScoreArt: tick several instruments, or
-  fetch the **whole library with one click** (everything not loaded yet). The licence is
-  shown in full and must be explicitly accepted once for the batch; the instruments are then
-  downloaded one after the other with progress ("instrument 3 of 75") and can be cancelled
-  (licence and acceptance are saved with the files). See
-  [docs/sounds.md](docs/sounds.md) for the libraries, their licences and how they compare with
-  Muse Sounds.
-
-![The mixer: the violin plays a SoundFont preset, the piano the built-in sound](docs/images/mixer.png)
-- **CLI** for conversion and for driving every command headlessly (agents, scripts).
-
-Not yet: PDF export, tuplet input, multi-measure rests, part extraction, transposing
-instruments, percussion and tablature, two-note tremolos — see [ROADMAP.md](ROADMAP.md).
-
-## Build and run
-
-Needs Rust ≥ 1.90. On Linux the desktop app needs the ALSA headers (`libasound2-dev`).
+ScoreArt is written entirely in **Rust**, with an [egui](https://github.com/emilk/egui) user
+interface that runs natively and in the browser (WebAssembly). It is organised the way the
+[ArtCraft apps](https://getartcraft.com/apps) (WordCraft, GridCraft …) are: small crates in
+strict layers, one registry of commands that the interface, the command line and scripts all
+use, and an open standard as the native file format.
 
 ```bash
-cargo run --release -p scoreart -- [score.musicxml]        # desktop app
-cargo run --release -p scoreart-cli -- convert sample out.svg
-cargo run --release -p scoreart-cli -- convert sample out.wav --sounds GeneralUser-GS.sf2   # samples
-cargo run --release -p scoreart-cli -- convert score.musicxml stems.zip    # one WAV per instrument
-cargo run --release -p scoreart-cli -- commands             # every command id
-cargo run --release -p scoreart-cli -- run --new \
-  --cmd 'note.enter={"step":"c"}' --cmd 'note.enter={"step":"e"}' --save out.musicxml
-
-# Web (needs `rustup target add wasm32-unknown-unknown` and `cargo install trunk`)
-cd apps/scoreart-web && trunk serve        # http://127.0.0.1:8790
-trunk build --release                      # → dist/web/
+cargo run --release -p scoreart -- [score.musicxml]          # desktop app
+cargo run --release -p scoreart-cli -- convert sample out.svg  # command line
+cd apps/scoreart-web && trunk serve                            # web app on http://127.0.0.1:8790
 ```
 
-Quality gate before every commit: `cargo xtask ci` (fmt, clippy `-D warnings`, tests, asset
-attribution, crate layering, wasm build).
+Needs Rust ≥ 1.90; on Linux also the ALSA headers (`libasound2-dev`). Before every commit:
+`cargo xtask ci` (format, lints, tests, asset licences, layering, WebAssembly build).
 
-## Keyboard
+The [**technical documentation**](docs/technical/README.md) explains how it is built:
 
-| Key | Action | Key | Action |
-|---|---|---|---|
-| `N` | note input on/off | `Esc` | leave note input / clear selection |
-| `A`–`G` | enter note | `Shift+A`–`G` | add note to chord |
-| `1`…`8` | 64th … breve (5 = quarter) | `.` | dot |
-| `0` | rest | `T` | tie |
-| `↑` `↓` | semitone up/down | `Ctrl+↑` `Ctrl+↓` | octave |
-| `Alt+Shift+↑/↓` | diatonic step | `←` `→` | previous/next note |
-| `Ctrl+←/→` | previous/next measure | `Ctrl+Alt+↑/↓` | staff above/below |
-| `Ctrl+Alt+1…4` | voice | `Del` | delete |
-| `Ctrl+B` | append measure | `Ins` | insert measure |
-| `Ctrl+Z` / `Ctrl+Y` | undo / redo | `Ctrl+L` | lyric |
-| `Ctrl+S` / `Ctrl+Shift+S` | save / save as | `Ctrl+O` / `Ctrl+N` | open / new |
-| `Space` | play / stop | `Esc` | stop playback |
-| `S` | slur over the selection | `<` / `>` | crescendo / diminuendo hairpin |
-| `/` | grace note | `Shift+→` | extend the selection |
-| `Ctrl+K` | chord symbol | `Ctrl+T` / `Ctrl+M` | staff text / rehearsal mark |
-| `F10` | mixer | `I` | instruments and sounds |
-| `Ctrl+F1` | fold or unfold the ribbon | | |
+| | |
+|---|---|
+| [Architecture](docs/technical/architecture.md) | Crates and layers, the score model, the engraver, the command registry, the apps |
+| [Built like the ArtCraft apps](docs/technical/artcraft-conventions.md) | Which conventions ScoreArt shares with WordCraft and GridCraft, and why |
+| [File formats and compatibility](docs/technical/file-formats.md) | MusicXML, MuseScore 2/3/4, MIDI, SVG, WAV — and how they are tested against other programs |
+| [Testing and quality](docs/technical/testing.md) | The CI gate, never-crash rules, corpus checks |
+| [Playback](docs/playback.md) · [Sounds](docs/sounds.md) | How a score is performed; sample libraries and the mixer |
+| [Command line](docs/technical/command-line.md) | Converting files and driving every command from scripts and agents |
 
-## How it is built
+Contributing: read [AGENTS.md](AGENTS.md) first — it holds the rules for this repository, above
+all the **clean-room rules** (no MuseScore or other GPL notation code is ever read or used).
 
-| Layer | Crate | Job |
-|---|---|---|
-| L1 | `model` | score model and edit primitives |
-| L2 | `musicxml`, `midi`, `engrave` | MusicXML I/O · MIDI · layout to a display list |
-| L3 | `render`, `synth` | SVG export with Bravura outlines · sound engine: mixer, built-in synthesizer, SoundFont and SFZ sampler |
-| L4 | `engine` | session, undo, command registry |
-| L6 | `ui-egui` | the egui front end |
-| apps | `scoreart`, `scoreart-cli`, `scoreart-web` | desktop, CLI, browser |
-
-Details: [docs/architecture.md](docs/architecture.md). Research and plan: [docs/plan.md](docs/plan.md).
-
-## Legal
+## Licence
 
 - Code: **MIT OR Apache-2.0** ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)).
-- Sounds: **no sample library is bundled**; users load their own (see [docs/sounds.md](docs/sounds.md)).
-  Muse Sounds are proprietary and not used.
-- Music font: **Bravura** © Steinberg Media Technologies GmbH, SIL Open Font License 1.1,
-  bundled unmodified ([assets/fonts/OFL-Bravura.txt](assets/fonts/OFL-Bravura.txt)). Text font:
-  **Crimson Text** © The Crimson Text Project Authors, SIL Open Font License 1.1, bundled
-  unmodified ([assets/fonts/OFL-CrimsonText.txt](assets/fonts/OFL-CrimsonText.txt)). Every asset
-  is listed in [ATTRIBUTION.md](ATTRIBUTION.md); see also [NOTICE](NOTICE).
-- **Clean room**: no MuseScore (GPL) or other copyleft notation code is read or used; file
-  formats come from public specifications (MusicXML 4.0 and SMuFL 1.4 of the W3C Music Notation
-  Community Group, Standard MIDI File 1.0). Rules for contributors and agents: [AGENTS.md](AGENTS.md).
-- MuseScore is a trademark of Muse Group; Sibelius of Avid; Finale of MakeMusic; Dorico of
-  Steinberg. These names are used only to describe file compatibility. ScoreArt is not
-  affiliated with, sponsored or endorsed by any of them, nor by ArtCraft / storytold.
+- Music font **Bravura** and text font **Crimson Text**, both SIL Open Font License 1.1, bundled
+  unmodified ([assets/fonts](assets/fonts)). Every asset is listed in
+  [ATTRIBUTION.md](ATTRIBUTION.md); see also [NOTICE](NOTICE).
+- No sample library is bundled; you load your own ([docs/sounds.md](docs/sounds.md)).
+- MuseScore is a trademark of Muse Group, Sibelius of Avid, Finale of MakeMusic, Dorico of
+  Steinberg; they are named only to describe file compatibility.
