@@ -84,6 +84,7 @@ const LAYERS: &[(&str, u8)] = &[
     ("scoreart-midi", 2),
     ("scoreart-synth", 3),
     ("scoreart-engrave", 2),
+    ("scoreart-pdf", 3),
     ("scoreart-render", 3),
     ("scoreart-engine", 4),
     ("scoreart-ui-egui", 6),

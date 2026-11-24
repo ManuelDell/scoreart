@@ -74,6 +74,8 @@ pub enum Ico {
     TextBlock,
     Header,
     PageNumber,
+    /// An original (PDF) beside the score: two pages side by side.
+    Original,
 }
 
 /// Paints `ico` centred in `rect`, scaled to the smaller side.
@@ -532,6 +534,14 @@ pub fn paint(p: &Painter, rect: Rect, ico: Ico, color: Color32) {
             }
             for y in [10.0, 12.5] {
                 line(&[(8.0, y), (16.0, y)]);
+            }
+        }
+        Ico::Original => {
+            rect_s(2.5, 4.0, 9.0, 16.0);
+            rect_s(12.5, 4.0, 9.0, 16.0);
+            for y in [8.0, 11.0, 14.0] {
+                line(&[(4.5, y), (9.5, y)]);
+                line(&[(14.5, y), (19.5, y)]);
             }
         }
     }

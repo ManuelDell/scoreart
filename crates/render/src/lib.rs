@@ -1,4 +1,4 @@
-//! Renders an engraved [`Layout`] page to SVG. Music glyphs are emitted as real outlines from the
+//! Renders an engraved [`Layout`] to SVG and PDF. Music glyphs are emitted as real outlines from the
 //! bundled Bravura font (OFL-1.1), so the SVG needs no font installed; text uses Crimson Text (serif) or a sans-serif font, by style.
 #![deny(
     clippy::unwrap_used,
@@ -13,6 +13,9 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use scoreart_engrave::{Align, Layout, Page, Shape, Style};
+
+mod pdf;
+pub use pdf::pdf;
 
 /// Bravura, the SMuFL reference font by Steinberg Media Technologies GmbH (SIL OFL 1.1),
 /// bundled unmodified. See `assets/fonts/OFL-Bravura.txt`.

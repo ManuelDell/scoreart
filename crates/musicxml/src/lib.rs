@@ -12,6 +12,7 @@
 mod dom;
 mod export;
 mod import;
+pub use import::program_for_name;
 pub mod mscz;
 mod mscz2;
 

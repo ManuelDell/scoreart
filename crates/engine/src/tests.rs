@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use scoreart_model::{EventKind, NoteValue, Step, TPQ};
+use scoreart_model::{EventKind, NoteValue, Score, Step, TPQ};
 
 use crate::*;
 
@@ -1682,4 +1682,119 @@ fn a_line_break_squeezes_its_system_before_breaking_it() {
     .unwrap();
     s.execute("measure.break", &json!({ "kind": "line" })).unwrap();
     assert_eq!(per_system(&mut s)[0], natural);
+}
+
+/// (part, staff, measure) → sorted (onset, MIDI pitch, length) of every note.
+fn note_map(s: &Score) -> std::collections::BTreeMap<(usize, usize, usize), Vec<(u32, u8, u32)>> {
+    let mut out: std::collections::BTreeMap<_, Vec<_>> = std::collections::BTreeMap::new();
+    for (pi, p) in s.parts.iter().enumerate() {
+        for (m, pm) in p.measures.iter().enumerate() {
+            for (si, st) in pm.staves.iter().enumerate() {
+                for v in &st.voices {
+                    let mut t = 0;
+                    for e in &v.events {
+                        if let EventKind::Chord(ns) = &e.kind {
+                            for n in ns {
+                                out.entry((pi, si, m))
+                                    .or_default()
+                                    .push((t, n.pitch.midi(), e.ticks()));
+                            }
+                        }
+                        t += e.ticks();
+                    }
+                }
+            }
+        }
+    }
+    for v in out.values_mut() {
+        v.sort();
+    }
+    out
+}
+
+/// Exports `s` as PDF, converts the PDF back and checks every note came back.
+fn pdf_round_trip(s: &Session) -> Session {
+    let pdf = s.save_bytes("x.pdf").unwrap();
+    assert!(pdf.starts_with(b"%PDF"));
+    let mut back = Session::default();
+    back.open_bytes("x.pdf", &pdf).unwrap();
+    assert_eq!(back.score.parts.len(), s.score.parts.len());
+    assert_eq!(back.score.measures.len(), s.score.measures.len());
+    assert_eq!(note_map(&back.score), note_map(&s.score));
+    let r = back.reference.as_ref().unwrap();
+    assert!(r.uncertain.is_empty(), "uncertain {:?}", r.uncertain);
+    assert_eq!(back.file_name, "x.musicxml");
+    back
+}
+
+#[test]
+fn pdf_export_and_conversion_of_the_sample() {
+    let s = Session::default();
+    let back = pdf_round_trip(&s);
+    assert_eq!(back.score.meta.title, s.score.meta.title);
+    assert_eq!(back.score.meta.composer, s.score.meta.composer);
+}
+
+#[test]
+fn pdf_conversion_reads_keys_accidentals_and_chords() {
+    let xml = r#"<?xml version="1.0"?>
+<score-partwise version="4.0"><part-list><score-part id="P1"><part-name>Flute</part-name></score-part></part-list>
+<part id="P1">
+<measure number="1"><attributes><divisions>2</divisions><key><fifths>-3</fifths></key><time><beats>3</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>
+<note><pitch><step>E</step><alter>-1</alter><octave>4</octave></pitch><duration>2</duration><type>quarter</type></note>
+<note><pitch><step>A</step><octave>4</octave></pitch><duration>2</duration><type>quarter</type><accidental>natural</accidental></note>
+<note><pitch><step>A</step><octave>4</octave></pitch><duration>1</duration><type>eighth</type></note>
+<note><pitch><step>B</step><alter>-1</alter><octave>4</octave></pitch><duration>1</duration><type>eighth</type></note>
+</measure>
+<measure number="2"><attributes><key><fifths>2</fifths></key></attributes>
+<note><pitch><step>D</step><octave>5</octave></pitch><duration>3</duration><type>quarter</type><dot/></note>
+<note><pitch><step>C</step><alter>1</alter><octave>5</octave></pitch><duration>1</duration><type>eighth</type></note>
+<note><rest/><duration>2</duration><type>quarter</type></note>
+</measure>
+<measure number="3">
+<note><pitch><step>D</step><octave>4</octave></pitch><duration>4</duration><type>half</type></note>
+<note><chord/><pitch><step>F</step><alter>1</alter><octave>4</octave></pitch><duration>4</duration><type>half</type></note>
+<note><chord/><pitch><step>A</step><octave>4</octave></pitch><duration>4</duration><type>half</type></note>
+<note><pitch><step>C</step><octave>5</octave></pitch><duration>2</duration><type>quarter</type><accidental>natural</accidental></note>
+<barline location="right"><bar-style>light-heavy</bar-style></barline>
+</measure>
+</part></score-partwise>"#;
+    let mut s = Session::default();
+    s.open_bytes("k.musicxml", xml.as_bytes()).unwrap();
+    let back = pdf_round_trip(&s);
+    assert_eq!(back.score.measures[0].key.map(|k| k.fifths), Some(-3));
+    assert_eq!(back.score.measures[1].key.map(|k| k.fifths), Some(2));
+}
+
+#[test]
+fn a_pdf_can_be_shown_without_converting() {
+    let mut s = Session::default();
+    let pdf = s.save_bytes("x.pdf").unwrap();
+    let before = note_map(&s.score);
+    s.open_pdf("Original.pdf", &pdf, false).unwrap();
+    assert_eq!(note_map(&s.score), before);
+    let r = s.reference.as_ref().unwrap();
+    assert_eq!(r.name, "Original.pdf");
+    assert!(r.doc.page_count() >= 1);
+    let pic = r.doc.render(0, 300).unwrap();
+    assert_eq!(pic.width, 300);
+    assert_eq!(pic.rgba.len(), (pic.width * pic.height * 4) as usize);
+    // Ink on the page: not every pixel is white.
+    assert!(pic.rgba.chunks(4).any(|p| p[0] < 128));
+}
+
+#[test]
+fn broken_pdfs_fail_cleanly() {
+    let mut s = Session::default();
+    let title = s.score.meta.title.clone();
+    for bytes in [
+        &b"%PDF-1.7\n garbage"[..],
+        b"%PDF",
+        b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF",
+    ] {
+        assert!(s.open_bytes("bad.pdf", bytes).is_err());
+        assert!(s.open_pdf("bad.pdf", bytes, false).is_err());
+    }
+    assert_eq!(s.score.meta.title, title);
+    assert!(s.reference.is_none());
 }

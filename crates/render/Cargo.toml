@@ -1,6 +1,6 @@
 [package]
 name = "scoreart-render"
-description = "ScoreArt SVG export with real Bravura outlines; ships the bundled music font"
+description = "ScoreArt SVG and PDF export with the bundled music and text fonts"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,6 +11,8 @@ workspace = true
 [dependencies]
 scoreart-engrave = { workspace = true }
 ttf-parser = { workspace = true }
+krilla = { workspace = true }
+scoreart-model = { workspace = true }
 
 [dev-dependencies]
 scoreart-musicxml = { workspace = true }

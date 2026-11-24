@@ -18,6 +18,7 @@ const SOURCES: &[&str] = &[
     include_str!("side.rs"),
     include_str!("ribbon.rs"),
     include_str!("texts.rs"),
+    include_str!("reference.rs"),
 ];
 
 /// Messages the engine and model put in the status line (exact texts and templates).
@@ -36,6 +37,9 @@ const ENGINE_MESSAGES: &[&str] = &[
     "Opened {}",
     "Opened {} (MuseScore) — Save writes MusicXML",
     "Opened {} (MIDI) — Save writes MusicXML",
+    "Showing {} next to the score",
+    "Converted {}: {} measures — please check against the PDF",
+    "Converted {}: {} measures, unsure about measure {}",
     "Note {} · {} · Measure {} · Beat {} · {} · Voice {}",
     "Rest · {} · Measure {} · Beat {} · {} · Voice {}",
     "Measure {}",

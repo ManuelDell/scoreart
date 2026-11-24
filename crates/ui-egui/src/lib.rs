@@ -23,6 +23,7 @@ mod mixer;
 mod page;
 mod panels;
 mod playback;
+mod reference;
 pub mod ribbon;
 pub mod side;
 mod texts;
@@ -255,6 +256,8 @@ pub struct ScoreApp {
     /// What surrounds the score: ribbon, side panel, both or the focus bar.
     pub surface: ribbon::Surface,
     pub ribbon: ribbon::RibbonState,
+    /// A PDF shown beside the score, and one waiting for "show or convert".
+    pub(crate) reference: reference::RefView,
 }
 
 impl ScoreApp {
@@ -325,6 +328,7 @@ impl ScoreApp {
             header_footer: None,
             surface,
             ribbon: Default::default(),
+            reference: Default::default(),
         }
     }
 
@@ -354,6 +358,10 @@ impl ScoreApp {
     }
 
     pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) {
+        if bytes.starts_with(b"%PDF") {
+            reference::opened(self, name, bytes);
+            return;
+        }
         self.stop_playback();
         match self.session.open_bytes(name, bytes) {
             Ok(()) => {
@@ -436,6 +444,7 @@ impl ScoreApp {
             side::strip(self, ui);
             side::panel(self, ui);
         }
+        reference::panel(self, ui);
         let tk = theme::Tokens::get(&ctx);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(tk.canvas))
@@ -450,6 +459,7 @@ impl ScoreApp {
         texts::window(self, &ctx);
         texts::header_footer_dialog(self, &ctx);
         midi::window(self, &ctx);
+        reference::dialog(self, &ctx);
         if self.surface == ribbon::Surface::Focus {
             ribbon::focus_bar(self, &ctx);
         }

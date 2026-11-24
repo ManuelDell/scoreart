@@ -31,6 +31,8 @@ every other notation program understands.
 - 🔊 **Hear what you write** — built-in sounds, or free sample libraries for real instruments.
 - 🔄 **Open what you already have** — files from **MuseScore** (2, 3 and 4), **Sibelius**,
   **Finale**, **Dorico** and other programs (via MusicXML), and MIDI files.
+- 📄 **PDF in and out** — export every page as PDF; open a PDF to keep it next to your score,
+  or let ScoreArt turn a PDF from a notation program back into an editable score.
 - 🌍 **English and German** interface.
 - 💸 **Free forever**, no account, no subscription, no tracking.
 
@@ -54,7 +56,7 @@ also in German: [**Handbuch auf Deutsch**](docs/guide/de/README.md).
 | [Texts](docs/guide/05-texts.md) | Title, composer, headings, fonts, moving and locking texts |
 | [Instruments](docs/guide/06-instruments.md) | Adding, changing and arranging instruments |
 | [Playback and sounds](docs/guide/07-playback-and-sounds.md) | Listening, the mixer, free sound libraries, audio export |
-| [Files](docs/guide/08-files.md) | Opening MuseScore, MusicXML and MIDI files; saving and exporting |
+| [Files](docs/guide/08-files.md) | Opening MuseScore, MusicXML, MIDI and PDF files; saving and exporting |
 | [Keyboard shortcuts](docs/guide/09-keyboard.md) | Every key at a glance |
 
 <p>
@@ -65,8 +67,8 @@ also in German: [**Handbuch auf Deutsch**](docs/guide/de/README.md).
 ## Good to know
 
 - ScoreArt is **young** (version 0.1, alpha). It already writes, prints and plays real
-  scores, but some things are still missing — among them PDF export, tuplet input, parts and
-  multi-measure rests. See the [roadmap](ROADMAP.md).
+  scores, but some things are still missing — among them tuplet input, parts,
+  multi-measure rests and reading scanned sheet music. See the [roadmap](ROADMAP.md).
 - Your scores are saved as **MusicXML**, the open exchange format of music notation. Any
   other notation program can open them, so your music is never locked in.
 - ScoreArt is an **independent project**. It is not made by, affiliated with or endorsed by
@@ -98,7 +100,7 @@ The [**technical documentation**](docs/technical/README.md) explains how it is b
 |---|---|
 | [Architecture](docs/technical/architecture.md) | Crates and layers, the score model, the engraver, the command registry, the apps |
 | [Built like the ArtCraft apps](docs/technical/artcraft-conventions.md) | Which conventions ScoreArt shares with WordCraft and GridCraft, and why |
-| [File formats and compatibility](docs/technical/file-formats.md) | MusicXML, MuseScore 2/3/4, MIDI, SVG, WAV — and how they are tested against other programs |
+| [File formats and compatibility](docs/technical/file-formats.md) | MusicXML, MuseScore 2/3/4, MIDI, PDF, SVG, WAV — and how they are tested against other programs |
 | [Testing and quality](docs/technical/testing.md) | The CI gate, never-crash rules, corpus checks |
 | [Playback](docs/playback.md) · [Sounds](docs/sounds.md) | How a score is performed; sample libraries and the mixer |
 | [Command line](docs/technical/command-line.md) | Converting files and driving every command from scripts and agents |

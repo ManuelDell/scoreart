@@ -48,7 +48,8 @@
 
 | # | Gap | Why it matters | Estimate |
 |---|---|---|---|
-| 2 | **PDF export** (krilla, MIT/Apache) and printing | Sheet music is printed | 4–6 h |
+| 2 | **Printing** straight from the app (PDF export is done) | Sheet music is printed | 2–3 h |
+| 3 | **Scanned sheet music** (optical recognition; desktop) and LilyPond PDFs | Old paper scores | 30+ h |
 | 4 | **Tuplet input** (`Ctrl+3` …) and tuplet brackets | Common rhythm | 4–6 h |
 | 5 | **Copy/paste, range selection across staves** | Everyday editing | 6–10 h |
 | 6 | **Nextcloud app** (reuse the `?host=parent` bridge, like the ArtCraft-Office integration) | Use it where the files are | 3–5 h |

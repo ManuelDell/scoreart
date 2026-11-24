@@ -2423,6 +2423,18 @@ fn tab_view(app: &mut ScoreApp, ui: &mut Ui) {
                 crate::page::set_view(app, v);
             }
         }
+        if big(
+            ui,
+            Ico::Original,
+            t("PDF"),
+            app.reference.show && app.session.reference.is_some(),
+            app.session.reference.is_some(),
+            t("Show the opened PDF beside the score (open a PDF with File → Open)"),
+        )
+        .clicked()
+        {
+            crate::reference::toggle(app);
+        }
     });
     group(ui, t("Zoom"), |ui| {
         column(ui, |ui| {

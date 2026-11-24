@@ -249,6 +249,17 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         app.set_zoom(7.5);
                     }
                     ui.separator();
+                    let mut pdf = app.reference.show && app.session.reference.is_some();
+                    if ui
+                        .add_enabled(
+                            app.session.reference.is_some(),
+                            egui::Checkbox::new(&mut pdf, t("PDF beside the score")),
+                        )
+                        .clicked()
+                    {
+                        crate::reference::toggle(app);
+                    }
+                    ui.separator();
                     for tab in crate::side::SideTab::ALL {
                         if ui.selectable_label(app.side == Some(tab), tab.label()).clicked() {
                             crate::side::toggle(app, tab);
@@ -586,8 +597,9 @@ pub fn toolbar(app: &mut ScoreApp, ui: &mut egui::Ui) {
 }
 
 /// The export formats: label and file extension.
-pub(crate) fn export_formats() -> [(&'static str, &'static str); 6] {
+pub(crate) fn export_formats() -> [(&'static str, &'static str); 7] {
     [
+        (t("PDF (.pdf)"), "pdf"),
         (t("MusicXML (.musicxml)"), "musicxml"),
         (t("Compressed MusicXML (.mxl)"), "mxl"),
         (t("MIDI (.mid)"), "mid"),

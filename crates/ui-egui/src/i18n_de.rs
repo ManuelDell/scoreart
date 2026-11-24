@@ -208,6 +208,7 @@ pub const DE: &[(&str, &str)] = &[
         "Änderungen erscheinen sofort. Klick auf einen Text wählt seine Art.",
     ),
     ("Channel", "Kanal"),
+    ("Check measure {}", "Takt {} prüfen"),
     ("Choir (SATB)", "Chor (SATB)"),
     ("Choose sound", "Klang wählen"),
     ("Choose …", "Auswählen …"),
@@ -225,6 +226,7 @@ pub const DE: &[(&str, &str)] = &[
         "Klicke unten auf eine Taste oder drücke „Lernen“ und dann eine Taste, ein Pad, einen Knopf oder ein Pedal am Gerät, um festzulegen, was sie tut.",
     ),
     ("Close", "Schließen"),
+    ("Close the PDF", "PDF schließen"),
     ("Coda", "Coda"),
     ("Composer", "Komponist"),
     ("Compressed MusicXML (.mxl)", "Komprimiertes MusicXML (.mxl)"),
@@ -244,6 +246,19 @@ pub const DE: &[(&str, &str)] = &[
     ("Controller {} (sostenuto pedal)", "Regler {} (Sostenutopedal)"),
     ("Controller {} (sustain pedal)", "Regler {} (Haltepedal)"),
     ("Controller {} (volume)", "Regler {} (Lautstärke)"),
+    ("Convert to a score", "In eine Partitur umwandeln"),
+    (
+        "Converted {}: {} measures — please check against the PDF",
+        "{} umgewandelt: {} Takte – bitte mit dem PDF vergleichen",
+    ),
+    (
+        "Converted {}: {} measures, unsure about measure {}",
+        "{} umgewandelt: {} Takte, unsicher bei Takt {}",
+    ),
+    (
+        "Converting works with PDFs that notation programs wrote (MuseScore, Sibelius, Finale, Dorico, ScoreArt). Scanned pages cannot be converted yet. Always check the result against the PDF.",
+        "Das Umwandeln klappt mit PDFs, die Notenprogramme erzeugt haben (MuseScore, Sibelius, Finale, Dorico, ScoreArt). Eingescannte Seiten lassen sich noch nicht umwandeln. Vergleiche das Ergebnis immer mit dem PDF.",
+    ),
     (
         "Copy, change and share the samples, also commercially.",
         "Die Samples kopieren, ändern und weitergeben, auch kommerziell.",
@@ -436,6 +451,7 @@ pub const DE: &[(&str, &str)] = &[
     ("Heading", "Überschrift"),
     ("Hear notes", "Noten hören"),
     ("Help", "Hilfe"),
+    ("Hide", "Ausblenden"),
     ("Hide the ribbon    Ctrl+F1", "Ribbon ausblenden    Strg+F1"),
     (
         "Hold every text block at its place",
@@ -707,6 +723,7 @@ pub const DE: &[(&str, &str)] = &[
     ("One-measure repeat", "Taktwiederholung"),
     ("One-measure repeat (%)", "Taktwiederholung (%)"),
     ("Open", "Öffnen"),
+    ("Open PDF", "PDF öffnen"),
     ("Open sample (Ode to Joy)", "Beispiel öffnen (Ode an die Freude)"),
     (
         "Open the publisher's website to download",
@@ -726,6 +743,9 @@ pub const DE: &[(&str, &str)] = &[
     ("Orientation", "Ausrichtung"),
     ("Ornaments", "Verzierungen"),
     ("Own instrument …", "Eigenes Instrument …"),
+    ("PDF", "PDF"),
+    ("PDF (.pdf)", "PDF (.pdf)"),
+    ("PDF beside the score", "PDF neben der Partitur"),
     ("Page", "Seite"),
     ("Page break", "Seitenumbruch"),
     (
@@ -932,6 +952,7 @@ pub const DE: &[(&str, &str)] = &[
         "Show in the score (hidden instruments still play)",
         "In der Partitur zeigen (ausgeblendete Instrumente spielen weiter)",
     ),
+    ("Show next to the score", "Neben der Partitur anzeigen"),
     ("Show on first page", "Auf der ersten Seite zeigen"),
     ("Show or hide instrument", "Instrument ein- oder ausblenden"),
     ("Show page numbers", "Seitenzahlen zeigen"),
@@ -939,10 +960,22 @@ pub const DE: &[(&str, &str)] = &[
         "Show page numbers (from page 2)",
         "Seitenzahlen zeigen (ab Seite 2)",
     ),
+    (
+        "Show the PDF next to your score, for example to copy it, or let ScoreArt read its music and turn it into a score you can edit.",
+        "Das PDF neben deiner Partitur anzeigen, etwa um es abzuschreiben – oder ScoreArt die Noten lesen lassen und daraus eine Partitur machen, die du bearbeiten kannst.",
+    ),
+    (
+        "Show the opened PDF beside the score (open a PDF with File → Open)",
+        "Das geöffnete PDF neben der Partitur zeigen (ein PDF öffnest du mit Datei → Öffnen)",
+    ),
     ("Show the ribbon    Ctrl+F1", "Ribbon einblenden    Strg+F1"),
     (
         "Show this instrument in the score (hidden ones still play)",
         "Dieses Instrument in der Partitur zeigen (ausgeblendete spielen weiter)",
+    ),
+    (
+        "Showing {} next to the score",
+        "{} wird neben der Partitur angezeigt",
     ),
     (
         "Shown on every page from page 2.",

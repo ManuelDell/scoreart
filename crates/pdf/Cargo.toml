@@ -1,0 +1,15 @@
+[package]
+name = "scoreart-pdf"
+description = "ScoreArt PDF reading: shows the pages of a PDF and recognises the music of PDFs written by notation programs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+scoreart-model = { workspace = true }
+scoreart-engrave = { workspace = true }
+scoreart-musicxml = { workspace = true }
+hayro = { workspace = true }

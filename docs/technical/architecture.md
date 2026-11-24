@@ -10,7 +10,8 @@ apps/scoreart   apps/scoreart-cli   apps/scoreart-web            binaries
         └───────────────┬───────────────────┘
 L6  crates/ui-egui     ribbon, side panel, canvas, dialogs, mixer, i18n (egui)
 L4  crates/engine      Session · undo/redo · command registry · MIDI input · file dispatch
-L3  crates/render      SVG from the display list (Bravura outlines via ttf-parser)
+L3  crates/render      SVG and PDF from the display list (Bravura outlines via ttf-parser; PDF via krilla)
+L3  crates/pdf         PDF pages as pictures (hayro) and the recognition of the music in them
 L3  crates/synth       built-in synthesizer, SoundFont and SFZ sampler, mixer, reverb, catalogue
 L2  crates/engrave     layout: spacing, systems, pages → shapes, hit boxes, staff boxes
 L2  crates/musicxml    MusicXML 4.0 / MXL read & write; MuseScore 2/3/4 import

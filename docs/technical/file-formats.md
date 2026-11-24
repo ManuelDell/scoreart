@@ -8,6 +8,7 @@
 | MuseScore 2 (`.mscz`, `.mscx`) | ✓ | — | `crates/musicxml/src/mscz2.rs` → `mscz.rs` |
 | Standard MIDI File (`.mid`) | ✓ | ✓ | `crates/midi/src/{import,lib}.rs` |
 | SVG (first page) | — | ✓ | `crates/render` |
+| PDF (all pages) | ✓ shown, or converted (see below) | ✓ | write `crates/render/src/pdf.rs`; read `crates/pdf` |
 | WAV (whole score, or one per instrument) | — | ✓ | `crates/synth/src/wav.rs` |
 
 All formats are implemented from **public specifications** (MusicXML 4.0 and SMuFL 1.4 of the
@@ -61,6 +62,46 @@ read by the same code:
 - measure rests `<duration z n>`, tuplets by id, text styles as `<TextStyle>` blocks.
 
 MuseScore 1 files are refused with a message.
+
+## PDF
+
+**Writing** draws the same display list as the SVG export with
+[krilla](https://github.com/LaurenzV/krilla) (MIT OR Apache-2.0): music symbols as text in the
+embedded Bravura font, texts in the embedded Crimson Text, lines and beams as vector paths.
+Every page is written; the PDF's title is the score's.
+
+**Reading** uses [hayro](https://github.com/LaurenzV/hayro) (MIT OR Apache-2.0), a PDF reader and
+rasterizer in Rust that also runs in the browser. It does two things:
+
+- *Showing*: pages are drawn into pictures for the panel beside the score.
+- *Converting* (`crates/pdf/src/recognize.rs`): hayro interprets each page into an own drawing
+  device that records glyphs (with their font name, Unicode value and box) and paths. Because a
+  notation program's PDF still holds the music font's symbols, the music is *read*, not
+  guessed from pixels:
+  1. staves are five evenly spaced horizontal lines; staves joined by a brace, a bracket or a
+     system barline form a system;
+  2. barlines are vertical lines spanning the staff that touch no notehead and appear in most
+     staves of the system; they cut the system into measures;
+  3. glyphs are classified by their SMuFL code point (Bravura, Leland, Petaluma … — Bravura's
+     optional alternates are mapped back to their base glyph) or, for the older fonts with the
+     Sonata keyboard layout (Opus in Sibelius, Maestro in Finale), by their character;
+  4. per measure and staff: clef, key signature (sharps in the order F C G D A E B, flats
+     B E A D G C F), time signature; noteheads become chords by their stems; the duration
+     comes from the head, flags or the beams crossing the stem, and dots; accidentals carry
+     through the measure; voices split by stem direction when needed;
+  5. lyrics (text rows under a staff), dynamics, ties and slurs (curves), title, composer and
+     tempo are attached.
+
+  Measures whose content does not add up are reported as *uncertain*. Scanned PDFs (pictures of
+  paper) contain no glyphs; they are refused with a message — optical music recognition is on
+  the roadmap. LilyPond PDFs draw their symbols without Unicode values and are not read yet.
+
+How well it works, measured on PDFs exported from the 234 public-domain songs of the OpenScore
+Lieder corpus (each PDF converted back and compared note by note with the score it came from):
+85 % of notes exact in pitch, onset and length, 90 % right in pitch. On the eNote scorewriter
+comparison, the PDFs written by MuseScore, Sibelius, Finale and Dorico themselves come back with
+80–100 % of the notes right in most test files. The repository's tests convert ScoreArt's own
+PDFs back without a single wrong note (`crates/engine/src/tests.rs`, `pdf_*`).
 
 ## How compatibility is tested
 

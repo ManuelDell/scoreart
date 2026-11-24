@@ -80,6 +80,8 @@ pub enum Format {
     Mxl,
     Midi,
     Svg,
+    /// Every page, with the fonts embedded.
+    Pdf,
     Wav,
     /// One WAV file per instrument, in a zip archive.
     Stems,
@@ -94,11 +96,21 @@ impl Format {
             "mxl" => Some(Format::Mxl),
             "mid" | "midi" => Some(Format::Midi),
             "svg" => Some(Format::Svg),
+            "pdf" => Some(Format::Pdf),
             "wav" => Some(Format::Wav),
             "zip" => Some(Format::Stems),
             _ => None,
         }
     }
+}
+
+/// A PDF shown next to the score: the original a score is copied or converted from.
+pub struct Reference {
+    /// File name of the PDF.
+    pub name: String,
+    pub doc: scoreart_pdf::PdfDoc,
+    /// Measures (0-based) the conversion was unsure about; empty when only shown.
+    pub uncertain: Vec<usize>,
 }
 
 pub struct Session {
@@ -130,6 +142,8 @@ pub struct Session {
     pub file_path: String,
     /// When the score was last changed in this session.
     pub modified: Option<u64>,
+    /// A PDF shown next to the score (not part of the score).
+    pub reference: Option<Arc<Reference>>,
     undo: Vec<Score>,
     redo: Vec<Score>,
     layout: Option<(u64, scoreart_model::DocInfo, std::sync::Arc<Layout>)>,
@@ -162,6 +176,7 @@ impl Session {
             date_style: scoreart_model::DateStyle::default(),
             file_path: String::new(),
             modified: None,
+            reference: None,
             undo: Vec::new(),
             redo: Vec::new(),
             layout: None,
@@ -361,6 +376,9 @@ impl Session {
 
     /// Opens a score from bytes; the format is taken from the file name (MusicXML or MXL).
     pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<()> {
+        if bytes.starts_with(b"%PDF") {
+            return self.open_pdf(name, bytes, true);
+        }
         let midi = bytes.starts_with(b"MThd");
         let score = if midi {
             scoreart_midi::from_smf(bytes).map_err(Error::File)?
@@ -390,6 +408,59 @@ impl Session {
         Ok(())
     }
 
+    /// Opens a PDF. With `convert` its music is recognised and becomes the score (for PDFs
+    /// written by notation programs, see [`scoreart_pdf::recognize`]); either way the PDF stays
+    /// open as the [`Reference`] to compare with.
+    pub fn open_pdf(&mut self, name: &str, bytes: &[u8], convert: bool) -> Result<()> {
+        let doc = scoreart_pdf::PdfDoc::open(bytes.to_vec()).map_err(Error::File)?;
+        let pdf_name = std::path::Path::new(name)
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "score.pdf".into());
+        if !convert {
+            self.reference = Some(Arc::new(Reference {
+                name: pdf_name.clone(),
+                doc,
+                uncertain: Vec::new(),
+            }));
+            self.status = format!("Showing {pdf_name} next to the score");
+            return Ok(());
+        }
+        let rec = scoreart_pdf::recognize(&doc).map_err(Error::File)?;
+        let stem = pdf_name.rsplit_once('.').map_or(pdf_name.as_str(), |(a, _)| a);
+        *self = Session {
+            file_name: format!("{stem}.musicxml"),
+            view: self.view,
+            sounds: std::mem::take(&mut self.sounds),
+            clock: self.clock,
+            date_style: self.date_style,
+            ..Session::new(rec.score)
+        };
+        self.dirty = true;
+        let measures = self.score.measures.len();
+        self.status = if rec.uncertain.is_empty() {
+            format!("Converted {pdf_name}: {measures} measures — please check against the PDF")
+        } else {
+            let list: Vec<String> = rec
+                .uncertain
+                .iter()
+                .take(12)
+                .map(|m| (m + 1).to_string())
+                .collect();
+            let more = if rec.uncertain.len() > 12 { " …" } else { "" };
+            format!(
+                "Converted {pdf_name}: {measures} measures, unsure about measure {}{more}",
+                list.join(", ")
+            )
+        };
+        self.reference = Some(Arc::new(Reference {
+            name: pdf_name,
+            doc,
+            uncertain: rec.uncertain,
+        }));
+        Ok(())
+    }
+
     /// Serialises the score in the format given by `name`'s extension. MusicXML carries the
     /// lines and pages of the page view, so other programs show the same layout.
     pub fn save_bytes(&self, name: &str) -> Result<Vec<u8>> {
@@ -411,6 +482,11 @@ impl Session {
                     .next()
                     .unwrap_or_default()
                     .into_bytes())
+            }
+            Some(Format::Pdf) => {
+                let style = self.style();
+                let l = scoreart_engrave::layout(&self.score, &style);
+                scoreart_render::pdf(&l, &style, &self.score.meta.title).map_err(Error::File)
             }
             None => Err(Error::File(format!("unknown file type: {name}"))),
         }

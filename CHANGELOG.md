@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **PDF export**: every page, with Bravura and Crimson Text embedded (krilla).
+- **PDFs as originals**: opening a PDF shows it in a panel beside the score (*View → PDF*).
+- **PDF to score**: the music of PDFs written by notation programs — MuseScore, Sibelius,
+  Finale, Dorico, ScoreArt — is read back into an editable score (staves, clefs, keys, times,
+  notes, rests, voices, ties, slurs, lyrics, dynamics, titles); measures it is unsure about are
+  listed. The command line converts too: `scoreart-cli convert score.pdf score.musicxml`.
+
 ## 0.1.0 — 2026-11-24
 
 The first release: ScoreArt writes, engraves, plays and exchanges real scores.

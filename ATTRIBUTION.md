@@ -29,6 +29,7 @@ Schiller, 1785).
 | `docs/images/app.png` | ScoreArt contributors | screenshot of ScoreArt itself (ribbon on the Notation tab, side panel on the palettes tab) showing its own sample score | MIT OR Apache-2.0 | Original; no third-party UI or assets |
 | `docs/images/instruments.png` | ScoreArt contributors | screenshot of ScoreArt itself (its Instruments tab and instrument-change question on a test score written for this repository) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
 | `docs/images/midi-input.png` | ScoreArt contributors | screenshot of ScoreArt itself (its MIDI input window; the device name comes from a simulated test device) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
+| `docs/images/pdf.png` | ScoreArt contributors | screenshot of ScoreArt itself (its own sample score converted from a PDF that ScoreArt exported, with that PDF in the panel beside it) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
 | `docs/images/page-settings.png` | ScoreArt contributors | screenshot of ScoreArt itself (its page settings dialog over its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
 | `docs/images/continuous-view.png` | ScoreArt contributors | screenshot of ScoreArt itself (its continuous view of its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
 | `docs/images/focus.png` | ScoreArt contributors | screenshot of ScoreArt itself (its focus layout over its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
@@ -41,6 +42,7 @@ Schiller, 1785).
 | `docs/images/header-footer.png` | ScoreArt contributors | screenshot of ScoreArt itself (its header and footer dialog over its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
 | `docs/images/breaks.png` | ScoreArt contributors | screenshot of ScoreArt itself (a section break and a spacer in its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
 | `docs/images/text-lock.png` | ScoreArt contributors | screenshot of ScoreArt itself (a locked text block of its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
+| `docs/images/de/pdf.png` | ScoreArt contributors | screenshot of ScoreArt itself in German (its own sample score converted from a PDF that ScoreArt exported, with that PDF in the panel beside it) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
 | `docs/images/de/note-input.png` | ScoreArt contributors | screenshot of ScoreArt itself in German (note input with the pen, over its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
 | `docs/images/de/notation-tab.png` | ScoreArt contributors | screenshot of ScoreArt itself in German (the Notation tab of its ribbon, over its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
 | `docs/images/de/page-settings.png` | ScoreArt contributors | screenshot of ScoreArt itself in German (its page settings dialog, over its own sample score) | MIT OR Apache-2.0 | Original; no third-party UI or assets |
