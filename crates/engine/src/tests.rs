@@ -1061,8 +1061,11 @@ fn hymn_in_six_eight() {
             ..
         } = sh
         {
-            let w = text.chars().count() as f32 * size * 0.45;
-            assert!(x + w <= right + 1.0, "{text} runs off the page");
+            let w = scoreart_engrave::text_width(text, *size);
+            assert!(
+                x + w <= right + 1.0,
+                "{text} runs off the page: x {x} size {size} w {w} right {right}"
+            );
         }
     }
     // The empty bass staff of the short ending shows one measure rest, not a split one.

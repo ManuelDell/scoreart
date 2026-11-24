@@ -15,9 +15,10 @@
 
 pub mod glyphs;
 mod layout;
+mod serif;
 pub mod smufl;
 
-pub use layout::layout;
+pub use layout::{layout, text_width};
 use scoreart_model::edit::EventRef;
 use scoreart_model::{Clef, PageFormat};
 

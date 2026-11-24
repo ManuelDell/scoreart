@@ -662,10 +662,15 @@ pub fn status_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     );
                     ui.separator();
                     ui.label(
-                        RichText::new(tf(
-                            "{} measures · {} instruments",
-                            &[&s.score.measures.len(), &s.score.parts.len()],
-                        ))
+                        RichText::new({
+                            let (m, p) = (s.score.measures.len(), s.score.parts.len());
+                            match (m == 1, p == 1) {
+                                (true, true) => tf("{} measure · {} instrument", &[&m, &p]),
+                                (true, false) => tf("{} measure · {} instruments", &[&m, &p]),
+                                (false, true) => tf("{} measures · {} instrument", &[&m, &p]),
+                                (false, false) => tf("{} measures · {} instruments", &[&m, &p]),
+                            }
+                        })
                         .color(tk.text_dim),
                     );
                 });

@@ -57,12 +57,13 @@ fn verse_number(l: &str) -> (Option<&str>, &str) {
 
 /// Estimated width of text in the style of `kind` drawn `nominal` sp big by default.
 fn styled_width(f: &Fonts, kind: TextKind, s: &str, nominal: f32) -> f32 {
-    let per_char = if f.styles.get(kind).font == scoreart_model::TextFont::Sans {
-        0.53
+    // The serif's own widths; the sans-serif of the screen runs a little wider.
+    let sans = if f.styles.get(kind).font == scoreart_model::TextFont::Sans {
+        1.1
     } else {
-        0.48
+        1.0
     };
-    s.chars().count() as f32 * f.size(kind, nominal) * per_char
+    text_width(s, f.size(kind, nominal)) * sans
 }
 
 /// Estimated width of a lyric syllable (without its joining hyphen and verse number).
@@ -377,8 +378,20 @@ fn header_width(score: &Score, m: usize) -> f32 {
     w
 }
 
-fn text_width(s: &str, size: f32) -> f32 {
-    s.chars().count() as f32 * size * 0.52
+/// Width of a text line at `size`: the advance widths of the serif text font (Crimson Text);
+/// characters outside its table count half an em.
+pub fn text_width(s: &str, size: f32) -> f32 {
+    let em: f32 = s
+        .chars()
+        .map(|c| {
+            u32::from(c)
+                .checked_sub(crate::serif::FIRST)
+                .and_then(|i| crate::serif::WIDTHS.get(i as usize))
+                .filter(|w| **w > 0)
+                .map_or(0.52, |w| f32::from(*w) / 1000.0)
+        })
+        .sum();
+    em * size
 }
 
 /// Whether a staff is drawn: hidden staves are left out (unless every staff is hidden).
@@ -1481,7 +1494,9 @@ fn draw_block(o: &mut Out, frame: &Frame, kind: TextKind, text: &str, y: f32, bl
     };
     let (dx, dy) = (f32::from(score_offset.0) / 10.0, f32::from(score_offset.1) / 10.0);
     let st = o.f.styles.get(kind);
-    let size = o.f.size(kind, kind.reference_pt() * 0.3528 / 1.75);
+    // `size` is the drawn size; the shapes take the nominal one and apply the style themselves.
+    let nominal = kind.reference_pt() * 0.3528 / 1.75;
+    let size = o.f.size(kind, nominal);
     let (x, align) = match st.align {
         scoreart_model::TextAlign::Left => (frame.ml, Align::Left),
         scoreart_model::TextAlign::Center => (frame.pw / 2.0, Align::Center),
@@ -1492,7 +1507,7 @@ fn draw_block(o: &mut Out, frame: &Frame, kind: TextKind, text: &str, y: f32, bl
     let mut by = top + size;
     let (mut x0, mut x1) = (f32::MAX, f32::MIN);
     for l in &lines {
-        let sh = o.f.shape(kind, l, x, by, size, align);
+        let sh = o.f.shape(kind, l, x, by, nominal, align);
         let w = text_width(l, size);
         let lx = match align {
             Align::Left => x,
@@ -1604,7 +1619,8 @@ fn draw_header_footer(
             .map_or((0.0, 0.0), |(x, y)| (f32::from(*x) / 10.0, f32::from(*y) / 10.0));
         let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
         for (i, k, lines) in header_lines(score, info, footer) {
-            let size = o.f.size(k, k.reference_pt() * 0.3528 / 1.75);
+            let nominal = k.reference_pt() * 0.3528 / 1.75;
+            let size = o.f.size(k, nominal);
             let (x, align) = match i {
                 0 => (pb.ml, Align::Left),
                 1 => (pw / 2.0, Align::Center),
@@ -1629,7 +1645,7 @@ fn draw_header_footer(
                 x0 = x0.min(lx);
                 x1 = x1.max(lx + w);
                 if !l.trim().is_empty() {
-                    let sh = o.f.shape(k, l, x, by, size, align);
+                    let sh = o.f.shape(k, l, x, by, nominal, align);
                     o.push(sh, None);
                 }
                 by += line_height(size);
