@@ -822,6 +822,9 @@ pub struct Score {
     /// Headers and footers (with page numbers and copyright).
     #[serde(default)]
     pub header_footer: text::HeaderFooter,
+    /// Title-page texts, page number, header and footer held at their place.
+    #[serde(default)]
+    pub locked_blocks: std::collections::BTreeSet<TextKind>,
 }
 
 /// How a score is played back (not printed): the room and a human touch.
@@ -1284,6 +1287,31 @@ impl Score {
 
     /// Whether a system starting at `measure` begins a section that shows the long instrument
     /// names (the first measure, or one after a section break that asks for them).
+    /// Whether a text block is held at its place (the hand cannot drag it).
+    pub fn block_locked(&self, b: BlockRef) -> bool {
+        match b {
+            BlockRef::Fixed(k) => self.locked_blocks.contains(&k),
+            BlockRef::Added(i) => self.blocks.get(i).is_some_and(|x| x.locked),
+        }
+    }
+
+    /// Holds a text block at its place, or lets it move again.
+    pub fn set_block_locked(&mut self, b: BlockRef, locked: bool) {
+        match b {
+            BlockRef::Fixed(k) if locked => {
+                self.locked_blocks.insert(k);
+            }
+            BlockRef::Fixed(k) => {
+                self.locked_blocks.remove(&k);
+            }
+            BlockRef::Added(i) => {
+                if let Some(x) = self.blocks.get_mut(i) {
+                    x.locked = locked;
+                }
+            }
+        }
+    }
+
     pub fn section_starts_with_long_names(&self, measure: usize) -> bool {
         measure == 0
             || measure

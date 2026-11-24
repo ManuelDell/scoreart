@@ -41,6 +41,8 @@ pub enum Ico {
     LineBreak,
     PageBreak,
     SectionBreak,
+    Lock,
+    Unlock,
     SpacerUp,
     SpacerDown,
     SpacerFixed,
@@ -356,6 +358,29 @@ pub fn paint(p: &Painter, rect: Rect, ico: Ico, color: Color32) {
             for x in [3.0, 7.0, 11.0, 15.0, 19.0] {
                 line(&[(x, 12.0), (x + 2.0, 12.0)]);
             }
+        }
+        Ico::Lock | Ico::Unlock => {
+            rect_s(5.0, 11.0, 14.0, 10.0);
+            if ico == Ico::Lock {
+                line(&[
+                    (8.0, 11.0),
+                    (8.0, 7.5),
+                    (10.0, 4.5),
+                    (14.0, 4.5),
+                    (16.0, 7.5),
+                    (16.0, 11.0),
+                ]);
+            } else {
+                line(&[
+                    (8.0, 11.0),
+                    (8.0, 7.5),
+                    (10.0, 4.5),
+                    (14.0, 4.5),
+                    (16.0, 7.5),
+                    (16.0, 8.5),
+                ]);
+            }
+            dot(12.0, 16.0, 1.4);
         }
         Ico::SectionBreak => {
             line(&[(20.0, 4.0), (20.0, 12.0), (6.0, 12.0)]);

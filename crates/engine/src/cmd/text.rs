@@ -14,6 +14,32 @@ fn kind(p: &Value) -> Result<TextKind> {
     TextKind::from_id(k).ok_or_else(|| Error::Param(format!("no text kind {k:?}")))
 }
 
+/// Why a locked block does not move.
+pub const LOCKED: &str = "This text is locked — unlock it to move it";
+
+/// Every block the score shows: the title page's texts that are filled in, the page number,
+/// header and footer when shown, and the added blocks.
+fn all_blocks(s: &Session) -> Vec<BlockRef> {
+    let sc = &s.score;
+    let m = &sc.meta;
+    let mut out: Vec<BlockRef> = [
+        (TextKind::Title, !m.title.is_empty()),
+        (TextKind::Subtitle, !m.subtitle.is_empty()),
+        (TextKind::Composer, !m.composer.is_empty()),
+        (TextKind::Lyricist, !m.lyricist.is_empty()),
+        (TextKind::Copyright, !m.copyright.is_empty()),
+        (TextKind::PageNumber, !sc.hide_page_numbers),
+        (TextKind::Header, sc.header_footer.show_header),
+        (TextKind::Footer, sc.header_footer.show_footer),
+    ]
+    .into_iter()
+    .filter(|(_, shown)| *shown)
+    .map(|(k, _)| BlockRef::Fixed(k))
+    .collect();
+    out.extend((0..sc.blocks.len()).map(BlockRef::Added));
+    out
+}
+
 /// `block`: a fixed block by kind ("title", "page-number" …) or an added block by index.
 fn block(s: &Session, p: &Value) -> Result<BlockRef> {
     match p.get("block") {
@@ -205,6 +231,7 @@ pub fn commands() -> Vec<CommandSpec> {
                     measure,
                     dx: 0,
                     dy: 0,
+                    locked: false,
                 });
                 Ok(json!({ "index": s.score.blocks.len() - 1 }))
             },
@@ -265,6 +292,9 @@ pub fn commands() -> Vec<CommandSpec> {
             enabled: always,
             run: |s, p| {
                 let b = block(s, p)?;
+                if s.score.block_locked(b) {
+                    return Err(Error::Disabled(LOCKED.into()));
+                }
                 let (dx, dy) = (tenths(p, "dx").unwrap_or(0), tenths(p, "dy").unwrap_or(0));
                 match b {
                     BlockRef::Fixed(k) => {
@@ -282,6 +312,40 @@ pub fn commands() -> Vec<CommandSpec> {
                     }
                 }
                 Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "block.lock",
+            label: "Lock text position",
+            menu: &[],
+            shortcut: None,
+            params: "block (a kind like title or page-number, the index of an added block, or all), locked? (true holds it at its place, false lets it move; default: toggle)",
+            enabled: always,
+            run: |s, p| {
+                let want = match p.get("locked") {
+                    None | Some(Value::Null) => None,
+                    Some(v) => Some(
+                        v.as_bool()
+                            .ok_or_else(|| Error::Param("locked: true or false".into()))?,
+                    ),
+                };
+                if p.get("block").and_then(Value::as_str) == Some("all") {
+                    let all = all_blocks(s);
+                    // Toggle: lock all unless all are locked already.
+                    let on = want.unwrap_or_else(|| !all.iter().all(|b| s.score.block_locked(*b)));
+                    for b in all {
+                        s.score.set_block_locked(b, on);
+                    }
+                    if !on {
+                        s.score.locked_blocks.clear();
+                    }
+                    return Ok(json!({ "locked": on }));
+                }
+                let b = block(s, p)?;
+                let on = want.unwrap_or(!s.score.block_locked(b));
+                s.score.set_block_locked(b, on);
+                Ok(json!({ "locked": on }))
             },
             undoable: true,
         },

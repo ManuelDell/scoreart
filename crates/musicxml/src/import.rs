@@ -414,6 +414,7 @@ fn read_credits(root: &Element, score: &mut Score) {
                 measure,
                 dx: 0,
                 dy: 0,
+                locked: false,
             });
         }
     }

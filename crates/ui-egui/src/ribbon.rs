@@ -2209,6 +2209,51 @@ fn tab_format(app: &mut ScoreApp, ui: &mut Ui) {
                 );
             }
         });
+        column(ui, |ui| {
+            let sel = app.block_sel;
+            let locked = sel.is_some_and(|b| app.session.score.block_locked(b));
+            let (ico, label) = if locked {
+                (Ico::Lock, t("Position locked"))
+            } else {
+                (Ico::Unlock, t("Lock position"))
+            };
+            let tip = if sel.is_none() {
+                t("Pick a text block first (click it with the hand)")
+            } else if locked {
+                t("The picked text stays at its place; click to let it move again")
+            } else {
+                t("Hold the picked text at its place so that it cannot be dragged by accident")
+            };
+            if small(ui, Some(ico), label, locked, sel.is_some(), tip).clicked()
+                && let Some(b) = sel
+            {
+                crate::texts::lock_block(app, b, !locked);
+            }
+            if small(
+                ui,
+                Some(Ico::Lock),
+                t("Lock all texts"),
+                false,
+                true,
+                t("Hold every text block at its place"),
+            )
+            .clicked()
+            {
+                app.run("block.lock", json!({ "block": "all", "locked": true }));
+            }
+            if small(
+                ui,
+                Some(Ico::Unlock),
+                t("Unlock all texts"),
+                false,
+                true,
+                t("Let every text block move freely again"),
+            )
+            .clicked()
+            {
+                app.run("block.lock", json!({ "block": "all", "locked": false }));
+            }
+        });
     });
     group(ui, t("Breaks"), |ui| {
         column(ui, |ui| {

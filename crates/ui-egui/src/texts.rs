@@ -98,6 +98,7 @@ fn sample(styles: &TextStyles, page: PageFormat) -> Score {
         measure,
         dx: 0,
         dy: 0,
+        locked: false,
     };
     s.blocks = vec![
         block(
@@ -353,7 +354,22 @@ fn controls(app: &mut ScoreApp, ui: &mut egui::Ui, w: &mut FontsWindow) {
             app.run("page.numbers", json!({ "on": on }));
         }
     }
+    let fixed = BlockRef::Fixed(k);
+    let locked = app.session.score.block_locked(fixed);
+    if (k.is_block() && meta_text(&app.session.score, k).is_some()) || k == TextKind::PageNumber {
+        let mut on = locked;
+        if ui
+            .checkbox(&mut on, t("Lock its position"))
+            .on_hover_text(t(
+                "Hold the text at its place so that it cannot be dragged by accident",
+            ))
+            .changed()
+        {
+            lock_block(app, fixed, on);
+        }
+    }
     if app.session.score.block_offsets.contains_key(&k)
+        && !locked
         && ui
             .button(t("Back to its place"))
             .on_hover_text(t("Undo moving it by hand"))
@@ -618,6 +634,11 @@ pub(crate) fn block_offset(score: &Score, b: BlockRef) -> (f32, f32) {
         BlockRef::Added(i) => score.blocks.get(i).map_or((0, 0), |x| (x.dx, x.dy)),
     };
     (f32::from(dx) / 10.0, f32::from(dy) / 10.0)
+}
+
+/// Holds a block at its place, or lets it move again.
+pub(crate) fn lock_block(app: &mut ScoreApp, b: BlockRef, locked: bool) {
+    app.run("block.lock", json!({ "block": block_param(b), "locked": locked }));
 }
 
 /// Moves a block by a dragged distance.

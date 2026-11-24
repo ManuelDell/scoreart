@@ -116,7 +116,10 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
 - **Texts as tagged blocks**: title, subtitle, composer, lyricist, copyright (foot of the first
   page), **headings** and **text blocks** between the systems, **headers**, **footers** and page
   numbers (from page 2). Each is a block of its kind that the hand picks up and moves freely;
-  double-click edits it, `Delete` removes the picked one (*Format → Texts*).
+  double-click edits it, `Delete` removes the picked one (*Format → Texts*). **Lock position**
+  holds the picked block where it is (a padlock shows on it; the hand no longer drags it) until
+  it is unlocked again; *Lock all texts* / *Unlock all texts* do it for every block at once. The
+  lock is saved with the score.
 - **Fonts** (*Format → Fonts*): one clear list of every kind of text that is not a note —
   title page, between the systems, every page, in the music (instrument names, measure numbers,
   tempo, rehearsal marks, staff and system text, chord symbols, lyrics, fingering) — each with

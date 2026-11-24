@@ -23,7 +23,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
 
-pub use cmd::{CommandInfo, CommandSpec, registry};
+pub use cmd::{CommandInfo, CommandSpec, TEXT_LOCKED, registry};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

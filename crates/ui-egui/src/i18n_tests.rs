@@ -57,6 +57,7 @@ const ENGINE_MESSAGES: &[&str] = &[
     "Controller {} (sustain pedal)",
     "Controller {} (sostenuto pedal)",
     "Controller {} (soft pedal)",
+    scoreart_engine::TEXT_LOCKED,
 ];
 
 /// The texts inside `t("…")` and `tf("…"` calls of a source file.

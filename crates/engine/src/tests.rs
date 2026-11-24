@@ -1474,3 +1474,74 @@ fn header_macros_for_dates_files_and_parts() {
     let h = header(&mut s).unwrap();
     assert!(h.starts_with("24.11.2026|01.03.2025|01.03.2025||"), "{h}");
 }
+
+#[test]
+fn locked_text_blocks_stay_put_until_unlocked() {
+    let mut s = Session::default();
+    s.execute(
+        "file.new",
+        &json!({ "instruments": ["piano"], "measures": 4, "title": "Lied", "composer": "N. N." }),
+    )
+    .unwrap();
+    s.execute(
+        "block.add",
+        &json!({ "kind": "text", "text": "Strophe", "measure": 0 }),
+    )
+    .unwrap();
+    // Free: it moves.
+    s.execute("block.move", &json!({ "block": 0, "dx": 2, "dy": 1 }))
+        .unwrap();
+    assert_eq!((s.score.blocks[0].dx, s.score.blocks[0].dy), (20, 10));
+    // Locked: it stays where it is, also "back to its place" is refused.
+    let r = s.execute("block.lock", &json!({ "block": 0 })).unwrap();
+    assert_eq!(r, json!({ "locked": true }));
+    let err = s
+        .execute("block.move", &json!({ "block": 0, "dx": 0, "dy": 0 }))
+        .unwrap_err();
+    assert_eq!(err.to_string(), crate::TEXT_LOCKED);
+    assert_eq!((s.score.blocks[0].dx, s.score.blocks[0].dy), (20, 10));
+    // The title page's texts lock alike.
+    s.execute("block.lock", &json!({ "block": "title", "locked": true }))
+        .unwrap();
+    assert!(
+        s.execute("block.move", &json!({ "block": "title", "dx": 1, "dy": 0 }))
+            .is_err()
+    );
+    assert!(
+        s.execute("block.move", &json!({ "block": "composer", "dx": 1, "dy": 0 }))
+            .is_ok()
+    );
+    // Unlocked again: free to move.
+    s.execute("block.lock", &json!({ "block": 0, "locked": false }))
+        .unwrap();
+    s.execute("block.move", &json!({ "block": 0, "dx": -1, "dy": 0 }))
+        .unwrap();
+    assert_eq!(s.score.blocks[0].dx, -10);
+    // All at once; undo brings the previous state back.
+    s.execute("block.lock", &json!({ "block": "all", "locked": true }))
+        .unwrap();
+    use scoreart_model::{BlockRef, TextKind};
+    for b in [
+        BlockRef::Added(0),
+        BlockRef::Fixed(TextKind::Title),
+        BlockRef::Fixed(TextKind::Composer),
+        BlockRef::Fixed(TextKind::Footer),
+    ] {
+        assert!(s.score.block_locked(b), "{b:?}");
+    }
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(!s.score.block_locked(BlockRef::Fixed(TextKind::Composer)));
+    assert!(s.score.block_locked(BlockRef::Fixed(TextKind::Title)));
+    s.execute("block.lock", &json!({ "block": "all", "locked": false }))
+        .unwrap();
+    assert!(s.score.locked_blocks.is_empty() && !s.score.blocks[0].locked);
+    // The lock is saved with the score.
+    s.execute("block.lock", &json!({ "block": "subtitle" })).ok();
+    s.execute("block.lock", &json!({ "block": 0 })).unwrap();
+    s.execute("block.lock", &json!({ "block": "composer" })).unwrap();
+    let xml = scoreart_musicxml::to_string(&s.score);
+    let back = scoreart_musicxml::from_str(&xml).unwrap();
+    assert!(back.block_locked(BlockRef::Added(0)));
+    assert!(back.block_locked(BlockRef::Fixed(TextKind::Composer)));
+    assert!(!back.block_locked(BlockRef::Fixed(TextKind::Title)));
+}

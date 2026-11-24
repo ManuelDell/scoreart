@@ -1,7 +1,7 @@
 //! Texts of a score that are not notes: their styles (font, size, weight, slant, alignment) by
 //! kind, and the text blocks of the page (title, headings, header, footer …), which can be moved.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -243,6 +243,9 @@ pub struct TextBlock {
     pub dx: i16,
     #[serde(default)]
     pub dy: i16,
+    /// Held at its place: the hand cannot drag it until it is unlocked.
+    #[serde(default)]
+    pub locked: bool,
 }
 
 /// Which block: the title page's texts and the page number by kind, added blocks by index.
@@ -268,6 +271,9 @@ pub struct TextSettings {
     pub hide_page_numbers: bool,
     #[serde(default)]
     pub header_footer: HeaderFooter,
+    /// The fixed blocks held at their place.
+    #[serde(default)]
+    pub locked: BTreeSet<TextKind>,
 }
 
 impl TextSettings {
@@ -278,6 +284,7 @@ impl TextSettings {
             offsets: score.block_offsets.clone(),
             hide_page_numbers: score.hide_page_numbers,
             header_footer: score.header_footer.clone(),
+            locked: score.locked_blocks.clone(),
         }
     }
 
@@ -287,6 +294,7 @@ impl TextSettings {
         score.block_offsets = self.offsets;
         score.hide_page_numbers = self.hide_page_numbers;
         score.header_footer = self.header_footer.clipped();
+        score.locked_blocks = self.locked;
     }
 }
 

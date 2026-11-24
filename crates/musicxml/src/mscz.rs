@@ -429,6 +429,7 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                                 measure: measures_before,
                                 dx: 0,
                                 dy: 0,
+                                locked: false,
                             });
                         }
                     }

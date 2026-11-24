@@ -435,6 +435,18 @@ pub const DE: &[(&str, &str)] = &[
     ("Hear notes", "Noten hören"),
     ("Help", "Hilfe"),
     ("Hide the ribbon    Ctrl+F1", "Ribbon ausblenden    Strg+F1"),
+    (
+        "Hold every text block at its place",
+        "Alle Textblöcke an ihrem Platz festhalten",
+    ),
+    (
+        "Hold the picked text at its place so that it cannot be dragged by accident",
+        "Den gewählten Text an seinem Platz festhalten, damit er nicht versehentlich verschoben wird",
+    ),
+    (
+        "Hold the text at its place so that it cannot be dragged by accident",
+        "Den Text an seinem Platz festhalten, damit er nicht versehentlich verschoben wird",
+    ),
     ("Home", "Start"),
     ("Human touch", "Menschliches Spiel"),
     (
@@ -506,6 +518,10 @@ pub const DE: &[(&str, &str)] = &[
     ),
     ("Left-hand pizzicato", "Linke-Hand-Pizzicato"),
     ("Length / pickup…", "Länge / Auftakt…"),
+    (
+        "Let every text block move freely again",
+        "Alle Textblöcke wieder frei verschiebbar machen",
+    ),
     ("Let ring", "Klingen lassen"),
     ("Licence of {}", "Lizenz von {}"),
     ("Licence:", "Lizenz:"),
@@ -532,6 +548,10 @@ pub const DE: &[(&str, &str)] = &[
         "Klänge „{}“ geladen ({} Presets)",
     ),
     ("Loading {} …", "Lade {} …"),
+    ("Lock all texts", "Alle Texte sperren"),
+    ("Lock its position", "Position sperren"),
+    ("Lock position", "Position sperren"),
+    ("Lock text position", "Textposition sperren"),
     ("Long fermata", "Lange Fermate"),
     ("Long fermata (Henze)", "Lange Fermate (Henze)"),
     (
@@ -751,6 +771,10 @@ pub const DE: &[(&str, &str)] = &[
     ),
     ("Percussion clef", "Schlagzeugschlüssel"),
     ("Piano", "Klavier"),
+    (
+        "Pick a text block first (click it with the hand)",
+        "Zuerst einen Textblock wählen (mit der Hand anklicken)",
+    ),
     ("Pitch", "Tonhöhe"),
     ("Pitch down", "Tonhöhe runter"),
     ("Pitch up", "Tonhöhe hoch"),
@@ -779,6 +803,7 @@ pub const DE: &[(&str, &str)] = &[
     ("Plop", "Plop"),
     ("Portato (louré)", "Portato (louré)"),
     ("Portrait", "Hochformat"),
+    ("Position locked", "Position gesperrt"),
     ("Prall down", "Pralltriller abwärts"),
     ("Prall up", "Pralltriller aufwärts"),
     ("Prall-mordent", "Pralltriller mit Mordent"),
@@ -1028,11 +1053,19 @@ pub const DE: &[(&str, &str)] = &[
         "The other lines are deleted (Undo brings them back).",
         "Die anderen Zeilen werden gelöscht (Rückgängig holt sie zurück).",
     ),
+    (
+        "The picked text stays at its place; click to let it move again",
+        "Der gewählte Text bleibt an seinem Platz; klicken, um ihn wieder frei zu verschieben",
+    ),
     ("Theme", "Design"),
     ("Thick caesura", "Dicke Zäsur"),
     (
         "This is a summary, not legal advice. Only the licence text is binding.",
         "Dies ist eine Zusammenfassung, keine Rechtsberatung. Verbindlich ist nur der Lizenztext.",
+    ),
+    (
+        "This text is locked — unlock it to move it",
+        "Dieser Text ist gesperrt – entsperre ihn, um ihn zu verschieben",
     ),
     (
         "Three fields each, left, middle and right; macros such as $p (page number) are filled in on every page.",
@@ -1084,6 +1117,7 @@ pub const DE: &[(&str, &str)] = &[
     ("Undo (Ctrl+Z)", "Rückgängig (Strg+Z)"),
     ("Undo moving it by hand", "Verschieben von Hand rückgängig machen"),
     ("Unit", "Einheit"),
+    ("Unlock all texts", "Alle Texte entsperren"),
     ("Unstress", "Unbetont"),
     ("Untitled score", "Unbenannte Partitur"),
     ("Up", "Hoch"),

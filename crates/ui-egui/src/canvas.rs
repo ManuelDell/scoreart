@@ -533,7 +533,9 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         }
                         Some(Target::Block { block }) => {
                             app.block_sel = Some(block);
-                            if let Some(hit) = block_box(&layout, pi, block) {
+                            if app.session.score.block_locked(block) {
+                                app.session.status = scoreart_engine::TEXT_LOCKED.into();
+                            } else if let Some(hit) = block_box(&layout, pi, block) {
                                 app.block_drag = Some(BlockDrag { block, page: pi, grab: (sx, sy), delta: (0.0, 0.0), hit });
                             }
                         }
@@ -608,16 +610,13 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     && hp == pi
                 {
                     let target = layout.hit(pi, hx, hy);
-                    let movable = matches!(
-                        target,
-                        Some(
-                            Target::Note { .. }
-                                | Target::Text { .. }
-                                | Target::Dynamic { .. }
-                                | Target::Line { .. }
-                                | Target::Block { .. }
-                        )
-                    );
+                    let movable = match target {
+                        Some(Target::Block { block }) => !app.session.score.block_locked(block),
+                        t => matches!(
+                            t,
+                            Some(Target::Note { .. } | Target::Text { .. } | Target::Dynamic { .. } | Target::Line { .. })
+                        ),
+                    };
                     // At the end of a line: the end can be pulled sideways.
                     // Which end is under the pointer: Some(true) start, Some(false) end.
                     let end_here = match target {
@@ -762,7 +761,17 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 if let Some(b) = app.block_sel
                     && let Some(h) = block_box(&layout, pi, b)
                 {
-                    crate::texts::frame(&painter, Rect::from_min_max(map(h.x0, h.y0), map(h.x1, h.y1)), tk.accent);
+                    let r = Rect::from_min_max(map(h.x0, h.y0), map(h.x1, h.y1));
+                    crate::texts::frame(&painter, r, tk.accent);
+                    if app.session.score.block_locked(b) {
+                        let size = (zoom * 1.8).clamp(12.0, 22.0);
+                        let at = Rect::from_min_size(
+                            Pos2::new(r.right() + 3.0, r.top() - size * 0.3),
+                            Vec2::splat(size),
+                        );
+                        painter.rect_filled(at.expand(1.0), 3.0, tk.accent);
+                        crate::icons::paint(&painter, at, crate::icons::Ico::Lock, Color32::WHITE);
+                    }
                 }
                 if let Some(d) = app.block_drag.filter(|d| d.page == pi) {
                     let h = d.hit;

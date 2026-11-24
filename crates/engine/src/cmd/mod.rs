@@ -6,6 +6,7 @@ mod marks;
 mod note;
 mod score;
 mod text;
+pub use text::LOCKED as TEXT_LOCKED;
 
 use std::sync::OnceLock;
 
