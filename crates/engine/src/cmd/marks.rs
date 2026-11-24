@@ -244,6 +244,7 @@ pub fn commands() -> Vec<CommandSpec> {
                     pitches: vec![pitch],
                     value,
                     slash,
+                    after: false,
                 });
                 Ok(Value::Null)
             },

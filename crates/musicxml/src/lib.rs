@@ -191,6 +191,8 @@ pub fn to_mxl_laid_out(score: &Score, starts: &[(usize, bool)]) -> Result<Vec<u8
 }
 
 #[cfg(test)]
+mod compat_tests;
+#[cfg(test)]
 mod mscz_tests;
 #[cfg(test)]
 mod tests;

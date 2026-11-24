@@ -934,7 +934,8 @@ impl Arpeggio {
     }
 }
 
-/// A grace note (or grace chord) before the main note.
+/// A grace note (or grace chord) before the main note, or after it (the turn ending a
+/// trill: "Nachschlag").
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Grace {
     pub pitches: Vec<Pitch>,
@@ -942,6 +943,9 @@ pub struct Grace {
     pub value: NoteValue,
     /// Slashed stem: acciaccatura; without: appoggiatura.
     pub slash: bool,
+    /// After the main note (played at its end) instead of before it.
+    #[serde(default)]
+    pub after: bool,
 }
 
 /// Repeat navigation marks on a measure.

@@ -309,7 +309,7 @@ fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Styl
 /// Room needed left of the noteheads: grace notes, arpeggio, slides in, parentheses.
 fn lead_extra(e: &Event) -> f32 {
     let mut w = 0.0;
-    let graces: usize = e.grace.iter().map(|_| 1).sum();
+    let graces = e.grace.iter().filter(|g| !g.after).count();
     if graces > 0 {
         w += graces as f32 * 1.15 + 0.5;
     }
@@ -326,6 +326,16 @@ fn lead_extra(e: &Event) -> f32 {
         w += 0.5;
     }
     w
+}
+
+/// Room for the graces after a note (and its dots): (x offset of the first, width).
+fn after_graces_room(e: &Event) -> f32 {
+    let n = e.grace.iter().filter(|g| g.after).count();
+    if n == 0 {
+        0.0
+    } else {
+        n as f32 * 1.15 + 0.6 + f32::from(e.duration.dots) * 0.5
+    }
 }
 
 /// Room needed right of the noteheads: slides out, breath marks, parentheses.
@@ -346,7 +356,7 @@ fn trail_extra(e: &Event) -> f32 {
     if e.notes().iter().any(|n| n.paren) {
         w += 0.5;
     }
-    w
+    w + after_graces_room(e)
 }
 
 fn has_second(e: &Event) -> bool {
@@ -441,6 +451,9 @@ fn natural_width(sys: &System, plans: &[MeasurePlan]) -> f32 {
 
 /// Breaks the measures into systems of `width`; `fill` is the share of the line under which
 /// the last system is not stretched, `first_indent` the extra indent of the first system.
+/// How far a forced system may squeeze its notes together (share of their natural room).
+const SQUEEZE: f32 = 0.55;
+
 fn break_systems(
     score: &Score,
     plans: &[MeasurePlan],
@@ -458,7 +471,30 @@ fn break_systems(
         let avail = (width - indent - header).max(10.0);
         let mut ms = Vec::new();
         let mut used = 0.0f32;
-        while m < plans.len() {
+        // A line, page or section break ahead (the user's, or the system starts of the
+        // program a file comes from): its measures stay one system when they fit with the
+        // notes moved closer, down to SQUEEZE of their room, as other programs set them.
+        let forced = |i: usize| {
+            score
+                .measures
+                .get(i)
+                .is_some_and(|x| x.system_break || x.page_break || x.section.is_some())
+        };
+        if let Some(end) = (m..plans.len()).take(64).find(|i| forced(*i)) {
+            let run = |squeeze: f32| -> f32 {
+                (m..=end)
+                    .filter_map(|i| plans.get(i).map(|p| (i, p)))
+                    .map(|(i, p)| p.fixed() + p.stretch() * squeeze + if i == m { 0.0 } else { p.prefix })
+                    .sum()
+            };
+            if run(1.0) > avail && run(SQUEEZE) <= avail {
+                ms.extend(m..=end);
+                used = run(1.0);
+                m = end + 1;
+            }
+        }
+        let squeezed = !ms.is_empty();
+        while !squeezed && m < plans.len() {
             let Some(p) = plans.get(m) else { break };
             let w = p.fixed() + p.stretch() + if ms.is_empty() { 0.0 } else { p.prefix };
             // The second half of a measure written as two (hidden barline) always follows.
@@ -2619,6 +2655,11 @@ fn out_staff_box(
                     o.glyph(c, gg.stem_x - g::STEM / 2.0, gg.stem_end, Some(ev));
                 }
             }
+            // A longa: a stem down from the right side of its square head.
+            if gg.value == NoteValue::Long {
+                let sx = gg.x + head_w - g::STEM / 2.0;
+                o.line(sx, max_y, sx, max_y + 3.5, g::STEM, Some(ev));
+            }
             // Tremolo strokes through the stem (above a whole note).
             let trem = match e.tremolo {
                 scoreart_model::Tremolo::None => None,
@@ -2692,18 +2733,26 @@ fn out_staff_box(
                     }
                 }
             }
-            // Grace notes before the chord: small, stem up, slashed for acciaccaturas.
-            let ngr = e.grace.len();
-            for (gi, gr) in e.grace.iter().enumerate() {
-                let gx = left_edge
-                    - acc_room
-                    - if e.arpeggio != scoreart_model::Arpeggio::None {
-                        1.3
-                    } else {
-                        0.0
-                    }
-                    - (ngr - gi) as f32 * 1.15
-                    - 0.2;
+            // Grace notes before the chord: small, stem up, slashed for acciaccaturas; graces
+            // after it (a trill's turn) right of the heads and dots.
+            let ngr = e.grace.iter().filter(|g| !g.after).count();
+            let (mut bi, mut ai) = (0usize, 0usize);
+            for gr in e.grace.iter() {
+                let gx = if gr.after {
+                    ai += 1;
+                    left_edge + head_w + 0.45 + f32::from(e.duration.dots) * 0.5 + (ai - 1) as f32 * 1.15
+                } else {
+                    bi += 1;
+                    left_edge
+                        - acc_room
+                        - if e.arpeggio != scoreart_model::Arpeggio::None {
+                            1.3
+                        } else {
+                            0.0
+                        }
+                        - (ngr + 1 - bi) as f32 * 1.15
+                        - 0.2
+                };
                 const S: f32 = 0.62;
                 let mut top_y = f32::MAX;
                 let mut bot_y = f32::MIN;

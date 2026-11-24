@@ -764,13 +764,22 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                             // A gap before this event (secondary voices) becomes rests.
                             let room = i64::from(score.measure_ticks(mi)).saturating_sub(t);
                             let gap = std::mem::take(&mut moved).clamp(0, room.max(0));
-                            for d in Duration::decompose(gap.min(i64::from(u32::MAX)) as u32) {
+                            for d in Duration::fill(gap.min(i64::from(u32::MAX)) as u32) {
                                 push_event(&mut voice, &mut t, Event::rest(d));
                             }
                             // Grace notes come before their main note and take no time.
+                            // grace8after / grace16after / grace32after: after the main note.
+                            let after = c
+                                .children
+                                .iter()
+                                .any(|k| k.name.starts_with("grace") && k.name.ends_with("after"));
                             let grace = if c.has("acciaccatura") {
                                 Some((NoteValue::Eighth, true))
-                            } else if c.has("appoggiatura") || c.has("grace8") || c.has("grace4") {
+                            } else if c.has("appoggiatura")
+                                || c.has("grace8")
+                                || c.has("grace4")
+                                || c.has("grace8after")
+                            {
                                 Some((NoteValue::Eighth, false))
                             } else if c.has("grace16") || c.has("grace16after") {
                                 Some((NoteValue::N16th, false))
@@ -794,6 +803,7 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                                         pitches,
                                         value,
                                         slash,
+                                        after,
                                     });
                                 }
                                 continue;

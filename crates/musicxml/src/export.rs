@@ -344,7 +344,8 @@ pub fn write_laid_out(score: &Score, starts: &[(usize, bool)]) -> String {
         .measures
         .iter()
         .any(|i| i.section.is_some_and(|s| s.restart_numbers));
-    let per_tick = |t: u32| -> u32 { t * div / TPQ };
+    // (In u64: a long note in fine divisions overflows u32.)
+    let per_tick = |t: u32| -> u64 { u64::from(t) * u64::from(div) / u64::from(TPQ) };
     let mut x = String::new();
     x.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");
     x.push_str("<!DOCTYPE score-partwise PUBLIC \"-//Recordare//DTD MusicXML 4.0 Partwise//EN\" \"http://www.musicxml.org/dtds/partwise.dtd\">\n");
@@ -914,7 +915,7 @@ fn accidental_name(a: Accidental) -> &'static str {
 fn write_event(
     x: &mut String,
     e: &Event,
-    dur: u32,
+    dur: u64,
     voice: usize,
     staff: Option<usize>,
     tie_stops: &[Pitch],
@@ -950,27 +951,31 @@ fn write_event(
         harmony(x, c, staff);
     }
     let staff_el = staff.map(|s| format!("<staff>{s}</staff>")).unwrap_or_default();
-    // Grace notes come first.
-    for g in &e.grace {
-        for (i, p) in g.pitches.iter().enumerate() {
-            let slash = if g.slash { " slash=\"yes\"" } else { "" };
-            let chord = if i > 0 { "<chord/>" } else { "" };
-            let _ = write!(
-                x,
-                "      <note><grace{slash}/>{chord}<pitch><step>{}</step>",
-                p.step.letter()
-            );
-            if p.alter != 0 {
-                let _ = write!(x, "<alter>{}</alter>", p.alter);
+    // Grace notes come first; graces after the note follow it (taking time from it).
+    let graces = |x: &mut String, after: bool| {
+        for g in e.grace.iter().filter(|g| g.after == after) {
+            for (i, p) in g.pitches.iter().enumerate() {
+                let slash = if g.slash { " slash=\"yes\"" } else { "" };
+                let steal = if after { " steal-time-previous=\"10\"" } else { "" };
+                let chord = if i > 0 { "<chord/>" } else { "" };
+                let _ = write!(
+                    x,
+                    "      <note><grace{slash}{steal}/>{chord}<pitch><step>{}</step>",
+                    p.step.letter()
+                );
+                if p.alter != 0 {
+                    let _ = write!(x, "<alter>{}</alter>", p.alter);
+                }
+                let _ = writeln!(
+                    x,
+                    "<octave>{}</octave></pitch><voice>{voice}</voice><type>{}</type>{staff_el}</note>",
+                    p.octave,
+                    g.value.xml_name()
+                );
             }
-            let _ = writeln!(
-                x,
-                "<octave>{}</octave></pitch><voice>{voice}</voice><type>{}</type>{staff_el}</note>",
-                p.octave,
-                g.value.xml_name()
-            );
         }
-    }
+    };
+    graces(x, false);
     let note_lines = |first: bool| -> String {
         let mut n = String::new();
         if !first {
@@ -1200,6 +1205,7 @@ fn write_event(
                 tail(x, Some(n), n.tie, stop, i == 0);
                 x.push_str("</note>\n");
             }
+            graces(x, true);
         }
     }
 }

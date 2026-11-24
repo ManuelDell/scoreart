@@ -170,6 +170,96 @@ fn misc_field<'a>(root: &'a Element, name: &str) -> Option<&'a str> {
 /// ScoreArt's own page settings, and — in a file ScoreArt laid out — which of the written
 /// system and page starts are the user's breaks (the others only show ScoreArt's layout to
 /// other programs).
+/// An event as long as `ticks`: itself when its value says so; otherwise (a length no single
+/// value has, like a maxima) tied notes or rests that add up to it. Tuplets keep their value
+/// (other programs round their durations).
+fn split_event(e: &Event, ticks: u64) -> Vec<Event> {
+    let own = u64::from(e.ticks());
+    // Only lengths on the grid of 64ths are split; odd ones (rounded tuplets) stay as written.
+    if e.duration.tuplet.is_some()
+        || own.abs_diff(ticks) < u64::from(TPQ / 64)
+        || ticks == 0
+        || !ticks.is_multiple_of(u64::from(TPQ / 16))
+    {
+        return vec![e.clone()];
+    }
+    let parts = Duration::decompose(ticks.min(u64::from(TPQ) * 512) as u32);
+    let Some((first, rest)) = parts.split_first() else {
+        return vec![e.clone()];
+    };
+    let mut out = Vec::with_capacity(parts.len());
+    let mut head = e.clone();
+    head.duration = *first;
+    out.push(head);
+    for d in rest {
+        out.push(match &e.kind {
+            EventKind::Chord(notes) => Event::chord(notes.clone(), *d),
+            EventKind::Rest => Event::rest(*d),
+        });
+    }
+    // Every piece but the last is tied on; the last keeps the note's own ties.
+    let n = out.len();
+    for (i, piece) in out.iter_mut().enumerate() {
+        if let EventKind::Chord(notes) = &mut piece.kind {
+            for (k, note) in notes.iter_mut().enumerate() {
+                note.tie = if i + 1 < n {
+                    true
+                } else {
+                    e.notes().get(k).is_some_and(|x| x.tie)
+                };
+            }
+        }
+    }
+    out
+}
+
+/// A `<time>`: beats and beat type. Composite signatures ("3+2" beats, or several
+/// beats/beat-type pairs like 3/8 + 2/8 + 3/4) become one signature of the same length over
+/// the smallest beat (3/8 + 2/8 + 3/4 → 11/8).
+fn time_of(ts: &Element) -> (i64, i64) {
+    let beats: Vec<i64> = ts
+        .children_named("beats")
+        .map(|b| {
+            b.text
+                .split('+')
+                .map(|x| x.trim().parse::<i64>().ok())
+                .sum::<Option<i64>>()
+                .unwrap_or(4)
+        })
+        .collect();
+    let types: Vec<i64> = ts
+        .children_named("beat-type")
+        .map(|b| b.text.trim().parse::<i64>().unwrap_or(4))
+        .collect();
+    if beats.len() <= 1 {
+        return (
+            beats.first().copied().unwrap_or(4),
+            types.first().copied().unwrap_or(4),
+        );
+    }
+    let unit = types
+        .iter()
+        .copied()
+        .filter(|t| *t > 0 && *t <= 64)
+        .max()
+        .unwrap_or(4);
+    // (A sum beyond what a signature holds keeps the first part; the measure grows to fit.)
+    let total = beats
+        .iter()
+        .enumerate()
+        .map(|(i, b)| {
+            let t = types
+                .get(i)
+                .or(types.last())
+                .copied()
+                .filter(|t| *t > 0)
+                .unwrap_or(4);
+            b.saturating_mul(unit / t.min(unit))
+        })
+        .sum();
+    (total, unit)
+}
+
 fn read_layout(root: &Element, score: &mut Score, ours: bool) {
     if let Some(page) =
         misc_field(root, "scoreart-page").and_then(|j| serde_json::from_str::<PageFormat>(j).ok())
@@ -832,6 +922,9 @@ fn read_part(
         let mut graces: HashMap<(usize, u32), Vec<Grace>> = HashMap::new();
         let mut t: u64 = 0;
         let mut last_onset: u64 = 0;
+        // How far the measure reaches with what takes time but is no event (forward, notes
+        // that are not printed).
+        let mut reach: u64 = 0;
 
         for c in &m_el.children {
             match c.name.as_str() {
@@ -882,15 +975,7 @@ fn read_part(
                             info.key = Some(KeySig::new(f as i32));
                         }
                         if let Some(ts) = c.child("time") {
-                            let beats = ts
-                                .child_text("beats")
-                                .and_then(|b| {
-                                    b.split('+')
-                                        .map(|x| x.trim().parse::<i64>().ok())
-                                        .sum::<Option<i64>>()
-                                })
-                                .unwrap_or(4);
-                            let bt = ts.child_num("beat-type").unwrap_or(4.0) as i64;
+                            let (beats, bt) = time_of(ts);
                             if let Ok(mut sig) = TimeSig::new(beats, bt) {
                                 sig.symbol = match ts.attr("symbol") {
                                     Some("common") => TimeSymbol::Common,
@@ -931,7 +1016,14 @@ fn read_part(
                     }
                 }
                 "note" => {
-                    if c.has("cue") {
+                    // Cue notes and notes that are not printed (other programs add them for
+                    // playback, e.g. a written-out trill) take their time but show nothing.
+                    if c.has("cue") || c.attr("print-object") == Some("no") && !c.has("rest") {
+                        if !c.has("chord") && !c.has("grace") {
+                            let d = c.child_num("duration").unwrap_or(0.0).max(0.0) as u64;
+                            t = t.saturating_add(d.saturating_mul(u64::from(TPQ)) / divisions);
+                            reach = reach.max(t);
+                        }
                         continue;
                     }
                     let staff = c
@@ -966,6 +1058,8 @@ fn read_part(
                                     pitches: vec![p],
                                     value,
                                     slash: g.attr("slash") == Some("yes"),
+                                    // Taking time from the note before: a grace after that note.
+                                    after: g.attr("steal-time-previous").is_some(),
                                 });
                             }
                         }
@@ -1095,11 +1189,38 @@ fn read_part(
                         marks.retain(|m| m.id() != "trill");
                     }
                     if is_chord {
-                        if let Some(prev) = raws
-                            .iter_mut()
-                            .rev()
-                            .find(|r| r.staff == staff && r.voice == voice)
+                        // A chord reaching into the other staff of a piano (its notes there say
+                        // <staff>2</staff>): those notes become a chord of their own in that
+                        // staff, at the same time and with the same length.
+                        let here = raws
+                            .iter()
+                            .rposition(|r| r.staff == staff && r.voice == voice && r.onset == onset);
+                        if here.is_none()
+                            && let Some(main) =
+                                raws.iter().rev().find(|r| r.voice == voice && r.onset == onset)
+                            && let Some(n) = note
                         {
+                            let mut event = Event::chord(vec![n], main.event.duration);
+                            event.arpeggio = if arpeggio != Arpeggio::None {
+                                arpeggio
+                            } else {
+                                main.event.arpeggio
+                            };
+                            let ticks = main.ticks;
+                            raws.push(Raw {
+                                staff,
+                                voice,
+                                onset,
+                                ticks,
+                                event,
+                                starts,
+                                stops,
+                            });
+                            continue;
+                        }
+                        let at =
+                            here.or_else(|| raws.iter().rposition(|r| r.staff == staff && r.voice == voice));
+                        if let Some(prev) = at.and_then(|i| raws.get_mut(i)) {
                             if let (Some(n), EventKind::Chord(notes)) = (note, &mut prev.event.kind)
                                 && notes.len() < limits::MAX_CHORD_NOTES
                             {
@@ -1122,7 +1243,7 @@ fn read_part(
                     let mut duration = c
                         .child_text("type")
                         .and_then(NoteValue::from_xml_name)
-                        .map(|v| Duration::new(v, c.children_named("dot").count().min(3) as u8));
+                        .map(|v| Duration::new(v, c.children_named("dot").count().min(4) as u8));
                     if let (Some(d), Some(tm)) = (duration.as_mut(), c.child("time-modification")) {
                         let a = tm.child_num("actual-notes").unwrap_or(1.0) as i64;
                         let n = tm.child_num("normal-notes").unwrap_or(1.0) as i64;
@@ -1167,7 +1288,16 @@ fn read_part(
                         event.set_lyric(verse, Some(clip(&text)));
                     }
                     if let Some(g) = graces.remove(&(staff, voice)) {
-                        event.grace = g;
+                        let (after, before): (Vec<Grace>, Vec<Grace>) = g.into_iter().partition(|g| g.after);
+                        if !after.is_empty()
+                            && let Some(prev) = raws
+                                .iter_mut()
+                                .rev()
+                                .find(|r| r.staff == staff && r.voice == voice)
+                        {
+                            prev.event.grace.extend(after);
+                        }
+                        event.grace = before;
                     }
                     raws.push(Raw {
                         staff,
@@ -1188,6 +1318,7 @@ fn read_part(
                 "forward" => {
                     let d = c.child_num("duration").unwrap_or(0.0).max(0.0) as u64;
                     t = t.saturating_add(d.saturating_mul(u64::from(TPQ)) / divisions);
+                    reach = reach.max(t);
                 }
                 "harmony" => {
                     let staff = c.child_num("staff").map(|s| (s as usize).max(1) - 1).unwrap_or(0);
@@ -1197,6 +1328,14 @@ fn read_part(
                 }
                 "direction" => {
                     let staff = c.child_num("staff").map(|s| (s as usize).max(1) - 1).unwrap_or(0);
+                    // <offset>: the direction sits this many divisions before or after here.
+                    let at = match c.child_num("offset") {
+                        Some(o) if o.is_finite() => {
+                            let d = (o * f64::from(TPQ) / divisions as f64).round() as i64;
+                            (t as i64).saturating_add(d).max(0) as u64
+                        }
+                        _ => t,
+                    };
                     let system_text = c.attr("system") == Some("only-top");
                     let has_tempo = c.path(&["direction-type", "metronome"]).is_some()
                         || c.child("sound").is_some_and(|s| s.attr("tempo").is_some());
@@ -1215,7 +1354,7 @@ fn read_part(
                                             d.name.clone()
                                         };
                                         if let Some(dy) = Dynamic::from_id(&id) {
-                                            pending_dyn.push((staff, t, dy, moved));
+                                            pending_dyn.push((staff, at, dy, moved));
                                         }
                                     }
                                 }
@@ -1277,7 +1416,7 @@ fn read_part(
                                     match k.attr("type") {
                                         Some("crescendo") => dir_marks.push((
                                             staff,
-                                            t,
+                                            at,
                                             DirMark::Start {
                                                 key,
                                                 kind: SpannerKind::Crescendo,
@@ -1287,7 +1426,7 @@ fn read_part(
                                         )),
                                         Some("diminuendo") => dir_marks.push((
                                             staff,
-                                            t,
+                                            at,
                                             DirMark::Start {
                                                 key,
                                                 kind: SpannerKind::Diminuendo,
@@ -1297,7 +1436,7 @@ fn read_part(
                                         )),
                                         Some("stop") => dir_marks.push((
                                             staff,
-                                            t,
+                                            at,
                                             DirMark::Stop {
                                                 key,
                                                 spread: wedge_spread(k),
@@ -1319,7 +1458,7 @@ fn read_part(
                                         // "down": the notes are printed lower than they sound → 8va.
                                         Some("down") => dir_marks.push((
                                             staff,
-                                            t,
+                                            at,
                                             DirMark::Start {
                                                 key,
                                                 kind: SpannerKind::Ottava(oct),
@@ -1329,7 +1468,7 @@ fn read_part(
                                         )),
                                         Some("up") => dir_marks.push((
                                             staff,
-                                            t,
+                                            at,
                                             DirMark::Start {
                                                 key,
                                                 kind: SpannerKind::Ottava(-oct),
@@ -1339,7 +1478,7 @@ fn read_part(
                                         )),
                                         Some("stop") => dir_marks.push((
                                             staff,
-                                            t,
+                                            at,
                                             DirMark::Stop {
                                                 key,
                                                 spread: wedge_spread(k),
@@ -1353,7 +1492,7 @@ fn read_part(
                                     match k.attr("type") {
                                         Some("start") => dir_marks.push((
                                             staff,
-                                            t,
+                                            at,
                                             DirMark::Start {
                                                 key,
                                                 kind: SpannerKind::Pedal,
@@ -1363,7 +1502,7 @@ fn read_part(
                                         )),
                                         Some("stop") => dir_marks.push((
                                             staff,
-                                            t,
+                                            at,
                                             DirMark::Stop {
                                                 key,
                                                 spread: wedge_spread(k),
@@ -1393,7 +1532,7 @@ fn read_part(
                                                 words_here = None;
                                                 dir_marks.push((
                                                     staff,
-                                                    t,
+                                                    at,
                                                     DirMark::Start {
                                                         key,
                                                         kind,
@@ -1405,7 +1544,7 @@ fn read_part(
                                         }
                                         Some("stop") => dir_marks.push((
                                             staff,
-                                            t,
+                                            at,
                                             DirMark::Stop {
                                                 key,
                                                 spread: wedge_spread(k),
@@ -1477,9 +1616,9 @@ fn read_part(
                             }
                         } else {
                             if let Some(p) = words_place {
-                                pending_place.push((staff, t, p));
+                                pending_place.push((staff, at, p));
                             }
-                            pending_text.push((staff, t, w, false));
+                            pending_text.push((staff, at, w, false));
                         }
                     }
                 }
@@ -1593,16 +1732,50 @@ fn read_part(
 
         // A measure shorter than its time signature (pickup, split measure) keeps its length;
         // implicit="yes" leaves it out of the numbering.
-        if first_part {
-            let content = raws.iter().map(|r| r.onset + r.ticks).max().unwrap_or(0);
-            let full = u64::from(score.time_at(mi).measure_ticks());
-            if let Some(info) = score.measures.get_mut(mi) {
-                if content > 0 && content < full {
-                    info.actual = u32::try_from(content).ok();
+        // A measure holding more than its time signature allows (any part) grows to hold it,
+        // as other programs show it, instead of losing notes.
+        // Grace notes with no note after them in the measure end the note before (a trill's
+        // turn): graces after that note.
+        for ((staff, voice), list) in graces.drain() {
+            if let Some(prev) = raws
+                .iter_mut()
+                .rev()
+                .find(|r| r.staff == staff && r.voice == voice)
+            {
+                for mut g in list {
+                    if prev.event.grace.len() < limits::MAX_GRACE {
+                        g.after = true;
+                        prev.event.grace.push(g);
+                    }
                 }
-                if m_el.attr("implicit") == Some("yes") {
-                    info.uncounted = true;
-                }
+            }
+        }
+        // (Only notes count: other programs write a full-measure rest in a pickup.)
+        let content = raws
+            .iter()
+            .map(|r| r.onset + r.ticks)
+            .max()
+            .unwrap_or(0)
+            .max(reach);
+        let notes_end = raws
+            .iter()
+            .filter(|r| !matches!(r.event.kind, scoreart_model::EventKind::Rest))
+            .map(|r| r.onset + r.ticks)
+            .max()
+            .unwrap_or(0);
+        let now = u64::from(score.measure_ticks(mi));
+        let full = u64::from(score.time_at(mi).measure_ticks());
+        if let Some(info) = score.measures.get_mut(mi) {
+            // (Durations of other programs are rounded: a few ticks off is the full measure.)
+            let slack = u64::from(TPQ / 64);
+            if first_part && content > 0 && content + slack < full {
+                info.actual = u32::try_from(content).ok();
+            }
+            if notes_end > now + slack && notes_end <= u64::from(TPQ) * 512 {
+                info.actual = u32::try_from(notes_end).ok();
+            }
+            if first_part && m_el.attr("implicit") == Some("yes") {
+                info.uncounted = true;
             }
         }
         // Group into staves and voices; voice numbers map to indices in ascending order per staff.
@@ -1631,21 +1804,41 @@ fn read_part(
                     .filter(|(_, r)| r.staff == s && r.voice == vn)
                     .collect();
                 items.sort_by_key(|(_, r)| r.onset);
+                // Other programs round durations (a triplet in 256ths of a quarter): a start a
+                // few divisions off a sixteenth or a triplet sixteenth is that position.
+                let tol = (5 * u64::from(TPQ) / divisions.max(1)).min(u64::from(TPQ / 48));
                 for (ri, r) in items {
-                    if r.onset > pos {
-                        for d in Duration::decompose((r.onset - pos).min(u64::from(u32::MAX)) as u32) {
+                    let mut at = r.onset;
+                    if at != pos {
+                        let grid = |g: u64| (at + g / 2) / g * g;
+                        let snap = [grid(u64::from(TPQ / 16)), grid(u64::from(TPQ / 12))]
+                            .into_iter()
+                            .min_by_key(|x| x.abs_diff(at))
+                            .unwrap_or(at);
+                        if pos.abs_diff(at) <= tol {
+                            at = pos;
+                        } else if snap.abs_diff(at) <= tol && snap >= pos {
+                            at = snap;
+                        }
+                    }
+                    if at > pos {
+                        for d in Duration::fill((at - pos).min(u64::from(u32::MAX)) as u32) {
                             v.events.push(Event::rest(d));
                         }
-                        pos = r.onset;
+                        pos = at;
                     }
-                    if r.onset < pos {
+                    if at < pos {
                         continue; // overlapping events in one voice: keep the first
                     }
-                    v.events.push(r.event.clone());
+                    let pieces = split_event(&r.event, r.ticks);
+                    // The voice goes on after what it shows (exact values), not after the
+                    // rounded duration; a longer duration leaves a gap that the next start fills.
+                    let shown: u64 = pieces.iter().map(|e| u64::from(e.ticks())).sum();
+                    v.events.extend(pieces);
                     if let Some(p) = placed.get_mut(ri) {
                         *p = Some((s, vi, pos.min(u64::from(u32::MAX)) as u32));
                     }
-                    pos = pos.saturating_add(r.ticks);
+                    pos = pos.saturating_add(shown);
                     if v.events.len() >= limits::MAX_EVENTS_PER_VOICE {
                         break;
                     }
@@ -1696,11 +1889,12 @@ fn read_part(
                     dy,
                     spread,
                 } => {
+                    // The note nearest to where the line starts (a start placed between notes
+                    // by <offset> belongs to the closer one; the later one on a tie).
                     let tick = onsets
                         .iter()
                         .copied()
-                        .find(|o| *o >= at32)
-                        .or(onsets.last().copied())
+                        .min_by_key(|o| (o.abs_diff(at32), u32::MAX - *o))
                         .unwrap_or(0);
                     open_dir.insert((s, key), (kind, 0, Anchor { measure: mi, tick }, dy, spread));
                 }

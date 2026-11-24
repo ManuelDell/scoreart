@@ -58,6 +58,7 @@ pub const STEM_Y: f32 = 0.168;
 pub fn notehead(v: scoreart_model::NoteValue) -> (char, f32) {
     use scoreart_model::NoteValue::*;
     match v {
+        Long => ('\u{E0A1}', 1.664),
         Breve => (HEAD_DOUBLE_WHOLE, 2.396),
         Whole => (HEAD_WHOLE, 1.688),
         Half => (HEAD_HALF, HEAD_W),
@@ -72,6 +73,8 @@ pub fn flag(beams: u8, up: bool) -> Option<(char, f32)> {
         2 => (('\u{E242}', 1.116), ('\u{E243}', 1.168)),
         3 => (('\u{E244}', 1.044), ('\u{E245}', 1.092)),
         4 => (('\u{E246}', 1.044), ('\u{E247}', 1.092)),
+        5 => (('\u{E248}', 1.044), ('\u{E249}', 1.092)),
+        6 => (('\u{E24A}', 1.056), ('\u{E24B}', 1.196)),
         _ => return None,
     };
     Some(if up { u } else { d })
@@ -80,6 +83,7 @@ pub fn flag(beams: u8, up: bool) -> Option<(char, f32)> {
 pub fn rest(v: scoreart_model::NoteValue) -> (char, f32) {
     use scoreart_model::NoteValue::*;
     match v {
+        Long => ('\u{E4E1}', 0.5),
         Breve => (REST_DOUBLE_WHOLE, 0.504),
         Whole => (REST_WHOLE, 1.132),
         Half => (REST_HALF, 1.132),
@@ -88,6 +92,8 @@ pub fn rest(v: scoreart_model::NoteValue) -> (char, f32) {
         N16th => (REST_16TH, 1.28),
         N32nd => (REST_32ND, 1.452),
         N64th => (REST_64TH, 1.6),
+        N128th => ('\u{E4EA}', 1.94),
+        N256th => ('\u{E4EB}', 2.164),
     }
 }
 
@@ -114,7 +120,7 @@ pub fn head_for(head: scoreart_model::NoteHead, v: scoreart_model::NoteValue) ->
     use scoreart_model::NoteHead::*;
     use scoreart_model::NoteValue::*;
     let open = matches!(v, Half);
-    let whole = matches!(v, Whole | Breve);
+    let whole = matches!(v, Whole | Breve | Long);
     let name = match (head, whole, open) {
         (Normal, _, _) => return notehead(v),
         (X, true, _) => "noteheadXWhole",

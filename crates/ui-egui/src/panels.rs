@@ -422,6 +422,7 @@ fn paint_icon(p: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
 
 pub(crate) fn duration_glyph(v: NoteValue) -> char {
     match v {
+        NoteValue::Long => '\u{ECA1}',
         NoteValue::Breve => '\u{ECA0}',
         NoteValue::Whole => '\u{ECA2}',
         NoteValue::Half => '\u{ECA3}',
@@ -430,6 +431,8 @@ pub(crate) fn duration_glyph(v: NoteValue) -> char {
         NoteValue::N16th => '\u{ECA9}',
         NoteValue::N32nd => '\u{ECAB}',
         NoteValue::N64th => '\u{ECAD}',
+        NoteValue::N128th => '\u{ECAF}',
+        NoteValue::N256th => '\u{ECB1}',
     }
 }
 

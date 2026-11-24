@@ -492,7 +492,41 @@ pub fn sequence(score: &Score) -> Sequence {
                         let sound = |k: u8| (i32::from(k) + shift).clamp(0, 127) as u8;
                         // Grace notes take a little time from the start of the note.
                         let mut start = t + sw_start;
-                        let graces: Vec<_> = e.grace.iter().filter(|g| !g.pitches.is_empty()).collect();
+                        let graces: Vec<_> = e
+                            .grace
+                            .iter()
+                            .filter(|g| !g.pitches.is_empty() && !g.after)
+                            .collect();
+                        // Graces after the note (a trill's turn) take the end of it.
+                        let after: Vec<_> = e
+                            .grace
+                            .iter()
+                            .filter(|g| !g.pitches.is_empty() && g.after)
+                            .collect();
+                        if !after.is_empty() && !e.is_rest() {
+                            let each = (u64::from(TPQ) / 8)
+                                .min(d / (2 * after.len() as u64).max(1))
+                                .max(1);
+                            let mut at = (t + sw_start + d).saturating_sub(each * after.len() as u64);
+                            for g in &after {
+                                for p in &g.pitches {
+                                    seq.notes.push(PlayNote {
+                                        start: at,
+                                        ticks: each,
+                                        key: sound(p.midi()),
+                                        velocity: vel,
+                                        part: pi,
+                                        program,
+                                        tech: Tech {
+                                            ornament: true,
+                                            ..tech
+                                        },
+                                        repeat: 0,
+                                    });
+                                }
+                                at += each;
+                            }
+                        }
                         if !graces.is_empty() && !e.is_rest() {
                             let each = (u64::from(TPQ) / 8)
                                 .min(d / (2 * graces.len() as u64).max(1))

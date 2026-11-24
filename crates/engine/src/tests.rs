@@ -1597,3 +1597,86 @@ fn filling_a_page_keeps_fixed_spacers() {
         assert!(!later.is_empty());
     }
 }
+
+/// Graces after a note (a trill's turn) are played at its end, those before at its start.
+#[test]
+fn graces_after_a_note_play_at_its_end() {
+    let mut s = Session::default();
+    s.execute(
+        "file.new",
+        &json!({ "instruments": ["flute"], "measures": 1, "title": "" }),
+    )
+    .unwrap();
+    s.execute("input.toggle", &json!({})).unwrap();
+    s.execute("input.duration", &json!({ "value": "whole" })).unwrap();
+    s.execute("note.enter", &json!({ "step": "c" })).unwrap();
+    s.execute("input.toggle", &json!({})).unwrap();
+    let e = s.score.parts[0].measures[0].staves[0].voices[0]
+        .events
+        .first_mut()
+        .unwrap();
+    let p = |m: u8| scoreart_model::Pitch::from_midi(i32::from(m), scoreart_model::KeySig::new(0));
+    e.grace = vec![
+        scoreart_model::Grace {
+            pitches: vec![p(74)],
+            value: scoreart_model::NoteValue::N16th,
+            slash: true,
+            after: false,
+        },
+        scoreart_model::Grace {
+            pitches: vec![p(71)],
+            value: scoreart_model::NoteValue::N16th,
+            slash: false,
+            after: true,
+        },
+    ];
+    let seq = scoreart_midi::sequence(&s.score);
+    let at = |k: u8| seq.notes.iter().find(|n| n.key == k).map(|n| n.start).unwrap();
+    assert!(
+        at(74) < u64::from(scoreart_model::TPQ / 4),
+        "before: at the start"
+    );
+    assert!(at(71) >= u64::from(3 * scoreart_model::TPQ), "after: at the end");
+}
+
+/// A line break with a little too much before it: the notes move closer instead of a new
+/// system starting (other programs' system starts come out alike).
+#[test]
+fn a_line_break_squeezes_its_system_before_breaking_it() {
+    let mut s = Session::default();
+    s.execute(
+        "file.new",
+        &json!({ "instruments": ["piano"], "measures": 24, "title": "" }),
+    )
+    .unwrap();
+    s.execute("input.toggle", &json!({})).unwrap();
+    s.execute("input.duration", &json!({ "value": "16th" })).unwrap();
+    for _ in 0..16 * 24 {
+        s.execute("note.enter", &json!({ "step": "c" })).unwrap();
+    }
+    s.execute("input.toggle", &json!({})).unwrap();
+    let per_system = |s: &mut Session| -> Vec<usize> {
+        let l = s.layout();
+        let mut n = std::collections::BTreeMap::new();
+        for b in l.staves.iter().filter(|b| b.part == 0 && b.staff == 0) {
+            *n.entry(b.system).or_insert(0) += 1;
+        }
+        n.into_values().collect()
+    };
+    let natural = per_system(&mut s)[0];
+    // One measure more than fits, then a break.
+    let m = natural;
+    s.execute("select.measure", &json!({ "part": 0, "staff": 0, "measure": m }))
+        .unwrap();
+    s.execute("measure.break", &json!({ "kind": "line" })).unwrap();
+    assert_eq!(per_system(&mut s)[0], natural + 1, "squeezed into one system");
+    // Far too much: broken as usual.
+    s.execute("measure.break", &json!({ "kind": "line" })).unwrap();
+    s.execute(
+        "select.measure",
+        &json!({ "part": 0, "staff": 0, "measure": 2 * natural + 1 }),
+    )
+    .unwrap();
+    s.execute("measure.break", &json!({ "kind": "line" })).unwrap();
+    assert_eq!(per_system(&mut s)[0], natural);
+}

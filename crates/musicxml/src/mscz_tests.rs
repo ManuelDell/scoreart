@@ -773,3 +773,16 @@ fn a_break_on_a_frame_ends_the_measure_before_it() {
     );
     assert_eq!(s.measure_number(1), 1);
 }
+
+#[test]
+fn graces_after_a_note_in_musescore_files() {
+    let xml = MS_RHYTHMS.replacen(
+        "<Chord><durationType>quarter</durationType><Note><pitch>64</pitch>",
+        "<Chord><durationType>16th</durationType><grace16after/><Note><pitch>62</pitch><tpc>16</tpc></Note></Chord><Chord><durationType>quarter</durationType><Note><pitch>64</pitch>",
+        1,
+    );
+    let s = from_bytes(xml.as_bytes()).unwrap();
+    let g = &s.voice(0, 0, 0, 0).unwrap().events[0].grace;
+    assert_eq!(g.len(), 1);
+    assert!(g[0].after && g[0].value == scoreart_model::NoteValue::N16th);
+}

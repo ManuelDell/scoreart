@@ -187,14 +187,15 @@ impl Default for TimeSig {
 }
 
 impl TimeSig {
-    /// A time signature with sane bounds: 1–32 beats, beat type a power of two 1–32.
+    /// A time signature with sane bounds: 1–128 beats, beat type a power of two 1–64
+    /// (other programs write signatures like 126/4 or 64/16).
     pub fn new(beats: i64, beat_type: i64) -> Result<TimeSig> {
-        if !(1..=32).contains(&beats) {
-            return Err(Error::Invalid(format!("beats {beats} (1–32)")));
+        if !(1..=128).contains(&beats) {
+            return Err(Error::Invalid(format!("beats {beats} (1–128)")));
         }
-        if ![1, 2, 4, 8, 16, 32].contains(&beat_type) {
+        if ![1, 2, 4, 8, 16, 32, 64].contains(&beat_type) {
             return Err(Error::Invalid(format!(
-                "beat type {beat_type} (1, 2, 4, 8, 16, 32)"
+                "beat type {beat_type} (1, 2, 4, 8, 16, 32, 64)"
             )));
         }
         Ok(TimeSig {
@@ -1263,7 +1264,7 @@ impl Score {
             .get(measure)
             .and_then(|i| i.actual)
             .filter(|t| *t > 0)
-            .map(|t| t.min(TPQ * 64))
+            .map(|t| t.min(TPQ * 512))
             .unwrap_or_else(|| self.time_at(measure).measure_ticks())
     }
 
@@ -1556,7 +1557,7 @@ fn fit_voice(v: &mut Voice, len: u32, _primary: bool) {
         } else {
             // Cut the overflowing event to what still fits.
             let room = len.saturating_sub(t);
-            for piece in Duration::decompose(room) {
+            for piece in Duration::fill(room) {
                 let mut cut = e.clone();
                 cut.duration = piece;
                 t += piece.ticks();
@@ -1566,7 +1567,7 @@ fn fit_voice(v: &mut Voice, len: u32, _primary: bool) {
         }
     }
     if t < len {
-        for piece in Duration::decompose(len - t) {
+        for piece in Duration::fill(len - t) {
             keep.push(Event::rest(piece));
         }
     }

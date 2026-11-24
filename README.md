@@ -62,7 +62,7 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   - **lines**: slurs, crescendo/diminuendo hairpins and cresc./dim. lines, 8va/8vb/15ma/15mb/
     22ma/22mb (notes are displaced on screen, sound at pitch), pedal, trill and vibrato lines,
     let ring, palm mute, straight and wavy glissandos — drawn across system breaks;
-  - **grace notes** (acciaccatura, appoggiatura, 16th, 32nd), single-note **tremolos** (1–4
+  - **grace notes** (acciaccatura, appoggiatura, 16th, 32nd; before or after the note), single-note **tremolos** (1–4
     strokes, buzz roll), **arpeggios** (normal, up, down, bracket), **noteheads** (x, diamond,
     slash, triangle, circle-x, cross, circled, parenthesised);
   - **repeats and jumps**: voltas, segno, coda, varied coda, Fine, To Coda, D.C., D.S. and their
@@ -113,6 +113,13 @@ project, not affiliated with ArtCraft / storytold or with MuseScore / Muse Group
   read and written with odd/even margins and the title page as credits, and ScoreArt writes where
   each of its systems and pages starts, so MuseScore shows the same lines and pages (ScoreArt
   itself keeps only the user's breaks when it opens such a file).
+- **MusicXML of other programs** — Finale, Sibelius, Dorico, MuseScore, Noteflight, music21 and
+  the MusicXML test suite, checked note by note on several hundred files: composite time
+  signatures (3/8+2/8+3/4), overfull measures (they grow instead of losing notes), chords
+  across both piano staves, cue and hidden playback notes, rounded tuplet durations, longa,
+  128th and 256th notes, four dots, graces after a note (a trill's turn, also from MuseScore
+  files), lines placed with `<offset>`; the system starts of the file are kept, squeezing a
+  line a little rather than breaking it again.
 - **Texts as tagged blocks**: title, subtitle, composer, lyricist, copyright (foot of the first
   page), **headings** and **text blocks** between the systems, **headers**, **footers** and page
   numbers (from page 2). Each is a block of its kind that the hand picks up and moves freely;
