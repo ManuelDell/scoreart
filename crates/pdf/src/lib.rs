@@ -16,6 +16,7 @@
 mod alternates;
 mod collect;
 mod fonts;
+mod lily;
 mod recognize;
 
 pub use recognize::{Recognition, recognize};

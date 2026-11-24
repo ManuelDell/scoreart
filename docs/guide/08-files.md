@@ -35,7 +35,7 @@ When you open a PDF, ScoreArt asks what to do with it:
   compare. Measures ScoreArt was unsure about are listed at the top of the panel.
 
 Converting works with PDFs that **notation programs wrote** — MuseScore, Sibelius, Finale,
-Dorico and ScoreArt itself — because their PDFs still contain the music font's symbols and the
+Dorico, LilyPond and ScoreArt itself — because their PDFs still contain the music font's symbols and the
 staff lines. **Scanned** sheet music (photos or scans of paper) is just a picture and cannot be
 converted yet. Always check the result against the PDF: ScoreArt gets most notes right, but
 unusual notation can come out wrong.

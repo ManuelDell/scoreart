@@ -38,7 +38,7 @@ Wenn du ein PDF öffnest, fragt ScoreArt, was damit geschehen soll:
   war, stehen oben in der Leiste.
 
 Das Umwandeln klappt mit PDFs, die **Notenprogramme erzeugt** haben — MuseScore, Sibelius,
-Finale, Dorico und ScoreArt selbst —, denn in diesen PDFs stecken noch die Zeichen der
+Finale, Dorico, LilyPond und ScoreArt selbst —, denn in diesen PDFs stecken noch die Zeichen der
 Notenschrift und die Notenlinien. **Eingescannte** Noten (Fotos oder Scans von Papier) sind
 nur ein Bild und lassen sich noch nicht umwandeln. Vergleiche das Ergebnis immer mit dem PDF:
 ScoreArt erkennt die meisten Noten richtig, ungewöhnliche Notation kann aber falsch herauskommen.

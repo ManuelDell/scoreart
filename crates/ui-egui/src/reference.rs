@@ -47,7 +47,7 @@ pub(crate) fn dialog(app: &mut ScoreApp, ctx: &egui::Context) {
         let tk = Tokens::get(ui.ctx());
         ui.label(
             RichText::new(t(
-                "Converting works with PDFs that notation programs wrote (MuseScore, Sibelius, Finale, Dorico, ScoreArt). Scanned pages cannot be converted yet. Always check the result against the PDF.",
+                "Converting works with PDFs that notation programs wrote (MuseScore, Sibelius, Finale, Dorico, LilyPond, ScoreArt). Scanned pages cannot be converted yet. Always check the result against the PDF.",
             ))
             .color(tk.text_dim)
             .size(12.0),

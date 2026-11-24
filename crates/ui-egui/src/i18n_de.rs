@@ -256,8 +256,8 @@ pub const DE: &[(&str, &str)] = &[
         "{} umgewandelt: {} Takte, unsicher bei Takt {}",
     ),
     (
-        "Converting works with PDFs that notation programs wrote (MuseScore, Sibelius, Finale, Dorico, ScoreArt). Scanned pages cannot be converted yet. Always check the result against the PDF.",
-        "Das Umwandeln klappt mit PDFs, die Notenprogramme erzeugt haben (MuseScore, Sibelius, Finale, Dorico, ScoreArt). Eingescannte Seiten lassen sich noch nicht umwandeln. Vergleiche das Ergebnis immer mit dem PDF.",
+        "Converting works with PDFs that notation programs wrote (MuseScore, Sibelius, Finale, Dorico, LilyPond, ScoreArt). Scanned pages cannot be converted yet. Always check the result against the PDF.",
+        "Das Umwandeln klappt mit PDFs, die Notenprogramme erzeugt haben (MuseScore, Sibelius, Finale, Dorico, LilyPond, ScoreArt). Eingescannte Seiten lassen sich noch nicht umwandeln. Vergleiche das Ergebnis immer mit dem PDF.",
     ),
     (
         "Copy, change and share the samples, also commercially.",

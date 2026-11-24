@@ -32,7 +32,8 @@ every other notation program understands.
 - 🔄 **Open what you already have** — files from **MuseScore** (2, 3 and 4), **Sibelius**,
   **Finale**, **Dorico** and other programs (via MusicXML), and MIDI files.
 - 📄 **PDF in and out** — export every page as PDF; open a PDF to keep it next to your score,
-  or let ScoreArt turn a PDF from a notation program back into an editable score.
+  or let ScoreArt turn a PDF from a notation program (MuseScore, Sibelius, Finale, Dorico,
+  LilyPond …) back into an editable score.
 - 🌍 **English and German** interface.
 - 💸 **Free forever**, no account, no subscription, no tracking.
 

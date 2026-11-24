@@ -72,10 +72,11 @@ fn lines(segs: &[Seg]) -> Vec<(f32, f32, f32)> {
     hs.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
     let mut out: Vec<(f32, f32, f32)> = Vec::new();
     for h in hs {
+        // Pieces of one line (sorted by height): look back over all lines at this height.
         if let Some(last) = out
             .iter_mut()
             .rev()
-            .take(8)
+            .take_while(|l| h.0 - l.0 < 0.3)
             .find(|l| (l.0 - h.0).abs() < 0.3 && h.1 <= l.2 + 3.0 && h.2 >= l.1 - 3.0)
         {
             last.1 = last.1.min(h.1);
@@ -118,9 +119,18 @@ fn staves(lines: &[(f32, f32, f32)]) -> Vec<Staff> {
                     .filter(|x| !picked.contains(x))
                     .min_by(|x, y| (lines[*x].0 - want).abs().total_cmp(&(lines[*y].0 - want).abs()))
                 {
-                    Some(x) if (lines[x].0 - want).abs() < d * 0.15 => picked.push(x),
+                    Some(x) if (lines[x].0 - want).abs() < d * 0.3 => picked.push(x),
                     _ => continue 'cand,
                 }
+            }
+            // Evenly spaced: a line drawn a little off (rounding) is fine, a stray line is not.
+            let ys: Vec<f32> = picked.iter().map(|p| lines[*p].0).collect();
+            let gaps: Vec<f32> = ys.windows(2).map(|w| w[1] - w[0]).collect();
+            let (lo, hi) = gaps
+                .iter()
+                .fold((f32::MAX, f32::MIN), |(l, h), g| (l.min(*g), h.max(*g)));
+            if !(lo > 0.0 && hi < lo * 1.3) {
+                continue 'cand;
             }
             for p in &picked {
                 used[*p] = true;
@@ -231,6 +241,10 @@ struct Reader {
     key: KeySig,
     time: Option<TimeSig>,
     tempo: Option<Tempo>,
+    /// Staves per system of the score (from its first system).
+    score_staves: Option<usize>,
+    /// Pages after the score hold the instruments' parts: reading stopped there.
+    parts_follow: bool,
 }
 
 fn near(a: f32, b: f32, tol: f32) -> bool {
@@ -239,6 +253,9 @@ fn near(a: f32, b: f32, tol: f32) -> bool {
 
 impl Reader {
     fn page(&mut self, page: &PageContent) {
+        if self.parts_follow {
+            return;
+        }
         let all = staves(&lines(&page.segs));
         if all.is_empty() {
             return;
@@ -252,7 +269,31 @@ impl Reader {
                 g: g.clone(),
             })
             .collect();
-        let text: Vec<&Glyph> = page.glyphs.iter().filter(|g| !is_music(g)).collect();
+        let mut elems = elems;
+        // A small "8" in a text font right under a treble clef (LilyPond) belongs to the clef.
+        let clefs: Vec<Glyph> = elems
+            .iter()
+            .filter(|e| e.sym == Sym::Clef(crate::fonts::ClefSym::G))
+            .map(|e| e.g.clone())
+            .collect();
+        let under_clef = |g: &Glyph| {
+            g.ch == Some('8')
+                && clefs.iter().any(|c| {
+                    let sp = (c.by1 - c.by0) / 7.0;
+                    g.cx() > c.bx0 && g.cx() < c.bx1 && g.by0 > c.by1 - 1.5 * sp && g.by0 < c.by1 + sp
+                })
+        };
+        for g in page.glyphs.iter().filter(|g| !is_music(g) && under_clef(g)) {
+            elems.push(Elem {
+                sym: Sym::TimeDigit(8),
+                g: g.clone(),
+            });
+        }
+        let text: Vec<&Glyph> = page
+            .glyphs
+            .iter()
+            .filter(|g| !is_music(g) && !under_clef(g))
+            .collect();
         // Systems: neighbouring staves joined by a vertical line or a brace.
         let joined =
             |a: &Staff, b: &Staff| {
@@ -275,6 +316,16 @@ impl Reader {
                 Some(g) if g.last().is_some_and(|l| joined(l, &s)) => g.push(s),
                 _ => groups.push(vec![s]),
             }
+        }
+        // A score followed by its parts in one file: once a whole page has only single staves
+        // (and more than one) after a score of several, the parts begin.
+        match self.score_staves {
+            Some(k) if k > 1 && groups.len() > 1 && groups.iter().all(|g| g.len() == 1) => {
+                self.parts_follow = true;
+                return;
+            }
+            None => self.score_staves = groups.first().map(Vec::len),
+            _ => {}
         }
         for g in groups {
             self.system(g, page, &elems, &text);
@@ -609,7 +660,17 @@ impl Reader {
                 continue; // a courtesy clef before the next system or measure
             }
             if let Sym::Clef(c) = e.sym {
+                // A small "8" drawn under the clef as a glyph of its own (LilyPond) makes an
+                // octave clef too.
+                let eight_below = es.iter().any(|d| {
+                    d.sym == Sym::TimeDigit(8)
+                        && d.g.cx() > e.g.bx0
+                        && d.g.cx() < e.g.bx1
+                        && d.g.cy() > e.g.by1 - 0.5 * sp
+                        && d.g.cy() < e.g.by1 + 2.0 * sp
+                });
                 let clef = match c {
+                    ClefSym::G if eight_below => Clef::Treble8vb,
                     ClefSym::G | ClefSym::G8va => Clef::Treble,
                     ClefSym::G8vb => Clef::Treble8vb,
                     ClefSym::F | ClefSym::F8vb => Clef::Bass,
@@ -687,6 +748,8 @@ impl Reader {
         let digits: Vec<&&Elem> = es
             .iter()
             .filter(|e| matches!(e.sym, Sym::TimeDigit(_)) && e.g.cx() < first_note_x)
+            // Inside the staff: an "8" under a clef is no time signature.
+            .filter(|e| e.g.cy() > st.top - 0.3 * sp && e.g.cy() < st.bottom() + 0.3 * sp)
             .collect();
         if let Some(e) = es
             .iter()
@@ -988,6 +1051,11 @@ impl Reader {
     /// The score from the systems.
     fn build(self, title: Titles) -> Recognition {
         let mut notes = Vec::new();
+        if self.parts_follow {
+            notes.push(
+                "The pages after the score hold the instruments' parts; only the score was read.".into(),
+            );
+        }
         let n = self
             .systems
             .iter()

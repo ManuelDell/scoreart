@@ -139,9 +139,11 @@ pub(crate) struct PageContent {
     pub curves: Vec<Curve>,
 }
 
-struct Recorder {
+struct Recorder<'l> {
     page: PageContent,
     count: usize,
+    /// The glyphs of LilyPond's music fonts, found by character code and width.
+    lily: &'l crate::lily::LilyGlyphs,
 }
 
 fn subpaths(path: &BezPath) -> Vec<(Vec<Point>, bool, bool)> {
@@ -191,7 +193,7 @@ fn bbox(pts: &[Point]) -> (f32, f32, f32, f32) {
         })
 }
 
-impl Recorder {
+impl Recorder<'_> {
     fn full(&mut self) -> bool {
         self.count += 1;
         self.count > MAX_ITEMS
@@ -207,8 +209,15 @@ impl Recorder {
                 continue;
             }
             let (w, h) = (x1 - x0, y1 - y0);
+            // The outline of a closed shape (LilyPond strokes each filled beam and barline
+            // round its edge, for rounded corners): a thin one is a line, a wide one only
+            // repeats the filled shape — its edges are no lines of their own.
+            let outline = stroke_w.is_some() && closed && pts.len() > 2;
+            if outline && w.min(h) >= 1.3 {
+                continue;
+            }
             match stroke_w {
-                Some(sw) if !curved => {
+                Some(sw) if !curved && !outline => {
                     for p in pts.windows(2) {
                         self.page.segs.push(Seg {
                             x0: p[0].x as f32,
@@ -289,7 +298,7 @@ fn scale_of(t: &Affine) -> f32 {
     ((a * d - b * c).abs().sqrt()) as f32
 }
 
-impl<'a> Device<'a> for Recorder {
+impl<'a> Device<'a> for Recorder<'_> {
     fn draw_path(&mut self, path: &BezPath, props: DrawProps<'a>, mode: &DrawMode) {
         let p = props.transform * path.clone();
         let sw = match mode {
@@ -306,17 +315,29 @@ impl<'a> Device<'a> for Recorder {
                 return;
             }
             let t = props.transform * g.transform();
+            let mut lily = None;
             let (font, rect) = match &**g {
                 HGlyph::Outline(o) => {
-                    let name = o.font_data().and_then(|f| f.postscript_name).unwrap_or_default();
+                    let data = o.font_data();
+                    if data.is_none() && !self.lily.is_empty() {
+                        lily = self.lily.get(o.char_code(), o.advance_width());
+                    }
+                    let name = data.and_then(|f| f.postscript_name).unwrap_or_default();
                     (name, (t * o.outline()).bounding_box())
                 }
                 HGlyph::Type3(_) => (String::new(), Rect::ZERO),
             };
-            let ch = g.as_unicode().and_then(|u| match u {
-                hayro::hayro_interpret::hayro_cmap::BfString::Char(c) => Some(c),
-                _ => None,
+            let ch = lily.or_else(|| {
+                g.as_unicode().and_then(|u| match u {
+                    hayro::hayro_interpret::hayro_cmap::BfString::Char(c) => Some(c),
+                    _ => None,
+                })
             });
+            let font = if lily.is_some() {
+                "Emmentaler".to_string()
+            } else {
+                font
+            };
             let origin = t * Point::ZERO;
             // Outlines are in thousandths of an em.
             let size = scale_of(&t) * 1000.0;
@@ -346,6 +367,7 @@ impl<'a> Device<'a> for Recorder {
 pub(crate) fn collect(doc: &PdfDoc) -> Vec<PageContent> {
     let pdf = doc.pdf();
     let pages = pdf.pages();
+    let lily = crate::lily::glyphs(doc);
     let mut out = Vec::new();
     for page in pages.iter().take(crate::MAX_PAGES) {
         let (w, h) = page.render_dimensions();
@@ -364,6 +386,7 @@ pub(crate) fn collect(doc: &PdfDoc) -> Vec<PageContent> {
                 ..PageContent::default()
             },
             count: 0,
+            lily: &lily,
         };
         interpret_page(page, &mut ctx, &mut rec);
         // Text drawn twice at the same place (bold made by overprinting) counts once.

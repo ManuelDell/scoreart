@@ -84,7 +84,11 @@ rasterizer in Rust that also runs in the browser. It does two things:
      staves of the system; they cut the system into measures;
   3. glyphs are classified by their SMuFL code point (Bravura, Leland, Petaluma … — Bravura's
      optional alternates are mapped back to their base glyph) or, for the older fonts with the
-     Sonata keyboard layout (Opus in Sibelius, Maestro in Finale), by their character;
+     Sonata keyboard layout (Opus in Sibelius, Maestro in Finale), by their character; LilyPond
+     embeds its font (Emmentaler) without Unicode values, but the font's encoding names every
+     glyph it uses (`noteheads.s2`, `clefs.G` …) — these names, documented in the LilyPond
+     manual's list of Emmentaler glyphs, are read from the PDF (`crates/pdf/src/lily.rs`) and a
+     drawn glyph is found again by its character code and width;
   4. per measure and staff: clef, key signature (sharps in the order F C G D A E B, flats
      B E A D G C F), time signature; noteheads become chords by their stems; the duration
      comes from the head, flags or the beams crossing the stem, and dots; accidentals carry
@@ -94,13 +98,16 @@ rasterizer in Rust that also runs in the browser. It does two things:
 
   Measures whose content does not add up are reported as *uncertain*. Scanned PDFs (pictures of
   paper) contain no glyphs; they are refused with a message — optical music recognition is on
-  the roadmap. LilyPond PDFs draw their symbols without Unicode values and are not read yet.
+  the roadmap.
 
 How well it works, measured on PDFs exported from the 234 public-domain songs of the OpenScore
 Lieder corpus (each PDF converted back and compared note by note with the score it came from):
 85 % of notes exact in pitch, onset and length, 90 % right in pitch. On the eNote scorewriter
 comparison, the PDFs written by MuseScore, Sibelius, Finale and Dorico themselves come back with
-80–100 % of the notes right in most test files. The repository's tests convert ScoreArt's own
+80–100 % of the notes right in most test files. LilyPond PDFs from the Mutopia Project, compared
+with the MIDI file published with each piece (pitches in time order, so repeats written out in
+the MIDI count against it): about 73 % of the MIDI's notes found and 78 % of the notes read
+confirmed over 52 pieces; simple pieces come back almost completely. The repository's tests convert ScoreArt's own
 PDFs back without a single wrong note (`crates/engine/src/tests.rs`, `pdf_*`).
 
 ## How compatibility is tested

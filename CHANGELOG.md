@@ -8,6 +8,9 @@
   Finale, Dorico, ScoreArt — is read back into an editable score (staves, clefs, keys, times,
   notes, rests, voices, ties, slurs, lyrics, dynamics, titles); measures it is unsure about are
   listed. The command line converts too: `scoreart-cli convert score.pdf score.musicxml`.
+- **LilyPond PDFs** are converted too: the glyph names of its music font are read from the
+  PDF; octave-treble clefs with the "8" as a separate glyph, older LilyPond fonts, beams drawn
+  with outlines and scores followed by their parts in the same file are handled.
 
 ## 0.1.0 — 2026-11-24
 
