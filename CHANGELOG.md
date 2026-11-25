@@ -17,6 +17,11 @@
   set as close as MuseScore sets them (least distance from staff to staff, more only where
   lyrics and chord symbols would touch), chord symbols just above the staff, lyrics 3 spaces
   below it, and lines no longer squeezed so far that lyrics overlap.
+- **Overlaps marked in red** on the screen (never printed), counted in the status bar,
+  switchable under *View → Overlaps*: texts, lyrics, chord symbols, rehearsal marks, dynamics
+  and notes that run into each other. Fixed on the way: dynamics of sung staves go above the
+  staff, staves inside a system keep lyrics clear of the next staff, a clef change at the end
+  of a MuseScore measure holds from the next one.
 - **Layout settings in ScoreArt**: instrument names (full/short/none, first and other
   systems), naming a single instrument and German chord names in the page settings; *Blank
   space…* after a system; rehearsal marks, segno/coda and jumps dragged with the hand (and

@@ -2459,6 +2459,18 @@ fn tab_view(app: &mut ScoreApp, ui: &mut Ui) {
         }
         if big(
             ui,
+            Ico::Overlap,
+            t("Overlaps"),
+            app.show_collisions,
+            true,
+            t("Mark overlapping texts, marks and notes in red (only on the screen, never printed)"),
+        )
+        .clicked()
+        {
+            app.set_show_collisions(!app.show_collisions);
+        }
+        if big(
+            ui,
             Ico::Original,
             t("PDF"),
             app.reference.show && app.session.reference.is_some(),

@@ -496,6 +496,9 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
             }
         }
         let mut clef_now: Option<Clef> = None;
+        // A clef later in a measure (MuseScore puts the change before the next measure at the
+        // end of the one before): it holds from the next measure on.
+        let mut clef_next: Option<Clef> = None;
         for (mi, m_el) in st
             .children_named("Measure")
             .enumerate()
@@ -569,6 +572,9 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                 }
             }
             let mut pm_staff = StaffMeasure::default();
+            if let Some(c) = clef_next.take() {
+                pm_staff.clef = Some(c);
+            }
             let mut voices_el: Vec<&Element> = m_el.children_named("voice").collect();
             // MuseScore 2-style measures put the content directly in <Measure>.
             if voices_el.is_empty() {
@@ -609,8 +615,10 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                                 {
                                     *slot = clef;
                                 }
-                            } else if t == 0 && clef_now != Some(clef) && vi == 0 {
+                            } else if t == 0 && vi == 0 && clef_now != Some(clef) {
                                 pm_staff.clef = Some(clef);
+                            } else if t > 0 && vi == 0 && clef_now != Some(clef) {
+                                clef_next = Some(clef);
                             }
                             clef_now = Some(clef);
                         }

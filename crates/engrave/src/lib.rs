@@ -13,6 +13,7 @@
     clippy::unreachable
 )]
 
+mod collide;
 pub mod glyphs;
 mod layout;
 mod serif;
@@ -335,6 +336,17 @@ pub struct Layout {
     pub staves: Vec<StaffBox>,
     /// Marks for the editor only (not printed): breaks and spacers.
     pub marks: Vec<Mark>,
+    /// Places where things overlap (texts, lyrics, chord symbols, marks, notes), for the
+    /// editor to point out; never printed.
+    pub collisions: Vec<Collision>,
+}
+
+/// Two boxes that overlap on a page: `a` and `b` as (x0, y0, x1, y1) in staff spaces.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Collision {
+    pub page: usize,
+    pub a: [f32; 4],
+    pub b: [f32; 4],
 }
 
 /// A mark the editor shows on the page but that is not printed (as MuseScore shows its layout

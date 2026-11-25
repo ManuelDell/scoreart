@@ -249,6 +249,10 @@ pub fn menu_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         app.set_zoom(7.5);
                     }
                     ui.separator();
+                    let mut overlaps = app.show_collisions;
+                    if ui.checkbox(&mut overlaps, t("Mark overlaps in red")).clicked() {
+                        app.set_show_collisions(overlaps);
+                    }
                     let mut pdf = app.reference.show && app.session.reference.is_some();
                     if ui
                         .add_enabled(
@@ -640,6 +644,12 @@ pub fn status_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 .inner_margin(egui::Margin::symmetric(10, 0)),
         )
         .show(ui, |ui| {
+            let overlaps = if app.show_collisions {
+                app.session.layout().collisions.len()
+            } else {
+                0
+            };
+            let mut hide_overlaps = false;
             ui.horizontal_centered(|ui| {
                 let s = &app.session;
                 let mode = if s.input.active {
@@ -673,6 +683,21 @@ pub fn status_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                             .color(tk.text_dim),
                     );
                     ui.separator();
+                    if overlaps > 0 {
+                        let label = if overlaps == 1 {
+                            t("1 overlap").to_string()
+                        } else {
+                            tf("{} overlaps", &[&overlaps])
+                        };
+                        if ui
+                            .add(egui::Label::new(RichText::new(format!("⚠ {label}")).color(COLLISION_RED)).sense(egui::Sense::click()))
+                            .on_hover_text(t("Texts, marks or notes overlap where the score is marked red. Click to stop marking them (View → Overlaps)."))
+                            .clicked()
+                        {
+                            hide_overlaps = true;
+                        }
+                        ui.separator();
+                    }
                     ui.label(
                         RichText::new({
                             let (m, p) = (s.score.measures.len(), s.score.parts.len());
@@ -687,8 +712,14 @@ pub fn status_bar(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     );
                 });
             });
+            if hide_overlaps {
+                app.set_show_collisions(false);
+            }
         });
 }
+
+/// The colour that marks overlaps.
+pub(crate) const COLLISION_RED: Color32 = Color32::from_rgb(0xD0, 0x1E, 0x1E);
 
 // ---------- palette ----------
 

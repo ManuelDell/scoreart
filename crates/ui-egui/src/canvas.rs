@@ -825,6 +825,22 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     painter.rect_filled(r, 3.0, tk.accent.linear_multiply(0.12));
                     painter.rect_stroke(r, 3.0, Stroke::new(1.2, tk.accent), egui::StrokeKind::Outside);
                 }
+                // Overlaps: both boxes tinted, where they meet stronger (never printed).
+                if app.show_collisions {
+                    let red = crate::panels::COLLISION_RED;
+                    for c in layout.collisions.iter().filter(|c| c.page == pi) {
+                        for b in [c.a, c.b] {
+                            let r = Rect::from_min_max(map(b[0], b[1]), map(b[2], b[3]));
+                            painter.rect_filled(r, 1.0, red.linear_multiply(0.12));
+                            painter.rect_stroke(r, 1.0, Stroke::new(1.0, red.linear_multiply(0.8)), egui::StrokeKind::Outside);
+                        }
+                        let (x0, y0) = (c.a[0].max(c.b[0]), c.a[1].max(c.b[1]));
+                        let (x1, y1) = (c.a[2].min(c.b[2]), c.a[3].min(c.b[3]));
+                        if x1 > x0 && y1 > y0 {
+                            painter.rect_filled(Rect::from_min_max(map(x0, y0), map(x1, y1)), 0.0, red.linear_multiply(0.35));
+                        }
+                    }
+                }
                 // Breaks and spacers: editor-only signs, never printed.
                 for m in layout.marks.iter().filter(|m| m.page == pi) {
                     paint_layout_mark(&painter, m, &map, zoom, tk.accent);

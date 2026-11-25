@@ -278,3 +278,20 @@ fn small_staves_are_smaller() {
         Pitch::new(Step::B, 0, 4).diatonic()
     );
 }
+
+#[test]
+fn overlaps_are_found() {
+    let mut s = melody();
+    let l = layout(&s, &Style::default());
+    assert!(l.collisions.is_empty(), "a clean page: {:?}", l.collisions);
+    // A rehearsal mark dragged down onto the notes of measure 2.
+    s.measures[1].rehearsal = Some("Verse".into());
+    s.measures[1].rehearsal_place = Some(Placement::from_sp(1.0, 3.0, false));
+    let l = layout(&s, &Style::default());
+    assert!(!l.collisions.is_empty());
+    let c = l.collisions[0];
+    assert_eq!(c.page, 0);
+    // Its text inside its own frame is no overlap.
+    s.measures[1].rehearsal_place = None;
+    assert!(layout(&s, &Style::default()).collisions.is_empty());
+}

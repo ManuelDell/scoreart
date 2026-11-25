@@ -10,6 +10,7 @@ pub const DE: &[(&str, &str)] = &[
     (" semitones", " Halbtöne"),
     ("(by instrument)", "(nach Instrument)"),
     ("(remove the change)", "(Wechsel entfernen)"),
+    ("1 overlap", "1 Überschneidung"),
     ("128th", "Hundertachtundzwanzigstel"),
     ("15ma alta", "15ma alta"),
     ("15ma bassa", "15ma bassa"),
@@ -625,6 +626,11 @@ pub const DE: &[(&str, &str)] = &[
     ("Marcato", "Marcato"),
     ("Margins", "Ränder"),
     (
+        "Mark overlapping texts, marks and notes in red (only on the screen, never printed)",
+        "Sich überschneidende Texte, Zeichen und Noten rot markieren (nur am Bildschirm, nie im Druck)",
+    ),
+    ("Mark overlaps in red", "Überschneidungen rot markieren"),
+    (
         "Max. staff distance (justified)",
         "Max. Notensystemabstand (ausgerichtet)",
     ),
@@ -781,6 +787,7 @@ pub const DE: &[(&str, &str)] = &[
     ("Organ", "Orgel"),
     ("Orientation", "Ausrichtung"),
     ("Ornaments", "Verzierungen"),
+    ("Overlaps", "Überschneidungen"),
     ("Own instrument …", "Eigenes Instrument …"),
     ("PDF", "PDF"),
     ("PDF (.pdf)", "PDF (.pdf)"),
@@ -1108,6 +1115,10 @@ pub const DE: &[(&str, &str)] = &[
     ("Text styles", "Textstile"),
     ("Texts", "Texte"),
     (
+        "Texts, marks or notes overlap where the score is marked red. Click to stop marking them (View → Overlaps).",
+        "Wo die Partitur rot markiert ist, überschneiden sich Texte, Zeichen oder Noten. Klicken, um die Markierung abzuschalten (Ansicht → Überschneidungen).",
+    ),
+    (
         "That is the whole library: {}.",
         "Das ist die ganze Bibliothek: {}.",
     ),
@@ -1353,6 +1364,7 @@ pub const DE: &[(&str, &str)] = &[
     ("{} measure · {} instruments", "{} Takt · {} Instrumente"),
     ("{} measures · {} instrument", "{} Takte · {} Instrument"),
     ("{} measures · {} instruments", "{} Takte · {} Instrumente"),
+    ("{} overlaps", "{} Überschneidungen"),
     ("{} staves", "{} Systeme"),
     ("{} · {}: {}/{} files, {} MB", "{} · {}: {}/{} Dateien, {} MB"),
     (

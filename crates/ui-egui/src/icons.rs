@@ -76,6 +76,8 @@ pub enum Ico {
     PageNumber,
     /// An original (PDF) beside the score: two pages side by side.
     Original,
+    /// Overlaps: two boxes over each other.
+    Overlap,
 }
 
 /// Paints `ico` centred in `rect`, scaled to the smaller side.
@@ -535,6 +537,11 @@ pub fn paint(p: &Painter, rect: Rect, ico: Ico, color: Color32) {
             for y in [10.0, 12.5] {
                 line(&[(8.0, y), (16.0, y)]);
             }
+        }
+        Ico::Overlap => {
+            rect_s(3.0, 5.0, 11.0, 9.0);
+            rect_s(10.0, 10.0, 11.0, 9.0);
+            rect_f(10.0, 10.0, 4.0, 4.0);
         }
         Ico::Original => {
             rect_s(2.5, 4.0, 9.0, 16.0);

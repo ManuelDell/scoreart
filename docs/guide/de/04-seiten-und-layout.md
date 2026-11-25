@@ -48,6 +48,14 @@ Steht vor einem Zeilenumbruch etwas mehr Musik, als in die Zeile passt, rückt S
 Noten etwas zusammen, statt die Zeile noch einmal zu teilen — so enden die Zeilen dort, wo du
 es willst.
 
+## Überschneidungen
+
+Wo Texte, Liedtext, Akkordsymbole, Studierzeichen, Dynamik oder Noten ineinanderlaufen, markiert
+ScoreArt beide **rot**, und die Statusleiste zählt sie („⚠ 3 Überschneidungen“) — so geht eine
+gedrängte Stelle vor dem Drucken nicht unter. Die Markierung gibt es nur am Bildschirm, gedruckt
+wird sie nie. *Ansicht → Überschneidungen* (oder ein Klick auf die Zahl) schaltet sie aus und
+ein; ScoreArt merkt sich die Wahl.
+
 ## Kopf- und Fußzeilen
 
 *Format → Kopf- & Fußzeile…* hat ein linkes, mittleres und rechtes Feld für den oberen und

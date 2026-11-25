@@ -1180,7 +1180,9 @@ fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
                 let prev_bottom = tops.last().map_or(0.0, |t| t.2) + prev.h;
                 // Bottom line of the staff above to the top line of this one: what the notes
                 // need, at least what a spacer asks, or exactly what a fixed spacer says.
-                let natural = prev.down + prev.lyrics + prev.gap + st.up;
+                // MuseScore's staff distance from bottom line to top line, more only where
+                // what hangs below the one (lyrics) and stands above the other would touch.
+                let natural = prev.gap.max(prev.reach_down + SYSTEM_CLEAR + st.reach_up);
                 let d = match prev.sp_fixed {
                     Some(f) => f,
                     None => natural
@@ -1719,6 +1721,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             draw_header_footer(&mut o, score, style, PageBox { mt, mb, ml, mr, ph }, pw, &info);
         }
     }
+    out.collisions = crate::collide::collisions(&out);
     out
 }
 
@@ -3545,7 +3548,22 @@ fn out_staff_box(
                     .get(&gg.ev)
                     .map(|a| a.bottom.max(if a.up { a.bottom } else { a.stem_end }))
                     .unwrap_or(d.top);
-                let y = (d.top + 4.0 + 3.0).max(low + 2.6) + place.dy_sp();
+                // A singer's staff has its lyrics below: the dynamic goes above (over the
+                // chord symbols when the measure has any), unless it was placed by hand.
+                let sung = v.events.iter().any(|x| x.verse_count() > 0);
+                let y = if sung && e.dynamic_place.is_none() {
+                    let high = anchors
+                        .get(&gg.ev)
+                        .map(|a| a.top.min(a.stem_end))
+                        .unwrap_or(d.top);
+                    if chord_row_used {
+                        chord_row - 2.6
+                    } else {
+                        (high - 1.2).min(d.top - 1.5)
+                    }
+                } else {
+                    (d.top + 4.0 + 3.0).max(low + 2.6) + place.dy_sp()
+                };
                 for ch in dy.id().chars() {
                     if let Some((c, w)) = g::dynamic_letter(ch) {
                         o.glyph(c, x, y, Some(gg.ev));
@@ -3912,7 +3930,12 @@ fn staff_reach(score: &Score, part: usize, staff: usize, measures: &[usize]) -> 
         };
         let voices = sm.voices.iter().filter(|v| !v.events.is_empty()).count();
         for (vi, v) in sm.voices.iter().enumerate() {
+            let sung = v.events.iter().any(|x| x.verse_count() > 0);
             for (e, on) in v.events.iter().zip(v.onsets()) {
+                // A sung staff's dynamics stand above it.
+                if sung && e.dynamic.is_some() && e.dynamic_place.is_none() {
+                    up = up.max(3.0);
+                }
                 let shift = f32::from(score.ottava_at(part, staff, m, on)) * 3.5;
                 let marks = if e.articulations.is_empty() { 0.0 } else { 1.6 };
                 let above_marks = e

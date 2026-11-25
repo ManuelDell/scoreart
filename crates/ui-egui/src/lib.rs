@@ -265,9 +265,21 @@ pub struct ScoreApp {
     pub ribbon: ribbon::RibbonState,
     /// A PDF shown beside the score, and one waiting for "show or convert".
     pub(crate) reference: reference::RefView,
+    /// Overlapping texts, marks and notes shown in red (never printed).
+    pub show_collisions: bool,
 }
 
+/// The setting that remembers whether overlaps are shown.
+const COLLISIONS_SETTING: &str = "collisions";
+
 impl ScoreApp {
+    /// Shows or hides the red marking of overlaps, and remembers it.
+    pub fn set_show_collisions(&mut self, on: bool) {
+        self.show_collisions = on;
+        self.host
+            .save_setting(COLLISIONS_SETTING, if on { "1" } else { "0" });
+    }
+
     /// Switches the interface language and remembers it.
     pub fn set_language(&mut self, l: i18n::Lang) {
         i18n::set_lang(l);
@@ -308,6 +320,7 @@ impl ScoreApp {
         i18n::set_lang(lang);
         glyph::install_fonts(ctx);
         let surface = ribbon::saved_surface(host.as_ref());
+        let show_collisions = host.load_setting(COLLISIONS_SETTING).is_none_or(|v| v != "0");
         ScoreApp {
             session,
             host,
@@ -337,6 +350,7 @@ impl ScoreApp {
             surface,
             ribbon: Default::default(),
             reference: Default::default(),
+            show_collisions,
         }
     }
 

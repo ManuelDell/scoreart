@@ -42,6 +42,14 @@ Breaks and spacers show as small violet signs on the screen; they are never prin
 When a line break follows a little more music than fits, ScoreArt moves the notes slightly
 closer instead of breaking the line again — so the lines end where you said.
 
+## Overlaps
+
+Where texts, lyrics, chord symbols, rehearsal marks, dynamics or notes run into each other,
+ScoreArt marks both in **red** and the status bar counts them ("⚠ 3 overlaps") — so a crowded
+spot does not go unnoticed before you print. The marking is only on the screen, never printed.
+*View → Overlaps* (or a click on the count) switches it off and on; ScoreArt remembers your
+choice.
+
 ## Headers and footers
 
 *Format → Header & footer…* has a left, middle and right field for the top and the bottom of
