@@ -212,6 +212,11 @@ pub(crate) enum Dialog {
     },
     /// The settings of the section break after the selected measure.
     Section(scoreart_model::SectionBreak),
+    /// Blank space (an empty frame) after the selected measure's system.
+    Frame {
+        height: f32,
+        existing: bool,
+    },
 }
 
 pub struct ScoreApp {
@@ -244,6 +249,8 @@ pub struct ScoreApp {
     pub(crate) note_drag: Option<canvas::NoteDrag>,
     /// A staff text or dynamic being dragged.
     pub(crate) mark_drag: Option<canvas::MarkDrag>,
+    /// A rehearsal mark, segno/coda or jump being dragged.
+    pub(crate) measure_mark_drag: Option<canvas::MeasureMarkDrag>,
     /// A line (hairpin, slur …) being dragged.
     pub(crate) line_drag: Option<canvas::LineDrag>,
     /// A text block of the page being dragged, and the one picked by a click.
@@ -321,6 +328,7 @@ impl ScoreApp {
             midi: Default::default(),
             note_drag: None,
             mark_drag: None,
+            measure_mark_drag: None,
             line_drag: None,
             block_drag: None,
             block_sel: None,

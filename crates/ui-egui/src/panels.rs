@@ -1235,6 +1235,35 @@ pub fn properties_content(app: &mut ScoreApp, ui: &mut egui::Ui) {
     }
     egui::ScrollArea::vertical().show(ui, |ui| {
             ui.add_space(6.0);
+            // Marks of the selected measure moved by hand: back to their default place.
+            let m = app.session.focus().2;
+            if let Some(info) = app.session.score.measures.get(m).cloned() {
+                let moved: Vec<(&str, &str)> = [
+                    (info.rehearsal_place.is_some(), "rehearsal", t("Rehearsal mark")),
+                    (info.marker_place.is_some(), "marker", t("Segno / coda")),
+                    (info.jump_place.is_some(), "jump", t("Jump")),
+                ]
+                .into_iter()
+                .filter(|x| x.0)
+                .map(|x| (x.1, x.2))
+                .collect();
+                if !moved.is_empty() {
+                    ui.label(RichText::new(t("Moved by hand")).strong());
+                    for (kind, label) in moved {
+                        ui.horizontal(|ui| {
+                            ui.label(label);
+                            if ui
+                                .small_button(t("Reset position"))
+                                .on_hover_text(t("Back to its default place"))
+                                .clicked()
+                            {
+                                app.run("measure.place", json!({ "measure": m, "kind": kind, "reset": true }));
+                            }
+                        });
+                    }
+                    ui.add_space(6.0);
+                }
+            }
             egui::CollapsingHeader::new(RichText::new(t("Score")).strong()).default_open(true).show(ui, |ui| {
                 let mut changed = false;
                 egui::Grid::new("meta").num_columns(2).spacing([6.0, 6.0]).show(ui, |ui| {
@@ -1695,6 +1724,44 @@ pub fn dialogs(app: &mut ScoreApp, ctx: &egui::Context) {
                 close = true;
             } else {
                 app.dialog = Some(Dialog::Section(sec));
+            }
+        }
+        Dialog::Frame { mut height, existing } => {
+            let resp = egui::Modal::new(egui::Id::unique("frame_dialog")).show(ctx, |ui| {
+                ui.set_width(380.0);
+                ui.heading(t("Blank space"));
+                ui.label(t(
+                    "Free room after the system that ends with the selected measure.",
+                ));
+                ui.horizontal(|ui| {
+                    ui.label(t("Height"));
+                    ui.add(
+                        egui::DragValue::new(&mut height)
+                            .range(1.0..=200.0)
+                            .speed(0.5)
+                            .suffix(" sp"),
+                    );
+                });
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let ok = ui.button(t("OK")).clicked();
+                    let remove = existing && ui.button(t("Remove")).clicked();
+                    let cancel = ui.button(t("Cancel")).clicked();
+                    (ok, remove, cancel)
+                })
+                .inner
+            });
+            let (ok, remove, cancel) = resp.inner;
+            if ok || remove {
+                app.run(
+                    "measure.frame",
+                    json!({ "height": if remove { 0.0 } else { height } }),
+                );
+                close = true;
+            } else if cancel || resp.should_close() {
+                close = true;
+            } else {
+                app.dialog = Some(Dialog::Frame { height, existing });
             }
         }
         Dialog::Shortcuts => {

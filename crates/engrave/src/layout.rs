@@ -2164,6 +2164,20 @@ fn draw_system(
                 ] {
                     o.line(a, b, c, d2, 0.16, None);
                 }
+                o.hit(
+                    bx0,
+                    by1 - bh,
+                    bx0 + w,
+                    by1,
+                    Target::MeasureMark {
+                        measure: m,
+                        kind: crate::MeasureMark::Rehearsal,
+                        ax: m_start,
+                        ay: staff_top,
+                        x: bx0 + w / 2.0,
+                        base: by1 - 0.6 * bh / 2.6,
+                    },
+                );
                 if k > 0 && info.rehearsal_place.is_none() {
                     tx = tx.max(bx0 + w + 0.8);
                 }
@@ -2175,12 +2189,30 @@ fn draw_system(
                     _ => "codaSquare",
                 };
                 if let Some((c, w, lo, _)) = crate::smufl::get(name) {
+                    let left = if k == 0 { x_start } else { m_start };
+                    let (mx0, mbase, msize) = match info.marker_place {
+                        Some(p) => (left + p.dx_sp(), top + t0 + p.dy_sp(), MARKER_SCALE),
+                        None => (tx, ty, 1.0),
+                    };
+                    o.hit(
+                        mx0,
+                        mbase - 3.0 * msize,
+                        mx0 + w * msize,
+                        mbase + 0.3,
+                        Target::MeasureMark {
+                            measure: m,
+                            kind: crate::MeasureMark::Marker,
+                            ax: left,
+                            ay: top + t0,
+                            x: mx0,
+                            base: mbase,
+                        },
+                    );
                     match info.marker_place {
                         // Placed by hand: from the measure's barline (the system's start for
                         // its first measure) and the top staff line.
                         // Drawn at text size, as MuseScore draws its markers' symbols.
                         Some(p) => {
-                            let left = if k == 0 { x_start } else { m_start };
                             o.push(
                                 Shape::Glyph {
                                     c,
@@ -2213,6 +2245,7 @@ fn draw_system(
                 None => ty,
             };
             let ty_end = end_y;
+            let right_end = end_x;
             for j in info.jumps.iter().filter(|j| j.at_end()) {
                 let ty = ty_end;
                 if let Some(t) = j.text() {
@@ -2225,6 +2258,22 @@ fn draw_system(
                     let ts = o.styled(TextKind::SystemText, t, end_x, ty, 1.9, Align::Right);
                     end_x -= text_width(t, ts) + 1.0;
                 }
+            }
+            if info.jumps.iter().any(|j| j.at_end()) && end_x < right_end {
+                o.hit(
+                    end_x + 0.5,
+                    ty_end - 2.0,
+                    right_end,
+                    ty_end + 0.5,
+                    Target::MeasureMark {
+                        measure: m,
+                        kind: crate::MeasureMark::Jump,
+                        ax: m_end,
+                        ay: top + t0,
+                        x: right_end,
+                        base: ty_end,
+                    },
+                );
             }
             if let Some(tempo) = info.tempo {
                 // The beat unit: an eighth, quarter or half, perhaps dotted.

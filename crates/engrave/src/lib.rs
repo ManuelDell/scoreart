@@ -236,6 +236,28 @@ pub enum Target {
     Block {
         block: scoreart_model::BlockRef,
     },
+    /// A rehearsal mark, segno/coda sign or jump of a measure, with what moving it needs:
+    /// its anchor (`ax`: the measure's start, or end for a jump; `ay`: the top staff line), and
+    /// where it stands now (`x`: the mark's centre, left or right end; `base`: its baseline).
+    MeasureMark {
+        measure: usize,
+        kind: MeasureMark,
+        ax: f32,
+        ay: f32,
+        x: f32,
+        base: f32,
+    },
+}
+
+/// The marks of a measure that can be moved by hand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MeasureMark {
+    /// A boxed rehearsal mark (its centre).
+    Rehearsal,
+    /// Segno or coda at the start (its left end).
+    Marker,
+    /// D.S., D.C., Fine, To Coda at the end (its right end).
+    Jump,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -347,7 +369,10 @@ impl Layout {
         let inside = |h: &&Hit| h.page == page && x >= h.x0 && x <= h.x1 && y >= h.y0 && y <= h.y1;
         let rank = |t: &Target| match t {
             Target::Note { .. } => 0,
-            Target::Text { .. } | Target::Dynamic { .. } | Target::Block { .. } => 1,
+            Target::Text { .. }
+            | Target::Dynamic { .. }
+            | Target::Block { .. }
+            | Target::MeasureMark { .. } => 1,
             Target::Line { .. } => 2,
             Target::Rest { .. } => 3,
             Target::Measure { .. } => 4,
@@ -387,6 +412,7 @@ impl Layout {
                 | Target::Dynamic { .. }
                 | Target::Line { .. }
                 | Target::Measure { .. }
+                | Target::MeasureMark { .. }
                 | Target::Block { .. } => false,
             };
             if matches {

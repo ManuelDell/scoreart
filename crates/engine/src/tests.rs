@@ -1908,3 +1908,78 @@ fn layout_settings_from_musescore_survive_musicxml() {
     assert!(back.score.page.german_chords);
     assert_eq!(back.score.page.first_names, 2);
 }
+
+#[test]
+fn measure_marks_move_where_they_are_dropped() {
+    let mut s = lead_sheet();
+    s.execute("select.measure", &json!({ "part": 0, "staff": 0, "measure": 1 }))
+        .unwrap();
+    s.execute("measure.rehearsal", &json!({ "text": "Vers" }))
+        .unwrap();
+    let mark = |s: &mut Session| {
+        let l = s.layout();
+        l.hits.iter().find_map(|h| match h.target {
+            scoreart_engrave::Target::MeasureMark {
+                kind: scoreart_engrave::MeasureMark::Rehearsal,
+                ax,
+                ay,
+                x,
+                base,
+                ..
+            } => Some((ax, ay, x, base)),
+            _ => None,
+        })
+    };
+    let (ax, ay, x, base) = mark(&mut s).unwrap();
+    // Dropped 2 spaces right and 1 up: it stands exactly there.
+    s.execute(
+        "measure.place",
+        &json!({ "kind": "rehearsal", "measure": 1, "dx": x + 2.0 - ax, "dy": base - 1.0 - ay }),
+    )
+    .unwrap();
+    let (_, _, x2, base2) = mark(&mut s).unwrap();
+    assert!(
+        (x2 - (x + 2.0)).abs() < 0.06 && (base2 - (base - 1.0)).abs() < 0.06,
+        "{x}→{x2}, {base}→{base2}"
+    );
+    // Back to its default place.
+    s.execute(
+        "measure.place",
+        &json!({ "kind": "rehearsal", "measure": 1, "reset": true }),
+    )
+    .unwrap();
+    assert!(s.score.measures[1].rehearsal_place.is_none());
+    assert!(
+        s.execute(
+            "measure.place",
+            &json!({ "kind": "jump", "measure": 1, "dx": 1, "dy": -3 })
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn frames_and_name_settings_by_command() {
+    let mut s = lead_sheet();
+    s.execute("measure.frame", &json!({ "measure": 0, "height": 25 }))
+        .unwrap();
+    assert_eq!(s.score.measures[0].frame_after, Some(25.0));
+    assert!(s.score.measures[0].system_break);
+    s.execute("measure.frame", &json!({ "measure": 0, "height": 0 }))
+        .unwrap();
+    assert_eq!(s.score.measures[0].frame_after, None);
+    s.execute(
+        "page.format",
+        &json!({ "first_names": "none", "later_names": "short", "single_name": false, "german_chords": true }),
+    )
+    .unwrap();
+    let f = s.score.page;
+    assert_eq!(
+        (f.first_names, f.later_names, f.single_name, f.german_chords),
+        (2, 1, false, true)
+    );
+    assert!(
+        s.execute("page.format", &json!({ "first_names": "loud" }))
+            .is_err()
+    );
+}

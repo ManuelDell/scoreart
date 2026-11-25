@@ -654,6 +654,76 @@ pub fn commands() -> Vec<CommandSpec> {
             undoable: true,
         },
         CommandSpec {
+            id: "measure.place",
+            label: "Move measure mark",
+            menu: &[],
+            shortcut: None,
+            params: "kind: rehearsal|marker (segno/coda)|jump (D.S., Fine, To Coda …), dx and dy (staff spaces: from the measure's start — its end for a jump — and from the top staff line to the baseline, as MuseScore stores it), or reset: true (back to the default place); measure? (default: the selected one)",
+            enabled: always,
+            run: |s, p| {
+                let (first, _) = target_measures(s);
+                let m = p_usize(p, "measure").unwrap_or(first);
+                let kind = need_str(p, "kind")?.to_string();
+                let reset = p.get("reset").and_then(Value::as_bool).unwrap_or(false);
+                let num = |k: &str| p.get(k).and_then(Value::as_f64).filter(|v| v.is_finite());
+                let place = if reset {
+                    None
+                } else {
+                    let (dx, dy) = (
+                        num("dx").ok_or_else(|| Error::Param("dx: staff spaces".into()))?,
+                        num("dy").ok_or_else(|| Error::Param("dy: staff spaces".into()))?,
+                    );
+                    Some(scoreart_model::Placement::from_sp(dx, dy, false))
+                };
+                let info = s
+                    .score
+                    .measures
+                    .get_mut(m)
+                    .ok_or_else(|| Error::Param("no such measure".into()))?;
+                match kind.as_str() {
+                    "rehearsal" if info.rehearsal.is_some() => info.rehearsal_place = place,
+                    "marker" if info.jumps.iter().any(|j| !j.at_end()) => info.marker_place = place,
+                    "jump" if info.jumps.iter().any(|j| j.at_end()) => info.jump_place = place,
+                    "rehearsal" | "marker" | "jump" => {
+                        return Err(Error::Param(format!("measure {} has no {kind}", m + 1)));
+                    }
+                    k => return Err(Error::Param(format!("kind: rehearsal, marker or jump, not {k}"))),
+                }
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "measure.frame",
+            label: "Blank space after the system",
+            menu: &[],
+            shortcut: None,
+            params: "height: staff spaces (0 removes it), measure? (default: the last selected) — an empty frame after the measure: the system ends there and the room stays free (pushes what follows down, or onto the next page)",
+            enabled: always,
+            run: |s, p| {
+                let (_, last) = target_measures(s);
+                let m = p_usize(p, "measure").unwrap_or(last);
+                let h = p
+                    .get("height")
+                    .and_then(Value::as_f64)
+                    .filter(|h| h.is_finite())
+                    .ok_or_else(|| Error::Param("height: staff spaces".into()))?;
+                let info = s
+                    .score
+                    .measures
+                    .get_mut(m)
+                    .ok_or_else(|| Error::Param("no such measure".into()))?;
+                if h <= 0.0 {
+                    info.frame_after = None;
+                } else {
+                    info.frame_after = Some(h.min(200.0) as f32);
+                    info.system_break = true;
+                }
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
             id: "measure.break",
             label: "Line or page break",
             menu: &[],
@@ -906,7 +976,7 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "Page settings",
             menu: &["Format"],
             shortcut: None,
-            params: "any of: size (A4, Letter, A3, A5, B4, Legal, Tabloid), orientation (portrait|landscape), width_mm, height_mm, margin_mm (all four), margin_top_mm, margin_bottom_mm, margin_left_mm, margin_right_mm (odd pages, or all pages when not two-sided), two_sided (true|false), even_margin_top_mm, even_margin_bottom_mm, even_margin_left_mm, even_margin_right_mm, staff_space_mm (staff size), staff_gap (staves of one instrument), part_gap (between instruments), system_gap (least system distance), max_system_gap, music_top, music_bottom (staff spaces from the margin), vertical_justify (true|false), max_system_spread, max_staff_spread, spread_factor, last_system_fill (0…1), first_page_number, first_indent (staff spaces, 0 = none), header_offset, footer_offset, spacing (0.5…2), reset: true (defaults)",
+            params: "any of: size (A4, Letter, A3, A5, B4, Legal, Tabloid), orientation (portrait|landscape), width_mm, height_mm, margin_mm (all four), margin_top_mm, margin_bottom_mm, margin_left_mm, margin_right_mm (odd pages, or all pages when not two-sided), two_sided (true|false), even_margin_top_mm, even_margin_bottom_mm, even_margin_left_mm, even_margin_right_mm, staff_space_mm (staff size), staff_gap (staves of one instrument), part_gap (between instruments), system_gap (least system distance), max_system_gap, music_top, music_bottom (staff spaces from the margin), vertical_justify (true|false), max_system_spread, max_staff_spread, spread_factor, last_system_fill (0…1), first_page_number, first_indent (staff spaces, 0 = none), header_offset, footer_offset, spacing (0.5…2), first_names and later_names (full|short|none: instrument names before the first and the other systems), single_name (true|false: name the only instrument), german_chords (true|false: H for B in chord symbols), reset: true (defaults)",
             enabled: always,
             run: |s, p| {
                 let num = |k: &str| -> Result<Option<f32>> {
@@ -989,6 +1059,8 @@ pub fn commands() -> Vec<CommandSpec> {
                 for (k, slot) in [
                     ("two_sided", &mut f.two_sided),
                     ("vertical_justify", &mut f.vertical_justify),
+                    ("single_name", &mut f.single_name),
+                    ("german_chords", &mut f.german_chords),
                 ] {
                     match p.get(k) {
                         None | Some(Value::Null) => {}
@@ -1012,6 +1084,24 @@ pub fn commands() -> Vec<CommandSpec> {
                         f.even_margin_bottom_mm = f.margin_bottom_mm;
                         f.even_margin_left_mm = f.margin_right_mm;
                         f.even_margin_right_mm = f.margin_left_mm;
+                    }
+                }
+                // Instrument names: full, short or none.
+                for (k, slot) in [
+                    ("first_names", &mut f.first_names),
+                    ("later_names", &mut f.later_names),
+                ] {
+                    match p.get(k) {
+                        None | Some(Value::Null) => {}
+                        Some(Value::String(v)) => {
+                            *slot = match v.as_str() {
+                                "full" | "long" => 0,
+                                "short" => 1,
+                                "none" => 2,
+                                _ => return Err(Error::Param(format!("{k}: full, short or none"))),
+                            }
+                        }
+                        Some(_) => return Err(Error::Param(format!("{k}: full, short or none"))),
                     }
                 }
                 s.score.page = f.clamped();

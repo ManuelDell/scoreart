@@ -75,8 +75,36 @@ fn apply(app: &mut ScoreApp, f: &PageFormat) {
             "first_page_number": f.first_page_number,
             "first_indent": f.first_indent,
             "spacing": f.spacing,
+            "first_names": names_value(f.first_names),
+            "later_names": names_value(f.later_names),
+            "single_name": f.single_name,
+            "german_chords": f.german_chords,
         }),
     );
+}
+
+fn names_value(v: u8) -> &'static str {
+    match v {
+        0 => "full",
+        1 => "short",
+        _ => "none",
+    }
+}
+
+/// Full, short or no instrument names.
+fn names_combo(ui: &mut egui::Ui, id: &str, v: &mut u8) {
+    let label = |v: u8| match v {
+        0 => t("Full names"),
+        1 => t("Short names"),
+        _ => t("No names"),
+    };
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(label(*v))
+        .show_ui(ui, |ui| {
+            for k in 0..=2u8 {
+                ui.selectable_value(v, k, label(k));
+            }
+        });
 }
 
 /// A length in millimetres, shown in millimetres or inches.
@@ -314,6 +342,18 @@ pub(crate) fn dialog(app: &mut ScoreApp, ctx: &egui::Context) {
                     ui.end_row();
                     ui.label(t("Note spacing"));
                     ui.add(egui::Slider::new(&mut f.spacing, 0.5..=2.0).step_by(0.05));
+                    ui.end_row();
+                    ui.label(t("Instrument names, first system"));
+                    names_combo(ui, "names-first", &mut f.first_names);
+                    ui.end_row();
+                    ui.label(t("Instrument names, other systems"));
+                    names_combo(ui, "names-later", &mut f.later_names);
+                    ui.end_row();
+                    ui.label("");
+                    ui.checkbox(&mut f.single_name, t("Name a score's only instrument"));
+                    ui.end_row();
+                    ui.label(t("Chord symbols"));
+                    ui.checkbox(&mut f.german_chords, t("German note names (H for B)"));
                     ui.end_row();
                 });
             ui.label(

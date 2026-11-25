@@ -79,6 +79,17 @@ pub(crate) struct MarkDrag {
     hit: scoreart_engrave::Hit,
 }
 
+/// A rehearsal mark, segno/coda sign or jump picked up with the hand.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct MeasureMarkDrag {
+    /// The mark's target (with its anchor and where it stands).
+    target: Target,
+    page: usize,
+    grab: (f32, f32),
+    delta: (f32, f32),
+    hit: scoreart_engrave::Hit,
+}
+
 /// A line (hairpin, slur, 8va …) picked up with the hand: the whole line, or one end.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct LineDrag {
@@ -531,6 +542,12 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                                 app.mark_drag = Some(MarkDrag { ev, text, page: pi, grab: (sx, sy), delta: (0.0, 0.0), hit });
                             }
                         }
+                        Some(t @ Target::MeasureMark { .. }) => {
+                            if let Some(hit) = layout.hits.iter().copied().find(|h| h.page == pi && h.target == t) {
+                                app.measure_mark_drag =
+                                    Some(MeasureMarkDrag { target: t, page: pi, grab: (sx, sy), delta: (0.0, 0.0), hit });
+                            }
+                        }
                         Some(Target::Block { block }) => {
                             app.block_sel = Some(block);
                             if app.session.score.block_locked(block) {
@@ -581,6 +598,14 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     let (sx, sy) = ((pos.x - origin.x) / zoom, (pos.y - origin.y) / zoom);
                     d.delta = (sx - d.grab.0, sy - d.grab.1);
                 }
+                if let Some(d) = app.measure_mark_drag.as_mut()
+                    && d.page == pi
+                    && resp.dragged()
+                    && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
+                {
+                    let (sx, sy) = ((pos.x - origin.x) / zoom, (pos.y - origin.y) / zoom);
+                    d.delta = (sx - d.grab.0, sy - d.grab.1);
+                }
                 if let Some(d) = app.mark_drag.as_mut()
                     && d.page == pi
                     && resp.dragged()
@@ -614,7 +639,13 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                         Some(Target::Block { block }) => !app.session.score.block_locked(block),
                         t => matches!(
                             t,
-                            Some(Target::Note { .. } | Target::Text { .. } | Target::Dynamic { .. } | Target::Line { .. })
+                            Some(
+                                Target::Note { .. }
+                                    | Target::Text { .. }
+                                    | Target::Dynamic { .. }
+                                    | Target::Line { .. }
+                                    | Target::MeasureMark { .. }
+                            )
                         ),
                     };
                     // At the end of a line: the end can be pulled sideways.
@@ -638,6 +669,7 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     } else if app.line_drag.is_some_and(|d| d.end.is_some()) {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                     } else if app.mark_drag.is_some()
+                        || app.measure_mark_drag.is_some()
                         || app.note_drag.is_some()
                         || app.line_drag.is_some()
                         || app.block_drag.is_some()
@@ -779,6 +811,13 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     painter.rect_filled(r, 3.0, tk.accent.linear_multiply(0.12));
                     painter.rect_stroke(r, 3.0, Stroke::new(1.2, tk.accent), egui::StrokeKind::Outside);
                 }
+                // Where a dragged rehearsal mark, segno/coda or jump would go.
+                if let Some(d) = app.measure_mark_drag.filter(|d| d.page == pi) {
+                    let h = d.hit;
+                    let r = Rect::from_min_max(map(h.x0 + d.delta.0, h.y0 + d.delta.1), map(h.x1 + d.delta.0, h.y1 + d.delta.1));
+                    painter.rect_filled(r, 3.0, tk.accent.linear_multiply(0.12));
+                    painter.rect_stroke(r, 3.0, Stroke::new(1.2, tk.accent), egui::StrokeKind::Outside);
+                }
                 // Where a dragged text or dynamic would go.
                 if let Some(d) = app.mark_drag.filter(|d| d.page == pi) {
                     let h = d.hit;
@@ -845,6 +884,11 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
         && let Some(d) = app.mark_drag.take()
     {
         drop_mark(app, &layout, d);
+    }
+    if resp_drag_stopped(ui)
+        && let Some(d) = app.measure_mark_drag.take()
+    {
+        drop_measure_mark(app, d);
     }
     if resp_drag_stopped(ui)
         && let Some(d) = app.line_drag.take()
@@ -921,6 +965,40 @@ fn drop_note(app: &mut ScoreApp, layout: &scoreart_engrave::Layout, d: NoteDrag)
             json!({ "part": part, "staff": staff, "measure": measure, "tick": tick, "steps": steps }),
         );
     }
+}
+
+/// Places a rehearsal mark, segno/coda or jump where it was dragged (as MuseScore stores it:
+/// from its anchor, the measure's start or end and the top staff line).
+fn drop_measure_mark(app: &mut ScoreApp, d: MeasureMarkDrag) {
+    if d.delta.0.hypot(d.delta.1) < 0.15 {
+        return;
+    }
+    let Target::MeasureMark {
+        measure,
+        kind,
+        ax,
+        ay,
+        x,
+        base,
+    } = d.target
+    else {
+        return;
+    };
+    let round = |v: f32| (f64::from(v) * 10.0).round() / 10.0;
+    let kind = match kind {
+        scoreart_engrave::MeasureMark::Rehearsal => "rehearsal",
+        scoreart_engrave::MeasureMark::Marker => "marker",
+        scoreart_engrave::MeasureMark::Jump => "jump",
+    };
+    app.run(
+        "measure.place",
+        json!({
+            "measure": measure,
+            "kind": kind,
+            "dx": round(x + d.delta.0 - ax),
+            "dy": round(base + d.delta.1 - ay),
+        }),
+    );
 }
 
 /// Moves a staff text or dynamic by the distance it was dragged.
@@ -1023,6 +1101,10 @@ fn handle_click(
         }
         Some(Target::Measure { part, staff, measure }) => {
             s.execute("select.measure", &json!({ "part": part, "staff": staff, "measure": measure, "extend": shift }))
+        }
+        // A rehearsal mark, segno/coda or jump: its measure (in the top staff).
+        Some(Target::MeasureMark { measure, .. }) => {
+            s.execute("select.measure", &json!({ "part": 0, "staff": 0, "measure": measure, "extend": shift }))
         }
         None => s.execute("edit.escape", &json!({})),
     };

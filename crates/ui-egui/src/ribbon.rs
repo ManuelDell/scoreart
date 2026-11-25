@@ -1745,6 +1745,23 @@ fn tab_measures(app: &mut ScoreApp, ui: &mut Ui) {
             {
                 app.dialog = sec.map(Dialog::Section);
             }
+            let m = app.session.focus().2;
+            let frame = app.session.score.measures.get(m).and_then(|i| i.frame_after);
+            if small(
+                ui,
+                None,
+                t("Blank space…"),
+                frame.is_some(),
+                true,
+                t("Free room after the system of the measure: pushes what follows down or onto the next page"),
+            )
+            .clicked()
+            {
+                app.dialog = Some(Dialog::Frame {
+                    height: frame.unwrap_or(10.0),
+                    existing: frame.is_some(),
+                });
+            }
         });
     });
 }
@@ -2341,6 +2358,23 @@ fn tab_format(app: &mut ScoreApp, ui: &mut Ui) {
             .clicked()
             {
                 app.dialog = sec.map(Dialog::Section);
+            }
+            let m = app.session.focus().2;
+            let frame = app.session.score.measures.get(m).and_then(|i| i.frame_after);
+            if small(
+                ui,
+                None,
+                t("Blank space…"),
+                frame.is_some(),
+                true,
+                t("Free room after the system of the measure: pushes what follows down or onto the next page"),
+            )
+            .clicked()
+            {
+                app.dialog = Some(Dialog::Frame {
+                    height: frame.unwrap_or(10.0),
+                    existing: frame.is_some(),
+                });
             }
         });
     });
