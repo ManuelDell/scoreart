@@ -20,6 +20,10 @@ MuseScore 4 (A4, Ränder von 10 mm, Seitenzahl und Copyright unten).
 Der **Notenabstand** (*Eng*, *Normal*, *Weit*, *Sehr weit*) macht die Musik dichter oder
 luftiger.
 
+Ebenfalls in den Seiteneinstellungen: die **Instrumentnamen** vor dem ersten und vor den
+weiteren Systemen (voll, kurz oder keine), ob ein **einzelnes Instrument** benannt wird, und
+**deutsche Notennamen** für Akkordsymbole (H statt B, B statt Bb).
+
 ## Umbrüche und Abstandshalter
 
 Wähle einen Takt, dann unter *Format → Umbrüche* (oder *Takte*):
@@ -32,6 +36,8 @@ Wähle einen Takt, dann unter *Format → Umbrüche* (oder *Takte*):
 - **Abstandshalter oben / unten** — mehr Platz über oder unter einem System in diesen Takten,
   etwa für hohe Noten. Ein **fester Abstandshalter** setzt einen genauen Abstand zum System
   bzw. zur Akkolade darunter.
+- **Freiraum…** — freier Platz in wählbarer Höhe nach dem System, das mit dem Takt endet (ein
+  leerer Rahmen wie in MuseScore): Er schiebt das Folgende nach unten oder auf die nächste Seite.
 
 Umbrüche und Abstandshalter erscheinen als kleine violette Zeichen auf dem Bildschirm; gedruckt
 werden sie nie.

@@ -12,7 +12,8 @@ oder **nur eine behalten** werden soll.
 
 ![Der Reiter Instrumente und die Frage beim Wechsel von Frauen zu Sopran (englische Oberfläche)](../../images/instruments.png)
 
-**Leere Notenzeilen ausblenden** lässt ein Instrument in jedem System weg, in dem es nichts zu
+**Kleine Notenzeilen** zeichnet ein Instrument kleiner (70 %), wie Liederhefte es für die
+zweiten Stimmen tun. **Leere Notenzeilen ausblenden** lässt ein Instrument in jedem System weg, in dem es nichts zu
 spielen hat — eine Chorstimme, die nur den Refrain singt, erscheint nur dort. Partituren aus
 MuseScore behalten diese Einstellung.
 

@@ -627,6 +627,33 @@ pub fn commands() -> Vec<CommandSpec> {
             undoable: true,
         },
         CommandSpec {
+            id: "part.small",
+            label: "Small staves",
+            menu: &[],
+            shortcut: None,
+            params: "small: true|false, part? (default: the selected part) — draw the part's staves smaller (70 %), as for a second voice or cue",
+            enabled: has_parts,
+            run: |s, p| {
+                let part = p_usize(p, "part").unwrap_or_else(|| s.focus().0);
+                let on = p
+                    .get("small")
+                    .and_then(Value::as_bool)
+                    .ok_or_else(|| Error::Param("small: true or false".into()))?;
+                let pt = s
+                    .score
+                    .parts
+                    .get_mut(part)
+                    .ok_or_else(|| Error::Param("no such part".into()))?;
+                pt.small = if on {
+                    vec![true; pt.staff_count()]
+                } else {
+                    Vec::new()
+                };
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
             id: "part.hide_empty",
             label: "Hide empty staves",
             menu: &[],

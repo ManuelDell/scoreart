@@ -852,7 +852,7 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                 {
                     let tick = sb.tick_near(hx);
                     let x = sb.x_at(tick);
-                    let yy = sb.top + (sb.top_line_diff(hy) as f32) * 0.5;
+                    let yy = sb.top + (sb.top_line_diff(hy) as f32) * 0.5 * sb.mag;
                     let c = voice_color(input.voice).linear_multiply(0.55);
                     glyph::paint(
                         &painter,
@@ -1040,7 +1040,7 @@ trait TopLineDiff {
 impl TopLineDiff for scoreart_engrave::StaffBox {
     /// Half spaces below the top line, snapped.
     fn top_line_diff(&self, y: f32) -> i32 {
-        (((y - self.top) * 2.0).round() as i32).clamp(-24, 32)
+        (((y - self.top) * 2.0 / self.mag.max(0.1)).round() as i32).clamp(-24, 32)
     }
 }
 

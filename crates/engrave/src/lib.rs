@@ -285,6 +285,8 @@ pub struct StaffBox {
     pub clef: Clef,
     /// Onset tick → notehead x, ascending; the last entry is the measure end.
     pub columns: Vec<(u32, f32)>,
+    /// Size of the staff (smaller for a small staff: its lines are this many spaces apart).
+    pub mag: f32,
 }
 
 impl StaffBox {
@@ -310,7 +312,7 @@ impl StaffBox {
 
     /// The diatonic step (see `Pitch::diatonic`) at page y.
     pub fn diatonic_at(&self, y: f32) -> i32 {
-        let half_spaces = ((y - self.top) * 2.0).round() as i32;
+        let half_spaces = ((y - self.top) * 2.0 / self.mag.max(0.1)).round() as i32;
         self.clef.top_line() - half_spaces.clamp(-40, 40)
     }
 

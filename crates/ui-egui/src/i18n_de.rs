@@ -344,6 +344,10 @@ pub const DE: &[(&str, &str)] = &[
     ),
     ("Downloading {} ({} of {}) …", "Lade {} herunter ({} von {}) …"),
     ("Downloading {} …", "Lade {} herunter …"),
+    (
+        "Draw this instrument's staves smaller, as for a second voice",
+        "Die Notenzeilen dieses Instruments kleiner zeichnen, etwa für eine zweite Stimme",
+    ),
     ("Duration", "Notenwert"),
     ("Dynamic", "Dynamik"),
     ("Dynamics", "Dynamik"),
@@ -1027,6 +1031,7 @@ pub const DE: &[(&str, &str)] = &[
     ("Slides", "Gleiter"),
     ("Slur", "Bogen"),
     ("Slurs & hairpins", "Bögen & Gabeln"),
+    ("Small staves", "Kleine Notenzeilen"),
     (
         "Small, natural variations in timing and loudness (from the next start)",
         "Kleine, natürliche Schwankungen in Timing und Lautstärke (ab dem nächsten Start)",

@@ -27,7 +27,10 @@ Here is a sample of what ScoreArt draws:
 
 With the **hand**, drag staff texts, dynamics and lines where you want them. A line can be
 dragged as a whole or by one of its ends onto another note; pull the open end of a hairpin up
-or down to make it wider. Everything you move is saved.
+or down to make it wider. **Rehearsal marks** (boxes such as *Intro*, *Verse*, *Chorus*),
+**segno and coda** signs and jumps (*D.S. al Fine* …) are dragged the same way; *Properties →
+Reset position* puts them back. Everything you move is saved — the way MuseScore saves it, so
+the places survive the trip between the two programs.
 
 ## Everything is heard
 

@@ -17,6 +17,10 @@
   set as close as MuseScore sets them (least distance from staff to staff, more only where
   lyrics and chord symbols would touch), chord symbols just above the staff, lyrics 3 spaces
   below it, and lines no longer squeezed so far that lyrics overlap.
+- **Layout settings in ScoreArt**: instrument names (full/short/none, first and other
+  systems), naming a single instrument and German chord names in the page settings; *Blank
+  space…* after a system; rehearsal marks, segno/coda and jumps dragged with the hand (and
+  reset); **small staves** (70 %) per instrument, also from MuseScore files.
 - **LilyPond PDFs** are converted too: the glyph names of its music font are read from the
   PDF; octave-treble clefs with the "8" as a separate glyph, older LilyPond fonts, beams drawn
   with outlines and scores followed by their parts in the same file are handled.

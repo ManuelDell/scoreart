@@ -246,3 +246,35 @@ fn empty_staves_hide_and_frames_keep_room() {
     );
     assert_eq!(pages(&l), pages(&l2));
 }
+
+#[test]
+fn small_staves_are_smaller() {
+    let mut s = melody();
+    let flute = instrument("flute").unwrap();
+    s.add_part(flute);
+    let fl = s.parts.len() - 1;
+    let gap = |s: &Score| {
+        let l = layout(s, &Style::default());
+        let tops: Vec<f32> = [0, fl]
+            .iter()
+            .filter_map(|p| {
+                l.staves
+                    .iter()
+                    .find(|b| b.part == *p && b.system == 0)
+                    .map(|b| b.top)
+            })
+            .collect();
+        (tops[1] - tops[0], l)
+    };
+    let (before, _) = gap(&s);
+    s.parts[0].small = vec![true; s.parts[0].staff_count()];
+    let (after, l) = gap(&s);
+    assert!(after < before, "{before} → {after}");
+    let sb = l.staves.iter().find(|b| b.part == 0).unwrap();
+    assert!((sb.mag - 0.7).abs() < 1e-6);
+    // Input on a small staff: the middle line is still B4 in the treble clef.
+    assert_eq!(
+        sb.diatonic_at(sb.top + 2.0 * sb.mag),
+        Pitch::new(Step::B, 0, 4).diatonic()
+    );
+}

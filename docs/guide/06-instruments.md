@@ -10,6 +10,7 @@ voices, choir (women, men, SATB), strings, woodwinds, brass and more.
 
 ![The Instruments tab, and the question when Women changes to Soprano](../images/instruments.png)
 
+**Small staves** draws an instrument smaller (70 %), as songbooks do for the second voices.
 **Hide empty staves** leaves an instrument out of every system in which it has nothing to play
 — a choir part that only sings the refrain appears only there. Scores from MuseScore keep
 this setting.

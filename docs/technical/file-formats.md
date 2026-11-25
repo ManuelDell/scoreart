@@ -57,8 +57,8 @@ marks, segno/coda markers and jumps moved by hand stand where their `<offset>` p
 offset replaces MuseScore's default position: measured from the start or end of the measure
 and the top staff line); instrument names follow `hideInstrumentNameIfOneInstrument` and the
 first/later system visibility; chord symbols use German note names when the style asks; the
-`harmony` channel's program becomes the instrument chord symbols play with. Small staves
-(`<small>`) are read and saved, but still drawn at full size.
+`harmony` channel's program becomes the instrument chord symbols play with; small staves
+(`<small>`) are drawn at 70 %.
 
 MuseScore 2 files are first rewritten into the layout of MuseScore 3 files (`mscz2.rs`), then
 read by the same code:

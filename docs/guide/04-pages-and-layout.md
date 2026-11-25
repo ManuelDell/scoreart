@@ -17,6 +17,10 @@ A new score starts with the same page settings as a new score in MuseScore 4 (A4
 
 **Note spacing** (*Tight*, *Normal*, *Wide*, *Very wide*) makes the music denser or airier.
 
+Also in the page settings: **instrument names** before the first and before the other systems
+(full, short or none), whether a score's **only instrument** is named, and **German note
+names** for chord symbols (H for B, B for B flat).
+
 ## Breaks and spacers
 
 Select a measure, then on *Format → Breaks* (or *Measures*):
@@ -28,6 +32,8 @@ Select a measure, then on *Format → Breaks* (or *Measures*):
   movements or songs of one file.
 - **Spacer up / down** — more room above or below one staff in these measures, e.g. for high
   notes. A **fixed spacer** sets an exact distance to the staff or system below.
+- **Blank space…** — free room of a chosen height after the system that ends with the measure
+  (an empty frame, as in MuseScore): it pushes what follows down, or onto the next page.
 
 Breaks and spacers show as small violet signs on the screen; they are never printed.
 

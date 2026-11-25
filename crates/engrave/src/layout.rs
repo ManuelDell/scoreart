@@ -971,6 +971,43 @@ struct Stack {
     bottom_reach: f32,
 }
 
+/// Size of a small staff against a normal one (MuseScore's small staves).
+const SMALL_MAG: f32 = 0.7;
+
+/// Size factor of a staff: smaller for staves set small.
+fn staff_mag(score: &Score, part: usize, staff: usize) -> f32 {
+    if score.parts.get(part).is_some_and(|p| p.staff_small(staff)) {
+        SMALL_MAG
+    } else {
+        1.0
+    }
+}
+
+/// Height of a staff from its top line to its bottom line.
+fn staff_h(score: &Score, part: usize, staff: usize) -> f32 {
+    4.0 * staff_mag(score, part, staff)
+}
+
+/// Where a point drawn for a full-size staff with its top line at `top` lands on a staff of
+/// size `mag`: within 3 spaces of the staff all shrinks towards the top line; beyond, things
+/// move by what the staff lost (texts and lyrics keep their size).
+fn small_y(y: f32, top: f32, mag: f32) -> f32 {
+    let (lo, hi) = (top - 3.0, top + 7.0);
+    if y < lo {
+        y + 3.0 * (1.0 - mag)
+    } else if y > hi {
+        y - 7.0 * (1.0 - mag)
+    } else {
+        top + (y - top) * mag
+    }
+}
+
+/// A reach above or below a staff (in spaces) on a staff of size `mag` (see [`small_y`]):
+/// near the staff it shrinks, farther out it loses what the 3 spaces near the staff lost.
+fn small_reach(r: f32, mag: f32) -> f32 {
+    if r > 3.0 { r - 3.0 * (1.0 - mag) } else { r * mag }
+}
+
 /// Whether a staff has nothing but rests (and no lyrics or texts) in these measures.
 fn staff_empty(score: &Score, pi: usize, s: usize, measures: &[usize]) -> bool {
     measures.iter().all(|m| {
@@ -1022,6 +1059,8 @@ fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
     struct St {
         pi: usize,
         s: usize,
+        /// Height of the staff (smaller for a small staff).
+        h: f32,
         up: f32,
         down: f32,
         /// How far drawn things reach above the top line and below the bottom line.
@@ -1098,9 +1137,25 @@ fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
             } else {
                 0.0
             };
+            // A small staff: everything near it shrinks (lyrics move up with its bottom line).
+            let mag = staff_mag(score, pi, s);
+            let (reach_up, reach_down, lyric_reach) = if mag < 1.0 {
+                (
+                    small_reach(reach_up, mag),
+                    small_reach(reach_down, mag),
+                    if lyric_reach > 0.0 {
+                        lyric_reach - 3.0 * (1.0 - mag)
+                    } else {
+                        0.0
+                    },
+                )
+            } else {
+                (reach_up, reach_down, lyric_reach)
+            };
             staves.push(St {
                 pi,
                 s,
+                h: 4.0 * mag,
                 up: (reach_up - 3.0).max(0.0),
                 down: (reach_down - 3.0).max(0.0),
                 reach_up,
@@ -1122,7 +1177,7 @@ fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
         let top = match k.checked_sub(1).and_then(|p| staves.get(p)) {
             None => sy + st.up,
             Some(prev) => {
-                let prev_bottom = tops.last().map_or(0.0, |t| t.2) + 4.0;
+                let prev_bottom = tops.last().map_or(0.0, |t| t.2) + prev.h;
                 // Bottom line of the staff above to the top line of this one: what the notes
                 // need, at least what a spacer asks, or exactly what a fixed spacer says.
                 let natural = prev.down + prev.lyrics + prev.gap + st.up;
@@ -1138,7 +1193,7 @@ fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
         tops.push((st.pi, st.s, top));
     }
     let sys_h = match (tops.last(), staves.last()) {
-        (Some(t), Some(st)) => t.2 + 4.0 + st.down + st.lyrics,
+        (Some(t), Some(st)) => t.2 + st.h + st.down + st.lyrics,
         _ => 4.0,
     }
     .max(4.0);
@@ -1386,7 +1441,8 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
         // The system fits when its last staff keeps the music bottom margin and nothing of it
         // runs into the bottom margin.
         let bottom = ph - mbp;
-        let fits = y + blocks_h + last_top + 4.0 <= bottom - style.page.music_bottom
+        let last_h = tops.last().map_or(4.0, |t| staff_h(score, t.0, t.1));
+        let fits = y + blocks_h + last_top + last_h <= bottom - style.page.music_bottom
             && y + blocks_h + sys_h <= bottom;
         if !endless && (!fits || forced) && si > 0 {
             page_index += 1;
@@ -1408,7 +1464,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             blocks,
             fixed,
         });
-        prev_staff_end = Some((page_index, y + last_top + 4.0, spacer_below));
+        prev_staff_end = Some((page_index, y + last_top + last_h, spacer_below));
         prev_reach = bottom_reach;
         y += sys_h + SYSTEM_CLEAR;
         // An empty frame after the system keeps its room: the next staff starts the frame's
@@ -1444,7 +1500,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                     continue;
                 }
             }
-            let last_staff = p.y + p.tops.last().map_or(0.0, |t| t.2) + 4.0;
+            let last_staff = p.y + p.tops.last().map_or(4.0, |t| t.2 + staff_h(score, t.0, t.1));
             // An empty frame after the page's last system fills its part of the page.
             let frame = systems
                 .get(p.si)
@@ -1947,6 +2003,9 @@ fn draw_system(
         hits: &mut out.hits,
         f: Fonts::of(score),
     };
+    // What this system draws starts here (small staves shrink it at the end).
+    let (items0, hits0) = (o.page.items.len(), o.hits.len());
+    let mut all_cols: Vec<f32> = Vec::new();
 
     // Staff lines.
     for &(_, _, t) in tops {
@@ -1956,7 +2015,10 @@ fn draw_system(
         }
     }
     let sys_top = tops.first().map(|t| top + t.2).unwrap_or(top);
-    let sys_bottom = tops.last().map(|t| top + t.2 + 4.0).unwrap_or(top + 4.0);
+    let sys_bottom = tops
+        .last()
+        .map(|t| top + t.2 + staff_h(score, t.0, t.1))
+        .unwrap_or(top + 4.0);
     if tops.len() > 1 {
         o.line(x_start, sys_top, x_start, sys_bottom, g::THIN_BAR, None);
     }
@@ -2116,6 +2178,7 @@ fn draw_system(
         }
         let m_end = cx;
         cols.push((plan.len, m_end));
+        all_cols.extend(cols.iter().map(|c| c.1));
 
         // Tempo and measure text above the top staff.
         if let Some(&(_, _, t0)) = tops.first() {
@@ -2134,7 +2197,8 @@ fn draw_system(
                     // top line (or, below, from the bottom line of the bottom staff).
                     Some(place) => {
                         let base = if place.below {
-                            tops.last().map_or(staff_top + 4.0, |t| top + t.2 + 4.0)
+                            tops.last()
+                                .map_or(staff_top + 4.0, |t| top + t.2 + staff_h(score, t.0, t.1))
                         } else {
                             staff_top
                         };
@@ -2366,6 +2430,7 @@ fn draw_system(
                 top: staff_top,
                 clef,
                 columns: cols.clone(),
+                mag: staff_mag(score, pi, s),
             });
         }
 
@@ -2436,6 +2501,121 @@ fn draw_system(
                 o.line(xb, vy, xb, vy + 2.0, 0.16, None);
             }
             k = j + 1;
+        }
+    }
+
+    // Small staves: what was drawn for them at full size shrinks to their size, the noteheads
+    // staying on their columns.
+    let content_x = ctx.system_ends.last().map_or(x_start, |e| e.2);
+    for (j, &(pi, s, t)) in tops.iter().enumerate() {
+        let mag = staff_mag(score, pi, s);
+        if mag >= 1.0 {
+            continue;
+        }
+        let st = top + t;
+        // What belongs to the staff: from a little above it to a little above the next one.
+        let (upper, lower) = (st - 4.0, tops.get(j + 1).map_or(f32::MAX, |q| top + q.2 - 3.0));
+        let col = |x: f32| -> f32 {
+            if x < content_x {
+                return x;
+            }
+            let c = all_cols
+                .iter()
+                .copied()
+                .min_by(|a, b| (a - x).abs().total_cmp(&(b - x).abs()))
+                .unwrap_or(x);
+            c + (x - c) * mag
+        };
+        let near = |y: f32| y >= st - 3.0 && y <= st + 7.0;
+        let fy = |y: f32| small_y(y, st, mag);
+        for it in o.page.items.iter_mut().skip(items0) {
+            let (y0, y1, x0) = match &it.shape {
+                Shape::Glyph { x, y, .. } => (*y, *y, *x),
+                Shape::Line { x1, y1, x2, y2, .. } => (y1.min(*y2), y1.max(*y2), x1.min(*x2)),
+                Shape::Rect { x, y, h, .. } => (*y, y + h, *x),
+                Shape::Quad { p } | Shape::Curve { p, .. } => (
+                    p.iter().map(|q| q.1).fold(f32::MAX, f32::min),
+                    p.iter().map(|q| q.1).fold(f32::MIN, f32::max),
+                    p.iter().map(|q| q.0).fold(f32::MAX, f32::min),
+                ),
+                Shape::Text { x, y, .. } => (*y, *y, *x),
+            };
+            if !(y0 >= upper && y1 <= lower && x0 >= x_start - 0.2) {
+                continue;
+            }
+            match &mut it.shape {
+                Shape::Glyph { x, y, scale, .. } => {
+                    if near(*y) {
+                        *scale *= mag;
+                    }
+                    *x = col(*x);
+                    *y = fy(*y);
+                }
+                Shape::Line {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    width,
+                } => {
+                    if near(*y1) && near(*y2) && (*x1 - *x2).abs() > 1e-3 && (*y1 - *y2).abs() < 1e-3 {
+                        // A staff line or ledger line keeps its length.
+                    } else {
+                        *x1 = col(*x1);
+                        *x2 = col(*x2);
+                    }
+                    *y1 = fy(*y1);
+                    *y2 = fy(*y2);
+                    *width *= mag.max(0.85);
+                }
+                Shape::Rect { x, y, w, h } => {
+                    let (a, b) = (fy(*y), fy(*y + *h));
+                    *x = col(*x);
+                    *w *= mag;
+                    *y = a;
+                    *h = b - a;
+                }
+                Shape::Quad { p } => {
+                    for q in p.iter_mut() {
+                        *q = (col(q.0), fy(q.1));
+                    }
+                }
+                Shape::Curve { p, thick } => {
+                    for q in p.iter_mut() {
+                        *q = (col(q.0), fy(q.1));
+                    }
+                    *thick *= mag;
+                }
+                Shape::Text { x, y, .. } => {
+                    *x = col(*x);
+                    *y = fy(*y);
+                }
+            }
+        }
+        for h in o.hits.iter_mut().skip(hits0) {
+            if h.y0 >= upper - 1.0 && h.y1 <= lower + 1.0 && h.x0 >= x_start - 0.2 && h.y1 > upper {
+                h.x0 = col(h.x0);
+                h.x1 = col(h.x1);
+                h.y0 = fy(h.y0);
+                h.y1 = fy(h.y1);
+            }
+        }
+        // Ties, slurs and lines drawn later start from the shrunk notes.
+        for (ev, a) in ctx.events.iter_mut() {
+            if ev.part == pi && ev.staff == s && a.system == si && a.page == page_index {
+                a.x_left = col(a.x_left);
+                a.x_right = col(a.x_right);
+                a.top = fy(a.top);
+                a.bottom = fy(a.bottom);
+                a.stem_end = fy(a.stem_end);
+            }
+        }
+        for ((ev, _), te) in ctx.heads.iter_mut() {
+            if ev.part == pi && ev.staff == s && te.system == si && te.page == page_index {
+                te.x_left = col(te.x_left);
+                te.x_right = col(te.x_right);
+                te.y = fy(te.y);
+            }
         }
     }
 }

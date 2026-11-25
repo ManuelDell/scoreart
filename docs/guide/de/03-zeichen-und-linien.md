@@ -27,8 +27,11 @@ So sieht ein Ausschnitt dessen aus, was ScoreArt setzt:
 
 Mit der **Hand** ziehst du Systemtexte, Dynamik und Linien dorthin, wo du sie haben willst.
 Eine Linie lässt sich als Ganzes ziehen oder an einem Ende auf eine andere Note; zieh das
-offene Ende einer Gabel nach oben oder unten, um sie weiter zu öffnen. Alles, was du
-verschiebst, wird gespeichert.
+offene Ende einer Gabel nach oben oder unten, um sie weiter zu öffnen. **Studierzeichen**
+(Kästen wie *Intro*, *Vers*, *Refrain*), **Segno- und Coda-Zeichen** und Sprünge (*D.S. al
+Fine* …) ziehst du genauso; *Eigenschaften → Position zurücksetzen* stellt sie zurück. Alles, was
+du verschiebst, wird gespeichert — so, wie MuseScore es speichert, damit die Positionen den Weg
+zwischen beiden Programmen überstehen.
 
 ## Alles ist zu hören
 

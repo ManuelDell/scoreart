@@ -231,6 +231,14 @@ fn part_row(app: &mut ScoreApp, ui: &mut egui::Ui, pi: usize, count: usize, play
             }
         }
     }
+    let mut small = !part.small.is_empty() && part.small.iter().all(|h| *h);
+    if ui
+        .checkbox(&mut small, t("Small staves"))
+        .on_hover_text(t("Draw this instrument's staves smaller, as for a second voice"))
+        .changed()
+    {
+        app.run("part.small", json!({ "part": pi, "small": small }));
+    }
     let mut hide = !part.hide_empty.is_empty() && part.hide_empty.iter().all(|h| *h);
     if ui
         .checkbox(&mut hide, t("Hide empty staves"))
