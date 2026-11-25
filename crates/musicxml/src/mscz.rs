@@ -366,6 +366,30 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
         } else {
             Vec::new()
         };
+        // The chord symbols' channel ("harmony") and its instrument.
+        let mut harmony = scoreart_model::HarmonySound::default();
+        if let Some(prog) = inst
+            .into_iter()
+            .flat_map(|i| i.children_named("Channel"))
+            .find(|c| c.attr("name") == Some("harmony"))
+            .and_then(|c| c.child("program"))
+            .and_then(|pr| pr.attr("value"))
+            .and_then(|v| v.trim().parse::<u8>().ok())
+        {
+            harmony.program = prog.min(127);
+        }
+        // Staves hidden in systems where they are empty, and staves drawn small.
+        let per_staff = |f: &dyn Fn(&Element) -> bool| -> Vec<bool> {
+            let v: Vec<bool> = p.children_named("Staff").take(clefs.len()).map(f).collect();
+            if v.iter().any(|b| *b) { v } else { Vec::new() }
+        };
+        let hide_empty =
+            per_staff(&|st: &Element| st.child_text("hideWhenEmpty").is_some_and(|v| v.trim() == "1"));
+        let small = per_staff(&|st: &Element| {
+            st.child("StaffType")
+                .and_then(|t| t.child_text("small"))
+                .is_some_and(|v| v.trim() == "1")
+        });
         score.parts.push(Part {
             id: format!("P{}", pi + 1),
             name: clip(&name),
@@ -375,6 +399,9 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
             measures: Vec::new(),
             sound: Default::default(),
             hidden,
+            hide_empty,
+            small,
+            harmony,
         });
     }
     if score.parts.is_empty() {
@@ -386,6 +413,8 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
     // Breaks on a frame belong to the measure before it (a collection of songs often ends
     // each song with a section break on the frame between them).
     let mut frame_breaks: Vec<(usize, &Element)> = Vec::new();
+    // Vertical frames after a measure: the height of an empty one.
+    let mut frames: Vec<(usize, Option<f32>)> = Vec::new();
     for st in sc.children_named("Staff") {
         let Some(&(pi, si)) = st.attr("id").and_then(|id| staff_map.get(id)) else {
             continue;
@@ -403,6 +432,18 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                 && let Some(m) = measures_before.checked_sub(1)
             {
                 frame_breaks.extend(c.children_named("LayoutBreak").map(|b| (m, b)));
+                // A frame between measures always ends the line; an empty one keeps its height
+                // as blank space (used to push the following music onto the next page).
+                if c.name == "VBox" {
+                    let empty = c
+                        .children_named("Text")
+                        .all(|t| flat_text(t.child("text").unwrap_or(t)).trim().is_empty());
+                    let h = c
+                        .child_text("height")
+                        .and_then(|v| v.trim().parse::<f32>().ok())
+                        .filter(|h| h.is_finite() && *h > 0.0);
+                    frames.push((m, if empty { h } else { None }));
+                }
             }
             match c.name.as_str() {
                 "Measure" => measures_before += 1,
@@ -504,13 +545,26 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                             (true, _, _) => Jump::DalSegno,
                         })
                     });
-                    if let Some(j) = jump {
-                        info.jumps.push(j);
+                    if let Some(jump) = jump {
+                        info.jumps.push(jump);
+                        if j.child("offset").is_some() {
+                            info.jump_place = placement_of(j);
+                        }
                     }
                 }
                 for mk in m_el.children_named("Marker") {
-                    if let Some(j) = mk.child_text("label").and_then(jump_of_label) {
-                        info.jumps.push(j);
+                    if let Some(jump) = mk.child_text("label").and_then(jump_of_label) {
+                        info.jumps.push(jump);
+                        // Placed by hand: the offset is where it stands (from MuseScore's
+                        // anchor: the start, or for "Fine" and "To Coda" the end, of the
+                        // measure, and the top staff line).
+                        if mk.child("offset").is_some() {
+                            if jump.at_end() {
+                                info.jump_place = placement_of(mk);
+                            } else {
+                                info.marker_place = placement_of(mk);
+                            }
+                        }
                     }
                 }
             }
@@ -621,7 +675,15 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                         "RehearsalMark" if top_staff => {
                             if let Some(info) = score.measures.get_mut(mi) {
                                 info.rehearsal = Some(clip(&flat_text(c.child("text").unwrap_or(c))));
-                                info.rehearsal_place = placement_of(c);
+                                // The offset is where the mark sits (MuseScore's default
+                                // position is only the offset of a mark not moved): below the
+                                // staff without one is the default 4 spaces under it.
+                                info.rehearsal_place = match placement_of(c) {
+                                    Some(p) if p.below && c.child("offset").is_none() => {
+                                        Some(Placement::from_sp(0.0, 4.0, true))
+                                    }
+                                    p => p,
+                                };
                             }
                         }
                         "SystemText" if top_staff => {
@@ -1079,6 +1141,14 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
             layout_break(info, b);
         }
     }
+    for (m, h) in frames {
+        if let Some(info) = score.measures.get_mut(m) {
+            info.system_break = true;
+            if h.is_some() {
+                info.frame_after = h.map(|h| h.min(200.0));
+            }
+        }
+    }
     score.meta = meta;
     if let Some(last) = score.measures.last_mut()
         && last.barline == Barline::Regular
@@ -1449,6 +1519,12 @@ pub(crate) fn apply_style(score: &mut Score, st: &BTreeMap<String, String>, majo
     sp("maxStaffSpread", &mut f.max_staff_spread);
     sp("lastSystemFillLimit", &mut f.last_system_fill);
     f.vertical_justify = flag("enableVerticalSpread").unwrap_or(false);
+    f.single_name = !flag("hideInstrumentNameIfOneInstrument").unwrap_or(true);
+    let vis = |k: &str, d: u8| num(k).map_or(d, |v| v.clamp(0.0, 2.0) as u8);
+    f.first_names = vis("firstSystemInstNameVisibility", 0);
+    f.later_names = vis("subsSystemInstNameVisibility", 1);
+    f.german_chords =
+        flag("useGermanNoteNames").unwrap_or(false) || flag("useFullGermanNoteNames").unwrap_or(false);
     // With vertical justification the least system distance is a setting of its own.
     let min_key = if f.vertical_justify {
         "minSystemSpread"
@@ -1469,6 +1545,12 @@ pub(crate) fn apply_style(score: &mut Score, st: &BTreeMap<String, String>, majo
     sp("headerOffset", &mut f.header_offset);
     sp("footerOffset", &mut f.footer_offset);
     score.page = score.page.clamped();
+    // Hide empty staves for the whole score.
+    if flag("hideEmptyStaves").unwrap_or(false) {
+        for p in &mut score.parts {
+            p.hide_empty = vec![true; p.staff_count()];
+        }
+    }
 
     // Headers and footers.
     let hf = &mut score.header_footer;

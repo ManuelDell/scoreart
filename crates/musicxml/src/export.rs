@@ -403,7 +403,12 @@ pub fn write_laid_out(score: &Score, starts: &[(usize, bool)]) -> String {
             esc(&j)
         );
     }
-    if !starts.is_empty() {
+    if !starts.is_empty()
+        || score
+            .measures
+            .iter()
+            .any(|i| i.frame_after.is_some() || i.system_break || i.page_break)
+    {
         let user = |page: bool| -> Vec<usize> {
             score
                 .measures
@@ -419,7 +424,13 @@ pub fn write_laid_out(score: &Score, starts: &[(usize, bool)]) -> String {
                 .map(|(m, _)| m)
                 .collect()
         };
-        let j = serde_json::json!({ "line": user(false), "page": user(true) });
+        let frames: Vec<serde_json::Value> = score
+            .measures
+            .iter()
+            .enumerate()
+            .filter_map(|(m, i)| i.frame_after.map(|h| serde_json::json!([m, h])))
+            .collect();
+        let j = serde_json::json!({ "line": user(false), "page": user(true), "frames": frames });
         let _ = write!(
             misc,
             "<miscellaneous-field name=\"scoreart-breaks\">{}</miscellaneous-field>",
@@ -447,7 +458,25 @@ pub fn write_laid_out(score: &Score, starts: &[(usize, bool)]) -> String {
             }
         }
     }
-    for (name, v) in [("scoreart-sections", sections), ("scoreart-spacers", spacers)] {
+    // Staves hidden where empty, and how the chord symbols sound (when not the default).
+    let parts_extra: Vec<serde_json::Value> = score
+        .parts
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| !p.hide_empty.is_empty() || p.harmony != scoreart_model::HarmonySound::default())
+        .map(|(pi, p)| {
+            serde_json::json!({
+                "part": pi,
+                "hide_empty": p.hide_empty,
+                "harmony": { "play": p.harmony.play, "program": p.harmony.program, "volume": p.harmony.volume },
+            })
+        })
+        .collect();
+    for (name, v) in [
+        ("scoreart-sections", sections),
+        ("scoreart-spacers", spacers),
+        ("scoreart-parts", parts_extra),
+    ] {
         if !v.is_empty() {
             let _ = write!(
                 misc,
@@ -618,8 +647,22 @@ pub fn write_laid_out(score: &Score, starts: &[(usize, bool)]) -> String {
                         x.push_str(&clef_xml(*c, (staves > 1).then_some(s)));
                     }
                     // Hidden staves still play but are not printed.
-                    for s in (0..staves).filter(|s| !p.staff_visible(*s)) {
-                        let _ = write!(x, "<staff-details number=\"{}\" print-object=\"no\"/>", s + 1);
+                    for s in (0..staves).filter(|s| !p.staff_visible(*s) || p.staff_small(*s)) {
+                        let _ = write!(
+                            x,
+                            "<staff-details number=\"{}\"{}>{}</staff-details>",
+                            s + 1,
+                            if p.staff_visible(s) {
+                                ""
+                            } else {
+                                " print-object=\"no\""
+                            },
+                            if p.staff_small(s) {
+                                "<staff-size>70</staff-size>"
+                            } else {
+                                ""
+                            }
+                        );
                     }
                 } else {
                     for (s, c) in &clef_changes {
@@ -693,9 +736,10 @@ pub fn write_laid_out(score: &Score, starts: &[(usize, bool)]) -> String {
             if pi == 0 {
                 for j in info.jumps.iter().filter(|j| j.at_end()) {
                     if let Some((t, sound)) = jump_words(*j) {
+                        let (placement, rel) = place_attrs(info.jump_place);
                         let _ = writeln!(
                             x,
-                            "      <direction placement=\"above\"><direction-type><words font-style=\"italic\">{t}</words></direction-type><sound{sound}/></direction>"
+                            "      <direction placement=\"{placement}\"><direction-type><words font-style=\"italic\"{rel}>{t}</words></direction-type><sound{sound}/></direction>"
                         );
                     }
                 }
@@ -758,12 +802,13 @@ fn write_measure_directions(x: &mut String, info: &MeasureInfo, effective_tempo:
         );
     }
     for j in info.jumps.iter().filter(|j| !j.at_end()) {
+        let (placement, rel) = place_attrs(info.marker_place);
         let body = match j {
-            Jump::Segno => "<segno/>",
-            Jump::Coda => "<coda/>",
-            _ => "<coda smufl=\"codaSquare\"/>",
+            Jump::Segno => format!("<segno{rel}/>"),
+            Jump::Coda => format!("<coda{rel}/>"),
+            _ => format!("<coda smufl=\"codaSquare\"{rel}/>"),
         };
-        direction(x, "above", body, None, "");
+        direction(x, placement, &body, None, "");
     }
     if info.tempo.is_some() || info.tempo_text.is_some() {
         let mut body = String::new();

@@ -1798,3 +1798,113 @@ fn broken_pdfs_fail_cleanly() {
     assert_eq!(s.score.meta.title, title);
     assert!(s.reference.is_none());
 }
+
+/// A lead sheet line: a melody with chord symbols.
+fn lead_sheet() -> Session {
+    let xml = r#"<?xml version="1.0"?>
+<score-partwise version="4.0"><part-list><score-part id="P1"><part-name>Voice</part-name></score-part></part-list>
+<part id="P1">
+<measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>
+<harmony><root><root-step>C</root-step></root><kind>major</kind></harmony>
+<note><pitch><step>E</step><octave>5</octave></pitch><duration>2</duration><type>half</type></note>
+<harmony><root><root-step>A</root-step></root><kind>minor</kind></harmony>
+<note><pitch><step>C</step><octave>5</octave></pitch><duration>2</duration><type>half</type></note>
+</measure>
+<measure number="2">
+<note><pitch><step>D</step><octave>5</octave></pitch><duration>2</duration><type>half</type></note>
+<harmony><root><root-step>G</root-step></root><kind>dominant</kind><bass><bass-step>B</bass-step></bass></harmony>
+<note><pitch><step>B</step><octave>4</octave></pitch><duration>2</duration><type>half</type></note>
+</measure>
+</part></score-partwise>"#;
+    let mut s = Session::default();
+    s.open_bytes("lead.musicxml", xml.as_bytes()).unwrap();
+    s
+}
+
+#[test]
+fn chord_symbols_sound_until_the_next_one() {
+    let mut s = lead_sheet();
+    let seq = scoreart_midi::sequence(&s.score);
+    let chords: Vec<&scoreart_midi::PlayNote> = seq.notes.iter().filter(|n| n.tech.harmony).collect();
+    let q = u64::from(TPQ);
+    // C: bass C3, then C E G; Am from beat 3 to the G7/B in measure 2, beat 3.
+    let at = |t: u64| -> Vec<u8> {
+        let mut k: Vec<u8> = chords.iter().filter(|n| n.start == t).map(|n| n.key).collect();
+        k.sort_unstable();
+        k
+    };
+    assert_eq!(at(0), vec![48, 60, 64, 67]);
+    assert_eq!(at(2 * q), vec![45, 57, 60, 64]);
+    assert_eq!(at(6 * q), vec![47, 55, 59, 62, 65]);
+    assert!(
+        chords
+            .iter()
+            .filter(|n| n.start == 2 * q)
+            .all(|n| n.ticks == 4 * q)
+    );
+    assert!(
+        chords
+            .iter()
+            .filter(|n| n.start == 6 * q)
+            .all(|n| n.ticks == 2 * q)
+    );
+    // The melody plays as before.
+    assert_eq!(seq.notes.iter().filter(|n| !n.tech.harmony).count(), 4);
+    // Their own instrument; off when switched off.
+    s.execute("part.harmony", &json!({ "part": 0, "instrument": "guitar" }))
+        .unwrap();
+    let guitar = scoreart_model::INSTRUMENTS
+        .iter()
+        .find(|i| i.id == "guitar")
+        .unwrap()
+        .program;
+    let seq = scoreart_midi::sequence(&s.score);
+    assert!(
+        seq.notes
+            .iter()
+            .filter(|n| n.tech.harmony)
+            .all(|n| n.program == guitar)
+    );
+    // A MIDI file gets a track of its own for them.
+    let smf = scoreart_midi::to_smf(&s.score);
+    assert!(smf.starts_with(b"MThd"));
+    s.execute("part.harmony", &json!({ "part": 0, "play": false }))
+        .unwrap();
+    assert!(
+        !scoreart_midi::sequence(&s.score)
+            .notes
+            .iter()
+            .any(|n| n.tech.harmony)
+    );
+    // Saved with the score.
+    let back = from_saved(&s);
+    assert_eq!(back.score.parts[0].harmony, s.score.parts[0].harmony);
+}
+
+fn from_saved(s: &Session) -> Session {
+    let bytes = s.save_bytes("x.musicxml").unwrap();
+    let mut back = Session::default();
+    back.open_bytes("x.musicxml", &bytes).unwrap();
+    back
+}
+
+#[test]
+fn layout_settings_from_musescore_survive_musicxml() {
+    let mut s = lead_sheet();
+    s.execute("part.hide_empty", &json!({ "part": 0, "hide": true }))
+        .unwrap();
+    s.score.measures[0].frame_after = Some(30.0);
+    s.score.measures[0].marker_place = Some(scoreart_model::Placement::from_sp(8.4, -4.0, false));
+    s.score.measures[0].jumps.push(scoreart_model::Jump::Segno);
+    s.score.page.german_chords = true;
+    s.score.page.first_names = 2;
+    let back = from_saved(&s);
+    assert_eq!(back.score.parts[0].hide_empty, vec![true]);
+    assert_eq!(back.score.measures[0].frame_after, Some(30.0));
+    assert_eq!(
+        back.score.measures[0].marker_place,
+        s.score.measures[0].marker_place
+    );
+    assert!(back.score.page.german_chords);
+    assert_eq!(back.score.page.first_names, 2);
+}

@@ -302,6 +302,21 @@ fn read_layout(root: &Element, score: &mut Score, ours: bool) {
             sm.spacer_fixed = f(&v, "fixed");
         }
     }
+    for v in json("scoreart-parts") {
+        if let Some(p) = n(&v, "part").and_then(|p| score.parts.get_mut(p)) {
+            if let Some(h) = v.get("hide_empty").and_then(|h| h.as_array()) {
+                p.hide_empty = h.iter().take(64).map(|x| x.as_bool().unwrap_or(false)).collect();
+            }
+            if let Some(h) = v.get("harmony") {
+                let d = scoreart_model::HarmonySound::default();
+                p.harmony = scoreart_model::HarmonySound {
+                    play: b(h, "play").unwrap_or(d.play),
+                    program: n(h, "program").map_or(d.program, |x| x.min(127) as u8),
+                    volume: n(h, "volume").map_or(d.volume, |x| x.min(100) as u8),
+                };
+            }
+        }
+    }
     if !ours {
         // Another program numbering a measure 1 again after counted ones: a new section.
         if let Some(part) = root.children_named("part").next() {
@@ -340,6 +355,16 @@ fn read_layout(root: &Element, score: &mut Score, ours: bool) {
     for (m, info) in score.measures.iter_mut().enumerate() {
         info.system_break = lines.contains(&m);
         info.page_break = pages.contains(&m);
+    }
+    // Empty frames: [measure, height].
+    for f in j.get("frames").and_then(|v| v.as_array()).into_iter().flatten() {
+        let m = f.get(0).and_then(|v| v.as_u64()).map(|v| v as usize);
+        let h = f.get(1).and_then(|v| v.as_f64()).filter(|h| h.is_finite());
+        if let (Some(m), Some(h)) = (m, h)
+            && let Some(info) = score.measures.get_mut(m)
+        {
+            info.frame_after = Some(h.clamp(0.0, 200.0) as f32);
+        }
     }
 }
 
@@ -895,6 +920,7 @@ fn read_part(
     let mut divisions: u64 = 1;
     let mut staves: usize = 1;
     let mut hidden: Vec<bool> = Vec::new();
+    let mut small: Vec<bool> = Vec::new();
     let mut clefs: BTreeMap<usize, Clef> = BTreeMap::new();
     let mut measures: Vec<PartMeasure> = Vec::new();
     // Open lines: (staff, voice, family, number) for note lines; (staff, key) for directions.
@@ -950,12 +976,21 @@ fn read_part(
                     }
                     // Staves that are not printed.
                     for sd in c.children_named("staff-details") {
+                        let n = sd
+                            .attr("number")
+                            .and_then(|n| n.parse::<usize>().ok())
+                            .unwrap_or(1)
+                            .clamp(1, limits::MAX_STAVES);
+                        // A staff drawn smaller (cue size).
+                        if sd.child_num("staff-size").is_some_and(|v| v < 90.0) {
+                            if small.len() < n {
+                                small.resize(n, false);
+                            }
+                            if let Some(h) = small.get_mut(n - 1) {
+                                *h = true;
+                            }
+                        }
                         if sd.attr("print-object") == Some("no") {
-                            let n = sd
-                                .attr("number")
-                                .and_then(|n| n.parse::<usize>().ok())
-                                .unwrap_or(1)
-                                .clamp(1, limits::MAX_STAVES);
                             if hidden.len() < n {
                                 hidden.resize(n, false);
                             }
@@ -1379,6 +1414,7 @@ fn read_part(
                                 "segno" => {
                                     if first_part && let Some(info) = score.measures.get_mut(mi) {
                                         info.jumps.push(Jump::Segno);
+                                        info.marker_place = placement_attrs(c, k).or(info.marker_place);
                                     }
                                 }
                                 "coda" => {
@@ -1389,6 +1425,7 @@ fn read_part(
                                             Jump::Coda
                                         };
                                         info.jumps.push(j);
+                                        info.marker_place = placement_attrs(c, k).or(info.marker_place);
                                     }
                                 }
                                 "metronome" => {
@@ -1605,6 +1642,9 @@ fn read_part(
                         if let Some(j) = jump_from_words(&w) {
                             if first_part && let Some(info) = score.measures.get_mut(mi) {
                                 info.jumps.push(j);
+                                if j.at_end() && words_place.is_some() {
+                                    info.jump_place = words_place;
+                                }
                             }
                         } else if has_tempo {
                             if first_part && let Some(info) = score.measures.get_mut(mi) {
@@ -1945,5 +1985,8 @@ fn read_part(
         measures,
         sound: Default::default(),
         hidden,
+        hide_empty: Vec::new(),
+        small,
+        harmony: Default::default(),
     })
 }

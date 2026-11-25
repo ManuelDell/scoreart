@@ -14,6 +14,7 @@
 )]
 
 mod arrange;
+pub mod chord;
 pub mod edit;
 pub mod marks;
 mod pitch;
@@ -494,6 +495,36 @@ pub struct Part {
     /// Staves not shown (by staff index; missing = shown). Hidden staves still play.
     #[serde(default)]
     pub hidden: Vec<bool>,
+    /// Staves left out of a system in which they have nothing to play (by staff index).
+    #[serde(default)]
+    pub hide_empty: Vec<bool>,
+    /// Staves drawn smaller (cue size; by staff index).
+    #[serde(default)]
+    pub small: Vec<bool>,
+    /// How the part's chord symbols sound.
+    #[serde(default)]
+    pub harmony: HarmonySound,
+}
+
+/// Chord symbols played back, as a channel of their part with an instrument of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HarmonySound {
+    pub play: bool,
+    /// General MIDI program, 0-based.
+    pub program: u8,
+    /// 0…100.
+    pub volume: u8,
+}
+
+impl Default for HarmonySound {
+    fn default() -> Self {
+        HarmonySound {
+            play: true,
+            program: 0,
+            volume: 70,
+        }
+    }
 }
 
 /// Which sound plays a part, and its mixer channel.
@@ -533,6 +564,16 @@ impl Part {
 
     pub fn staff_visible(&self, staff: usize) -> bool {
         !self.hidden.get(staff).copied().unwrap_or(false)
+    }
+
+    /// Whether a staff is left out of systems where it is empty.
+    pub fn staff_hides_empty(&self, staff: usize) -> bool {
+        self.hide_empty.get(staff).copied().unwrap_or(false)
+    }
+
+    /// Whether a staff is drawn small.
+    pub fn staff_small(&self, staff: usize) -> bool {
+        self.small.get(staff).copied().unwrap_or(false)
     }
 
     /// Whether any staff of the part is shown.
@@ -715,6 +756,10 @@ pub struct MeasureInfo {
     /// A new page starts after this measure.
     #[serde(default)]
     pub page_break: bool,
+    /// An empty frame after this measure's system: blank space of this height (staff spaces),
+    /// as MuseScore's vertical frames keep room on a page.
+    #[serde(default)]
+    pub frame_after: Option<f32>,
     /// Length in ticks when it differs from the time signature (pickup, split measure).
     #[serde(default)]
     pub actual: Option<u32>,
@@ -727,6 +772,14 @@ pub struct MeasureInfo {
     /// Where the rehearsal mark was moved to (None = default place above the staff).
     #[serde(default)]
     pub rehearsal_place: Option<Placement>,
+    /// Where the segno or coda sign at the start was placed by hand: offset from the start
+    /// of the measure, its baseline from the top staff line (staff spaces).
+    #[serde(default)]
+    pub marker_place: Option<Placement>,
+    /// Where the instruction at the end (D.S. al Fine, Fine, To Coda …) was placed by hand:
+    /// its right end from the end of the measure, its baseline from the top staff line.
+    #[serde(default)]
+    pub jump_place: Option<Placement>,
     /// A section ends after this measure (a new system follows; see [`SectionBreak`]).
     #[serde(default)]
     pub section: Option<SectionBreak>,
@@ -900,6 +953,14 @@ pub struct PageFormat {
     /// Header moved down and footer moved down from the margin line, staff spaces.
     pub header_offset: f32,
     pub footer_offset: f32,
+    /// Whether the name of the only instrument of a score is shown.
+    pub single_name: bool,
+    /// Instrument names before the first system and before the others: 0 the full name,
+    /// 1 the short name, 2 none.
+    pub first_names: u8,
+    pub later_names: u8,
+    /// Chord symbols with German note names (H for B, B for B flat).
+    pub german_chords: bool,
 }
 
 impl Default for PageFormat {
@@ -934,6 +995,10 @@ impl Default for PageFormat {
             first_indent: 0.0,
             header_offset: 0.0,
             footer_offset: 5.0,
+            single_name: true,
+            first_names: 0,
+            later_names: 1,
+            german_chords: false,
         }
     }
 }
@@ -1000,6 +1065,10 @@ impl PageFormat {
             first_indent: c(self.first_indent, 0.0, 60.0, d.first_indent),
             header_offset: c(self.header_offset, -50.0, 50.0, d.header_offset),
             footer_offset: c(self.footer_offset, -50.0, 50.0, d.footer_offset),
+            single_name: self.single_name,
+            first_names: self.first_names.min(2),
+            later_names: self.later_names.min(2),
+            german_chords: self.german_chords,
         }
     }
 
@@ -1227,6 +1296,9 @@ impl Score {
             measures: Vec::new(),
             sound: Default::default(),
             hidden: Vec::new(),
+            hide_empty: Vec::new(),
+            small: Vec::new(),
+            harmony: Default::default(),
         });
         self.normalize();
     }

@@ -18,7 +18,7 @@ mod layout;
 mod serif;
 pub mod smufl;
 
-pub use layout::{layout, text_width};
+pub use layout::{layout, text_accidental, text_width};
 use scoreart_model::edit::EventRef;
 use scoreart_model::{Clef, PageFormat};
 

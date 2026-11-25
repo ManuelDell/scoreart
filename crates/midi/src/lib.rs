@@ -464,6 +464,7 @@ pub fn sequence(score: &Score) -> Sequence {
                             legato: slurred && !short,
                             accent: ids.iter().any(|i| matches!(*i, "accent" | "marcato")),
                             ornament: false,
+                            harmony: false,
                         };
                         if ids.iter().any(|i| i.ends_with("pizzicato")) {
                             tech.technique = Technique::Pizzicato;
@@ -668,6 +669,7 @@ pub fn sequence(score: &Score) -> Sequence {
             }
         }
     }
+    harmony(score, &played, end, &mut seq.notes);
     seq.end = end;
     seq.tempos = timing::tempo_map(score, &played, end, &stretches, &pauses);
     seq.notes.sort_by_key(|n| (n.start, n.part, n.key));
@@ -678,14 +680,69 @@ pub fn sequence(score: &Score) -> Sequence {
     seq
 }
 
+/// Chord symbols sounding as their part's harmony channel (its own instrument): from each
+/// symbol until the next one of the part (in the played order), the bass low and the chord
+/// above it. A symbol that names no chord ("N.C.") is silence until the next.
+fn harmony(score: &Score, played: &[(usize, u64)], end: u64, notes: &mut Vec<PlayNote>) {
+    for (pi, part) in score.parts.iter().enumerate() {
+        let h = part.harmony;
+        if !h.play || h.volume == 0 {
+            continue;
+        }
+        let mut chords: Vec<(u64, &str)> = Vec::new();
+        for &(m, mtick) in played {
+            let Some(pm) = part.measures.get(m) else { continue };
+            let mut here: Vec<(u32, &str)> = Vec::new();
+            for sm in &pm.staves {
+                for v in &sm.voices {
+                    for (e, on) in v.events.iter().zip(v.onsets()) {
+                        if let Some(cs) = e.chord_symbol.as_deref() {
+                            here.push((on, cs));
+                        }
+                    }
+                }
+            }
+            here.sort_by_key(|c| c.0);
+            here.dedup_by_key(|c| c.0);
+            chords.extend(here.into_iter().map(|(on, cs)| (mtick + u64::from(on), cs)));
+        }
+        let velocity = (u32::from(h.volume) * 11 / 10).clamp(1, 127) as u8;
+        for (i, &(start, cs)) in chords.iter().enumerate() {
+            let stop = chords.get(i + 1).map_or(end, |c| c.0);
+            let Some(tones) = scoreart_model::chord::chord_tones(cs) else {
+                continue;
+            };
+            if stop <= start {
+                continue;
+            }
+            for key in tones.keys() {
+                notes.push(PlayNote {
+                    start,
+                    ticks: stop - start,
+                    key,
+                    velocity,
+                    part: pi,
+                    program: h.program,
+                    tech: Tech {
+                        harmony: true,
+                        ..Tech::default()
+                    },
+                    repeat: 0,
+                });
+            }
+        }
+    }
+}
+
 /// A note that would still sound when the same key of the same part is struck again (legato
 /// overlap, a long note under a short one) ends just as it is struck again, so the new note is
 /// not cut off by the old one's release. `notes` is sorted by start.
 fn untangle_repeated_keys(notes: &mut [PlayNote]) {
-    let mut last: std::collections::HashMap<(usize, u8), usize> = std::collections::HashMap::new();
+    // By sound too: a chord symbol's note and a melody note of one key are two instruments.
+    let mut last: std::collections::HashMap<(usize, u8, u8), usize> = std::collections::HashMap::new();
     for i in 0..notes.len() {
         let Some(&cur) = notes.get(i) else { continue };
-        if let Some(&j) = last.get(&(cur.part, cur.key))
+        if let Some(&j) = last.get(&(cur.part, cur.program, cur.key))
             && let Some(prev) = notes.get_mut(j)
             && prev.start < cur.start
             && prev.start + prev.ticks > cur.start
@@ -694,7 +751,7 @@ fn untangle_repeated_keys(notes: &mut [PlayNote]) {
                 .saturating_sub(u64::from(TPQ) / 96)
                 .max(1);
         }
-        last.insert((cur.part, cur.key), i);
+        last.insert((cur.part, cur.program, cur.key), i);
     }
 }
 
@@ -753,7 +810,7 @@ pub fn to_smf(score: &Score) -> Vec<u8> {
         }
         // Instrument changes: a program change before the first note of the new instrument.
         let mut current = part.program;
-        for n in seq.notes.iter().filter(|n| n.part == pi) {
+        for n in seq.notes.iter().filter(|n| n.part == pi && !n.tech.harmony) {
             if n.program != current {
                 current = n.program;
                 abs.push((
@@ -799,10 +856,57 @@ pub fn to_smf(score: &Score) -> Vec<u8> {
         let strokes: Vec<PlayNote> = seq
             .notes
             .iter()
-            .filter(|n| n.part == pi)
+            .filter(|n| n.part == pi && !n.tech.harmony)
             .flat_map(PlayNote::strokes)
             .collect();
         for n in &strokes {
+            let key = u7::new(n.key.min(127));
+            abs.push((
+                scale(n.start + n.ticks),
+                TrackEventKind::Midi {
+                    channel: ch,
+                    message: MidiMessage::NoteOff { key, vel: u7::new(0) },
+                },
+            ));
+            abs.push((
+                scale(n.start),
+                TrackEventKind::Midi {
+                    channel: ch,
+                    message: MidiMessage::NoteOn {
+                        key,
+                        vel: u7::new(n.velocity.clamp(1, 127)),
+                    },
+                },
+            ));
+        }
+        tracks.push(to_track(abs, scale(seq.end)));
+    }
+    // Chord symbols: a track per part that plays them, on channels after the parts'.
+    let mut next_ch = score.parts.len();
+    for (pi, part) in score.parts.iter().enumerate() {
+        let notes: Vec<&PlayNote> = seq
+            .notes
+            .iter()
+            .filter(|n| n.part == pi && n.tech.harmony)
+            .collect();
+        if notes.is_empty() {
+            continue;
+        }
+        if next_ch == 9 {
+            next_ch += 1;
+        }
+        let ch = u4::new((next_ch % 16) as u8);
+        next_ch += 1;
+        let mut abs: Vec<(u64, TrackEventKind<'static>)> = vec![(
+            0,
+            TrackEventKind::Midi {
+                channel: ch,
+                message: MidiMessage::ProgramChange {
+                    program: u7::new(part.harmony.program.min(127)),
+                },
+            },
+        )];
+        for n in notes {
             let key = u7::new(n.key.min(127));
             abs.push((
                 scale(n.start + n.ticks),

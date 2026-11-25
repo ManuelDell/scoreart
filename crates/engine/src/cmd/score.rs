@@ -589,6 +589,71 @@ pub fn commands() -> Vec<CommandSpec> {
             undoable: true,
         },
         CommandSpec {
+            id: "part.harmony",
+            label: "Chord symbol playback",
+            menu: &[],
+            shortcut: None,
+            params: "any of: play (true|false), instrument (an instrument id, e.g. piano, guitar) or program (General MIDI 0…127), volume (0…100); part? (default: the selected part) — how the part's chord symbols sound",
+            enabled: has_parts,
+            run: |s, p| {
+                let part = p_usize(p, "part").unwrap_or_else(|| s.focus().0);
+                let program = match p.get("instrument").and_then(Value::as_str) {
+                    Some(id) => Some(
+                        scoreart_model::INSTRUMENTS
+                            .iter()
+                            .find(|i| i.id == id)
+                            .map(|i| i.program)
+                            .ok_or_else(|| Error::Param(format!("no such instrument: {id}")))?,
+                    ),
+                    None => p_usize(p, "program").map(|v| v.min(127) as u8),
+                };
+                let h = &mut s
+                    .score
+                    .parts
+                    .get_mut(part)
+                    .ok_or_else(|| Error::Param("no such part".into()))?
+                    .harmony;
+                if let Some(on) = p.get("play").and_then(Value::as_bool) {
+                    h.play = on;
+                }
+                if let Some(pr) = program {
+                    h.program = pr;
+                }
+                if let Some(v) = p_usize(p, "volume") {
+                    h.volume = v.min(100) as u8;
+                }
+                Ok(json!({ "play": h.play, "program": h.program, "volume": h.volume }))
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "part.hide_empty",
+            label: "Hide empty staves",
+            menu: &[],
+            shortcut: None,
+            params: "hide: true|false, part? (default: the selected part) — leave the part's staves out of systems in which they have nothing to play",
+            enabled: has_parts,
+            run: |s, p| {
+                let part = p_usize(p, "part").unwrap_or_else(|| s.focus().0);
+                let on = p
+                    .get("hide")
+                    .and_then(Value::as_bool)
+                    .ok_or_else(|| Error::Param("hide: true or false".into()))?;
+                let pt = s
+                    .score
+                    .parts
+                    .get_mut(part)
+                    .ok_or_else(|| Error::Param("no such part".into()))?;
+                pt.hide_empty = if on {
+                    vec![true; pt.staff_count()]
+                } else {
+                    Vec::new()
+                };
+                Ok(Value::Null)
+            },
+            undoable: true,
+        },
+        CommandSpec {
             id: "measure.break",
             label: "Line or page break",
             menu: &[],

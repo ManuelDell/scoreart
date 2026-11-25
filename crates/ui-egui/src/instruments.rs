@@ -186,6 +186,61 @@ fn part_row(app: &mut ScoreApp, ui: &mut egui::Ui, pi: usize, count: usize, play
     }
     ui.label(RichText::new(t("Sound")).color(tk.text_dim));
     crate::mixer::sound_picker(app, ui, pi, &part.sound, playing, wide);
+    // Chord symbols: whether they sound, with which instrument and how loud.
+    let has_chords = part
+        .measures
+        .iter()
+        .flat_map(|pm| pm.staves.iter())
+        .flat_map(|sm| sm.voices.iter())
+        .flat_map(|v| v.events.iter())
+        .any(|e| e.chord_symbol.is_some());
+    if has_chords {
+        let h = part.harmony;
+        let mut play = h.play;
+        if ui
+            .checkbox(&mut play, t("Play chord symbols"))
+            .on_hover_text(t("The chord symbols sound with an instrument of their own"))
+            .changed()
+        {
+            app.run("part.harmony", json!({ "part": pi, "play": play }));
+        }
+        if h.play {
+            let current = INSTRUMENTS.iter().find(|i| i.program == h.program).map_or_else(
+                || tf("Program {}", &[&(u32::from(h.program) + 1)]),
+                |i| t(i.name).to_string(),
+            );
+            let mut pick: Option<&'static str> = None;
+            egui::ComboBox::from_id_salt(("harmony-instrument", pi))
+                .selected_text(current)
+                .width(wide)
+                .height(420.0)
+                .show_ui(ui, |ui| {
+                    for i in INSTRUMENTS {
+                        if ui.selectable_label(i.program == h.program, t(i.name)).clicked() {
+                            pick = Some(i.id);
+                        }
+                    }
+                });
+            if let Some(id) = pick {
+                app.run("part.harmony", json!({ "part": pi, "instrument": id }));
+            }
+            let mut vol = h.volume;
+            let r = ui.add(egui::Slider::new(&mut vol, 0..=100).text(t("Chord volume")));
+            if r.changed() {
+                app.run("part.harmony", json!({ "part": pi, "volume": vol }));
+            }
+        }
+    }
+    let mut hide = !part.hide_empty.is_empty() && part.hide_empty.iter().all(|h| *h);
+    if ui
+        .checkbox(&mut hide, t("Hide empty staves"))
+        .on_hover_text(t(
+            "Leave this instrument out of systems in which it has nothing to play",
+        ))
+        .changed()
+    {
+        app.run("part.hide_empty", json!({ "part": pi, "hide": hide }));
+    }
     // Lines that could become instruments of their own.
     let lines: Vec<Line> = part
         .lines()

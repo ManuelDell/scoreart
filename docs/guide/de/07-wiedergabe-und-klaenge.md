@@ -10,6 +10,15 @@ Jede Instrumentenfamilie spielt auf ihre Weise, und jede Note bekommt einen nat�
 und ein natürliches Ende. *Instrumente → Sound-Optimierung* schaltet diese Formung ab, wenn du
 schlichte Töne möchtest.
 
+## Akkordsymbole
+
+Auch Akkordsymbole erklingen: jedes von seiner Stelle bis zum nächsten, als Basston mit dem
+Akkord darüber — „C“, „Am7“, „F#/E“, „Bbmaj7“, „Dsus4“, „G7(b9)“, deutsch „Hm“ und die
+übrigen üblichen Schreibweisen; „N.C.“ ist Stille. Im Reiter *Instrumente* hat jedes
+Instrument mit Akkordsymbolen **Akkordsymbole abspielen**, das **Instrument**, mit dem sie
+klingen (Klavier, Gitarre, Orgel …), und ihre **Lautstärke** — wie der Akkord-Kanal in
+MuseScore. Partituren aus MuseScore behalten das dort gewählte Instrument.
+
 ## Der Mixer
 
 **Mixer** (`F10`) gibt jedem Instrument eine eigene Spur: Klang, Lautstärke, Panorama, Stumm,

@@ -21,6 +21,9 @@ struct MeasurePlan {
     len: u32,
     /// Width of key/time/clef changes drawn at the start when not first in a system.
     prefix: f32,
+    /// Per column: the least space it keeps when a system is squeezed (what lyrics and chord
+    /// symbols need; 0 = squeezable like any space).
+    mins: Vec<f32>,
 }
 
 impl MeasurePlan {
@@ -29,6 +32,21 @@ impl MeasurePlan {
     }
     fn stretch(&self) -> f32 {
         self.cols.iter().map(|c| c.2).sum()
+    }
+    /// A column's space at a stretch factor: squeezing stops at what lyrics need.
+    fn space(&self, i: usize, stretch: f32) -> f32 {
+        let sp = self.cols.get(i).map_or(0.0, |c| c.2) * stretch;
+        sp.max(
+            self.mins
+                .get(i)
+                .copied()
+                .unwrap_or(0.0)
+                .min(sp / stretch.max(1e-3)),
+        )
+    }
+    /// Width at a stretch factor (without the prefix).
+    fn width_at(&self, stretch: f32) -> f32 {
+        self.fixed() + (0..self.cols.len()).map(|i| self.space(i, stretch)).sum::<f32>()
     }
 }
 
@@ -74,6 +92,15 @@ fn syllable_width(f: &Fonts, l: &str) -> f32 {
         verse_number(l).1.trim_end_matches('-'),
         LYRIC_SIZE,
     )
+}
+
+/// Baseline of the first verse below the bottom staff line, staff spaces: 3 spaces (as
+/// MuseScore places lyrics), lower when notes reach down so far that the syllables would touch
+/// them (1 space clear).
+fn lyric_base(score: &Score, part: usize, staff: usize, measures: &[usize]) -> f32 {
+    let (_, down) = staff_reach(score, part, staff, measures);
+    let size = Fonts::of(score).size(TextKind::Lyrics, LYRIC_SIZE);
+    (down + 1.0 + 0.75 * size).max(3.0)
 }
 
 /// Distance between the lines of different verses, for the lyrics' size.
@@ -200,7 +227,12 @@ fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Styl
                     let mut prev_chord: Option<(u32, f32)> = None;
                     for (e, on) in v.events.iter().zip(v.onsets()) {
                         if let Some(cs) = &e.chord_symbol {
-                            let w = styled_width(&fonts, TextKind::ChordSymbol, &chord_text(cs), 2.2);
+                            let w = styled_width(
+                                &fonts,
+                                TextKind::ChordSymbol,
+                                &chord_text(cs, fonts.german),
+                                2.2,
+                            );
                             if let Some((pon, pw)) = prev_chord {
                                 lyric_need.push((pon, on, pw + 1.0));
                             }
@@ -272,13 +304,21 @@ fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Styl
             let sp = space_for(next - t, style.spacing) + extra.get(&t).copied().unwrap_or(0.0);
             cols.push((t, lead.get(&t).copied().unwrap_or(0.0), sp));
         }
-        // Widen the columns between two syllables when they are too close.
+        // Widen the columns between two syllables when they are too close; that room is
+        // kept when the measure is squeezed.
+        let mut mins = vec![0.0f32; cols.len()];
         for (from, to, need) in lyric_need {
             let have: f32 = cols.iter().filter(|c| c.0 >= from && c.0 < to).map(|c| c.2).sum();
-            if have > 0.0 && have < need {
-                let k = need / have;
-                for c in cols.iter_mut().filter(|c| c.0 >= from && c.0 < to) {
+            if have > 0.0 {
+                let k = (need / have).max(1.0);
+                for (c, mn) in cols
+                    .iter_mut()
+                    .zip(mins.iter_mut())
+                    .filter(|(c, _)| c.0 >= from && c.0 < to)
+                {
+                    let share = c.2 * need / have;
                     c.2 *= k;
+                    *mn = mn.max(share);
                 }
             }
         }
@@ -302,7 +342,12 @@ fn plan_measures(score: &Score, acc: &HashMap<NoteKey, Accidental>, style: &Styl
                 prefix += time_width(t) + 0.4;
             }
         }
-        plans.push(MeasurePlan { cols, len, prefix });
+        plans.push(MeasurePlan {
+            cols,
+            len,
+            prefix,
+            mins,
+        });
     }
     plans
 }
@@ -380,10 +425,24 @@ fn header_width(score: &Score, m: usize) -> f32 {
 
 /// Width of a text line at `size`: the advance widths of the serif text font (Crimson Text);
 /// characters outside its table count half an em.
+/// ♯ ♭ ♮ in a text (chord symbols, tempo …): the text font has none, so they are drawn with
+/// the music font — its glyph, width and how far above the baseline it sits (in ems).
+pub fn text_accidental(c: char) -> Option<(char, f32, f32)> {
+    Some(match c {
+        '♯' => ('\u{E262}', 0.29, 0.33),
+        '♭' => ('\u{E260}', 0.27, 0.12),
+        '♮' => ('\u{E261}', 0.21, 0.33),
+        _ => return None,
+    })
+}
+
 pub fn text_width(s: &str, size: f32) -> f32 {
     let em: f32 = s
         .chars()
         .map(|c| {
+            if let Some((_, w, _)) = text_accidental(c) {
+                return w;
+            }
             u32::from(c)
                 .checked_sub(crate::serif::FIRST)
                 .and_then(|i| crate::serif::WIDTHS.get(i as usize))
@@ -414,6 +473,25 @@ fn shown_parts(score: &Score) -> usize {
         .count()
 }
 
+/// The name written before a part's staves: full or short by the score's settings, none for
+/// the only instrument unless it asks for one.
+fn part_label(score: &Score, p: &scoreart_model::Part, first: bool) -> Option<String> {
+    if shown_parts(score) < 2 && !(first && score.page.single_name) {
+        return None;
+    }
+    let vis = if first {
+        score.page.first_names
+    } else {
+        score.page.later_names
+    };
+    let name = match vis {
+        0 => &p.name,
+        1 => &p.abbreviation,
+        _ => return None,
+    };
+    (!name.trim().is_empty()).then(|| name.clone())
+}
+
 fn name_indent(score: &Score, first: bool) -> f32 {
     let w = score
         .parts
@@ -422,12 +500,9 @@ fn name_indent(score: &Score, first: bool) -> f32 {
         .filter(|(pi, _)| shown_staves(score, *pi) > 0)
         .map(|(_, p)| p)
         .map(|p| {
-            let name = if first { &p.name } else { &p.abbreviation };
-            if !first && shown_parts(score) < 2 {
-                0.0
-            } else {
-                text_width(name, Fonts::of(score).size(TextKind::InstrumentName, NAME_SIZE))
-            }
+            part_label(score, p, first).map_or(0.0, |name| {
+                text_width(&name, Fonts::of(score).size(TextKind::InstrumentName, NAME_SIZE))
+            })
         })
         .fold(0.0f32, f32::max);
     let multi_staff = (0..score.parts.len()).any(|pi| shown_staves(score, pi) > 1) || shown_parts(score) > 1;
@@ -456,7 +531,7 @@ fn natural_width(sys: &System, plans: &[MeasurePlan]) -> f32 {
         .filter_map(|(i, m)| {
             plans
                 .get(*m)
-                .map(|p| p.fixed() + p.stretch() * sys.stretch + if i == 0 { 0.0 } else { p.prefix })
+                .map(|p| p.width_at(sys.stretch) + if i == 0 { 0.0 } else { p.prefix })
         })
         .sum();
     sys.indent + sys.header + body + 0.5
@@ -497,7 +572,7 @@ fn break_systems(
             let run = |squeeze: f32| -> f32 {
                 (m..=end)
                     .filter_map(|i| plans.get(i).map(|p| (i, p)))
-                    .map(|(i, p)| p.fixed() + p.stretch() * squeeze + if i == m { 0.0 } else { p.prefix })
+                    .map(|(i, p)| p.width_at(squeeze) + if i == m { 0.0 } else { p.prefix })
                     .sum()
             };
             if run(1.0) > avail && run(SQUEEZE) <= avail {
@@ -551,6 +626,29 @@ fn break_systems(
         } else {
             1.0
         };
+        // Squeezed: lyrics keep their room, so the rest gives a little more.
+        if stretch < 1.0 {
+            let width = |s: f32| -> f32 {
+                ms.iter()
+                    .enumerate()
+                    .filter_map(|(i, mi)| {
+                        plans
+                            .get(*mi)
+                            .map(|p| p.width_at(s) + if i == 0 { 0.0 } else { p.prefix })
+                    })
+                    .sum()
+            };
+            let (mut lo, mut hi) = (0.3f32, 1.0f32);
+            for _ in 0..24 {
+                let mid = (lo + hi) / 2.0;
+                if width(mid) > avail {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            stretch = lo;
+        }
         let last = m >= plans.len();
         let mut ragged = None;
         if last && used < avail * fill {
@@ -615,6 +713,8 @@ struct Fonts<'a> {
     blocks: &'a [scoreart_model::TextBlock],
     /// Staff space in mm (text sizes are points, independent of the staff size).
     space: f32,
+    /// Chord symbols with German note names.
+    german: bool,
 }
 
 impl<'a> Fonts<'a> {
@@ -624,6 +724,7 @@ impl<'a> Fonts<'a> {
             offsets: &score.block_offsets,
             blocks: &score.blocks,
             space: score.page.clamped().staff_space_mm,
+            german: score.page.german_chords,
         }
     }
 
@@ -865,6 +966,21 @@ struct Stack {
     below: Option<(f32, bool)>,
     /// Below each staff: whether a fixed spacer sets the distance.
     fixed: Vec<bool>,
+    /// How far the system's content reaches above its first staff and below its last one.
+    top_reach: f32,
+    bottom_reach: f32,
+}
+
+/// Whether a staff has nothing but rests (and no lyrics or texts) in these measures.
+fn staff_empty(score: &Score, pi: usize, s: usize, measures: &[usize]) -> bool {
+    measures.iter().all(|m| {
+        score.staff_measure(pi, s, *m).is_none_or(|sm| {
+            sm.voices
+                .iter()
+                .flat_map(|v| v.events.iter())
+                .all(|e| matches!(e.kind, scoreart_model::EventKind::Rest))
+        })
+    })
 }
 
 fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
@@ -874,18 +990,25 @@ fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
         score.measures.get(*m).is_some_and(|i| {
             // A rehearsal mark starting the system sits beside the clef; one moved below
             // the staff needs no row above it.
-            let rehearsal_row = i.rehearsal.is_some()
-                && Some(*m) != first_in_sys
-                && !i.rehearsal_place.is_some_and(|p| p.below);
+            // A mark placed by hand stands where it was put, not in the row.
+            let rehearsal_row =
+                i.rehearsal.is_some() && Some(*m) != first_in_sys && i.rehearsal_place.is_none();
             i.tempo.is_some()
                 || i.text.is_some()
                 || i.tempo_text.is_some()
                 || rehearsal_row
-                || !i.jumps.is_empty()
+                || i.jumps.iter().any(|j| {
+                    if j.at_end() {
+                        i.jump_place.is_none()
+                    } else {
+                        i.marker_place.is_none()
+                    }
+                })
         })
     });
     if has_above {
-        sy += 6.0;
+        // The text row (tempo, rehearsal marks, jumps): its text above what is above the staff.
+        sy += 3.0;
     }
     if sys
         .measures
@@ -901,6 +1024,9 @@ fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
         s: usize,
         up: f32,
         down: f32,
+        /// How far drawn things reach above the top line and below the bottom line.
+        reach_up: f32,
+        reach_down: f32,
         lyrics: f32,
         gap: f32,
         sp_up: Option<f32>,
@@ -908,8 +1034,36 @@ fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
         sp_fixed: Option<f32>,
     }
     let mut staves: Vec<St> = Vec::new();
+    // Staves set to hide when empty are left out of page systems in which they have no notes
+    // (unless that would leave the system with no staff at all).
+    let page = style.view == View::Page;
+    let kept = |pi: usize, s: usize| {
+        !page
+            || !score.parts.get(pi).is_some_and(|p| p.staff_hides_empty(s))
+            || !staff_empty(score, pi, s, &sys.measures)
+    };
+    let any_kept = score
+        .parts
+        .iter()
+        .enumerate()
+        .any(|(pi, part)| (0..part.staff_count()).any(|s| shown(score, pi, s) && kept(pi, s)));
+    // When every staff would go, the top one stays.
+    let top_staff = score.parts.iter().enumerate().find_map(|(pi, part)| {
+        (0..part.staff_count())
+            .find(|s| shown(score, pi, *s))
+            .map(|s| (pi, s))
+    });
     for (pi, part) in score.parts.iter().enumerate() {
-        let visible: Vec<usize> = (0..part.staff_count()).filter(|s| shown(score, pi, *s)).collect();
+        let visible: Vec<usize> = (0..part.staff_count())
+            .filter(|s| {
+                shown(score, pi, *s)
+                    && if any_kept {
+                        kept(pi, *s)
+                    } else {
+                        top_staff == Some((pi, *s))
+                    }
+            })
+            .collect();
         for &s in &visible {
             // Make room for notes (with stems and marks) far above or below the staff.
             let (reach_up, reach_down) = staff_reach(score, pi, s, &sys.measures);
@@ -936,11 +1090,21 @@ fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
                     .filter_map(|sm| f(sm))
                     .fold(None, |a: Option<f32>, v| Some(a.map_or(v, |a| a.max(v))))
             };
+            let lyric_reach = if verses > 0 {
+                let size = Fonts::of(score).size(TextKind::Lyrics, LYRIC_SIZE);
+                lyric_base(score, pi, s, &sys.measures)
+                    + lyric_line(&Fonts::of(score)) * (verses.saturating_sub(1)) as f32
+                    + 0.3 * size
+            } else {
+                0.0
+            };
             staves.push(St {
                 pi,
                 s,
                 up: (reach_up - 3.0).max(0.0),
                 down: (reach_down - 3.0).max(0.0),
+                reach_up,
+                reach_down: reach_down.max(lyric_reach),
                 lyrics,
                 gap: if visible.last().is_some_and(|l| s < *l) {
                     style.staff_gap
@@ -979,6 +1143,36 @@ fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
     }
     .max(4.0);
     let fixed = staves.iter().map(|st| st.sp_fixed.is_some()).collect();
+    // What stands above the first staff: its notes and chord symbols, the text row, and marks
+    // placed by hand (their text rises about 2.5 spaces over the baseline).
+    let placed_marks = sys
+        .measures
+        .iter()
+        .filter_map(|m| score.measures.get(*m))
+        .flat_map(|i| {
+            [
+                i.rehearsal.is_some().then_some(i.rehearsal_place).flatten(),
+                i.jumps
+                    .iter()
+                    .any(|j| !j.at_end())
+                    .then_some(i.marker_place)
+                    .flatten(),
+                i.jumps
+                    .iter()
+                    .any(|j| j.at_end())
+                    .then_some(i.jump_place)
+                    .flatten(),
+            ]
+        })
+        .flatten()
+        .filter(|p| !p.below)
+        .map(|p| -p.dy_sp() + 2.5)
+        .fold(0.0f32, f32::max);
+    let top_reach = staves
+        .first()
+        .map_or(0.0, |st| st.reach_up.max(0.0) + if has_above { 3.0 } else { 0.0 })
+        .max(placed_marks);
+    let bottom_reach = staves.last().map_or(0.0, |st| st.reach_down.max(0.0));
     let above = staves.first().and_then(|st| st.sp_up);
     let below = staves
         .last()
@@ -989,6 +1183,8 @@ fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
         above,
         below,
         fixed,
+        top_reach,
+        bottom_reach,
     }
 }
 
@@ -1115,6 +1311,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
     };
     // The last staff line of the previous system and its spacer below (same page only).
     let mut prev_staff_end: Option<(usize, f32, Option<(f32, bool)>)> = None;
+    let mut prev_reach = 0.0f32;
     for (si, sys) in systems.iter().enumerate() {
         let Stack {
             tops,
@@ -1122,6 +1319,8 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             above: spacer_above,
             below: spacer_below,
             fixed,
+            top_reach,
+            bottom_reach,
         } = stack_staves(score, style, sys);
         let above0 = tops.first().map_or(0.0, |t| t.2);
         let last_top = tops.last().map_or(0.0, |t| t.2);
@@ -1162,6 +1361,15 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                 .is_some_and(|i| i.page_break);
         // Spacers between this system and the one before: at least the room they ask for, or
         // exactly that for a fixed spacer below.
+        if let Some((pg, line, _)) = prev_staff_end
+            && pg == page_index
+        {
+            // The least system distance counts from the bottom line of one system to the top
+            // line of the next; more only where what hangs below the one and what stands
+            // above the other would come closer than SYSTEM_CLEAR.
+            let d = style.system_gap.max(prev_reach + SYSTEM_CLEAR + top_reach);
+            y = line + d - above0 - blocks_h;
+        }
         if let Some((pg, line, below)) = prev_staff_end
             && pg == page_index
         {
@@ -1201,7 +1409,21 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             fixed,
         });
         prev_staff_end = Some((page_index, y + last_top + 4.0, spacer_below));
-        y += sys_h + style.system_gap;
+        prev_reach = bottom_reach;
+        y += sys_h + SYSTEM_CLEAR;
+        // An empty frame after the system keeps its room: the next staff starts the frame's
+        // height and the distances around a frame below this system's last staff.
+        if !endless
+            && let Some(h) = sys
+                .measures
+                .last()
+                .and_then(|m| score.measures.get(*m))
+                .and_then(|i| i.frame_after)
+            && let Some((pg, line, below)) = prev_staff_end
+        {
+            prev_staff_end = Some((pg, line + h + 2.0 * FRAME_GAP - style.system_gap, below));
+            y = y.max(line + h + 2.0 * FRAME_GAP - style.system_gap);
+        }
     }
 
     // Pass 2: pages filled down to the music bottom margin (not the last page): systems move
@@ -1472,6 +1694,14 @@ fn line_height(size: f32) -> f32 {
 }
 
 /// Height of a block (its lines) in sp.
+/// Least room between what hangs below one system (lyrics) and what stands above the next
+/// (chord symbols), staff spaces.
+const SYSTEM_CLEAR: f32 = 0.5;
+
+/// Distance between a system and an empty frame (and the frame and the next system), staff
+/// spaces (MuseScore's default).
+const FRAME_GAP: f32 = 7.0;
+
 fn block_height(f: &Fonts, frame: &Frame, kind: TextKind, text: &str) -> f32 {
     if text.trim().is_empty() {
         return 0.0;
@@ -1732,12 +1962,8 @@ fn draw_system(
             let bx = x_start - if ensemble { 2.6 } else { 1.4 };
             draw_brace(&mut o, bx, pt, pb);
         }
-        let name = if sys.long_names {
-            &part.name
-        } else {
-            &part.abbreviation
-        };
-        if sys.long_names || shown_parts(score) > 1 {
+        if let Some(name) = part_label(score, part, sys.long_names) {
+            let name = &name;
             let nx = x_start - if multi { 3.0 } else { 1.0 } - if ensemble { 1.4 } else { 0.0 };
             o.styled(
                 TextKind::InstrumentName,
@@ -1860,10 +2086,10 @@ fn draw_system(
         // Column positions.
         let mut cols: Vec<(u32, f32)> = Vec::with_capacity(plan.cols.len() + 1);
         let mut cx = mx + PAD_LEFT;
-        for &(t, lead, sp) in &plan.cols {
+        for (ci, &(t, lead, _)) in plan.cols.iter().enumerate() {
             cx += lead;
             cols.push((t, cx));
-            cx += sp * sys.stretch;
+            cx += plan.space(ci, sys.stretch);
         }
         let m_end = cx;
         cols.push((plan.len, m_end));
@@ -1879,18 +2105,26 @@ fn draw_system(
                 let bh = rs + 0.4;
                 let w = text_width(r, rs) + 1.0;
                 let staff_top = top + t0;
-                let place = info.rehearsal_place.unwrap_or_default();
-                let (mut bx0, mut by1) = if place.below {
-                    let bottom = tops.last().map_or(staff_top + 4.0, |t| top + t.2 + 4.0);
-                    (m_start - 0.4, bottom + 2.0 + 2.6)
-                } else if k == 0 {
-                    // Clear of the measure number.
-                    (x_start, staff_top - 3.6)
-                } else {
-                    (m_start - 0.4, ty - 2.6)
+                let (bx0, by1) = match info.rehearsal_place {
+                    // A mark placed by hand (as MuseScore stores it): its text centred on the
+                    // measure's start plus the offset, the baseline the offset away from the
+                    // top line (or, below, from the bottom line of the bottom staff).
+                    Some(place) => {
+                        let base = if place.below {
+                            tops.last().map_or(staff_top + 4.0, |t| top + t.2 + 4.0)
+                        } else {
+                            staff_top
+                        };
+                        (
+                            m_start + place.dx_sp() - w / 2.0,
+                            base + place.dy_sp() + 0.6 * bh / 2.6,
+                        )
+                    }
+                    // At the start of a system above the clef, clear of the measure number;
+                    // elsewhere above the barline, over everything else above the staff.
+                    None if k == 0 => (x_start, staff_top - 3.6),
+                    None => (m_start - 0.4, ty - 2.6),
                 };
-                bx0 += place.dx_sp();
-                by1 += place.dy_sp();
                 o.styled(
                     TextKind::Rehearsal,
                     r,
@@ -1918,8 +2152,18 @@ fn draw_system(
                     _ => "codaSquare",
                 };
                 if let Some((c, w, lo, _)) = crate::smufl::get(name) {
-                    o.glyph(c, tx, ty + lo, None);
-                    tx += w + 0.8;
+                    match info.marker_place {
+                        // Placed by hand: from the measure's barline (the system's start for
+                        // its first measure) and the top staff line.
+                        Some(p) => {
+                            let left = if k == 0 { x_start } else { m_start };
+                            o.glyph(c, left + p.dx_sp(), top + t0 + p.dy_sp() + lo, None);
+                        }
+                        None => {
+                            o.glyph(c, tx, ty + lo, None);
+                            tx += w + 0.8;
+                        }
+                    }
                 }
             }
             if let Some(tt) = &info.tempo_text {
@@ -1927,7 +2171,18 @@ fn draw_system(
                 tx += text_width(tt, ts) + 0.8;
             }
             let mut end_x = m_end - 0.3;
+            // Placed by hand: the right end from the measure's end, the baseline from the top
+            // staff line.
+            let end_y = match info.jump_place {
+                Some(p) => {
+                    end_x = m_end + p.dx_sp();
+                    top + t0 + p.dy_sp()
+                }
+                None => ty,
+            };
+            let ty_end = end_y;
             for j in info.jumps.iter().filter(|j| j.at_end()) {
+                let ty = ty_end;
                 if let Some(t) = j.text() {
                     if *j == scoreart_model::Jump::ToCoda
                         && let Some((c, w, lo, _)) = crate::smufl::get("coda")
@@ -2016,6 +2271,7 @@ fn draw_system(
                     cols: &cols,
                     time: score.time_at(m),
                     sys_x1: x_end,
+                    lyrics: lyric_base(score, pi, s, &sys.measures),
                 },
             );
             out.staves.push(StaffBox {
@@ -2192,6 +2448,8 @@ struct StaffDraw<'a> {
     time: TimeSig,
     /// Where the system ends: texts are kept inside it.
     sys_x1: f32,
+    /// Baseline of the first verse below the bottom staff line.
+    lyrics: f32,
 }
 
 fn col_x(cols: &[(u32, f32)], tick: u32) -> f32 {
@@ -2969,15 +3227,15 @@ fn out_staff_box(
         // Dynamics and lyrics under the staff (whole voice, also on rests).
         // Per verse: where the last hyphenated syllable ended (x, y).
         let mut hyphen_from: Vec<Option<(f32, f32)>> = Vec::new();
-        // One line for this voice's chord symbols in the measure, clear of the highest note.
+        // Staff texts stand over the chord symbols of the measure: above its highest note.
         let chord_row_used = v.events.iter().any(|e| e.chord_symbol.is_some());
         let chord_row = geos
             .iter()
             .filter_map(|gg| anchors.get(&gg.ev).map(|a| a.top.min(a.stem_end)))
             .fold(d.top, f32::min)
             .min(d.top)
-            - 1.6;
-        let chord_row = chord_row.min(d.top - 3.0);
+            - 1.0;
+        let chord_row = chord_row.min(d.top - CHORD_ABOVE);
         for (gg, e) in geos.iter().zip(v.events.iter()) {
             if let Some(dy) = e.dynamic {
                 let place = e.dynamic_place.unwrap_or_default();
@@ -2997,10 +3255,17 @@ fn out_staff_box(
                 o.hit(x0 - 0.2, y - 1.6, x + 0.3, y + 0.5, Target::Dynamic { ev: gg.ev });
             }
             if let Some(cs) = &e.chord_symbol {
-                // All chord symbols of the measure sit on one line.
-                let y = chord_row;
-                let sh =
-                    o.f.shape(TextKind::ChordSymbol, &chord_text(cs), gg.x, y, 2.2, Align::Left);
+                // Just above the staff, or clear of the notes under the symbol (as far as it
+                // reaches to the right).
+                let text = chord_text(cs, o.f.german);
+                let w = styled_width(&o.f, TextKind::ChordSymbol, &text, 2.2);
+                let local = geos
+                    .iter()
+                    .filter(|h| h.x >= gg.x - 0.6 && h.x <= gg.x + w)
+                    .filter_map(|h| anchors.get(&h.ev).map(|a| a.top.min(a.stem_end)))
+                    .fold(d.top, f32::min);
+                let y = (local - 1.0).min(d.top - CHORD_ABOVE);
+                let sh = o.f.shape(TextKind::ChordSymbol, &text, gg.x, y, 2.2, Align::Left);
                 o.push(sh, Some(gg.ev));
             }
             if let Some(t) = &e.text {
@@ -3039,7 +3304,7 @@ fn out_staff_box(
                 o.push(sh, Some(gg.ev));
             }
             for (verse, l) in e.lyrics.iter().enumerate().filter(|(_, l)| !l.is_empty()) {
-                let y = d.top + 4.0 + 5.6 + lyric_line(&o.f) * verse as f32;
+                let y = d.top + 4.0 + d.lyrics + lyric_line(&o.f) * verse as f32;
                 let cx = gg.x + 0.59;
                 let (number, l) = verse_number(l);
                 if let Some(n) = number {
@@ -3089,8 +3354,10 @@ fn gg_onset(geos: &[EvGeo], gg: &EvGeo) -> u32 {
     gg.onset
 }
 
-/// Chord symbols with real sharps and flats.
-fn chord_text(s: &str) -> String {
+/// Chord symbols with real sharps and flats; with German names a B is written H and a B flat
+/// B (for the root and the bass note).
+fn chord_text(s: &str, german: bool) -> String {
+    let s = if german { german_chord(s) } else { s.to_string() };
     let mut out = String::with_capacity(s.len());
     let mut prev_letter = false;
     for c in s.chars() {
@@ -3101,6 +3368,27 @@ fn chord_text(s: &str) -> String {
         };
         prev_letter = matches!(c, 'A'..='G');
         out.push(mapped);
+    }
+    out
+}
+
+fn german_chord(s: &str) -> String {
+    // A note name starts the symbol and follows a slash (the bass).
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    let mut at_name = true;
+    while let Some(c) = chars.next() {
+        if at_name && c == 'B' {
+            if chars.peek() == Some(&'b') {
+                chars.next();
+                out.push('B');
+            } else {
+                out.push('H');
+            }
+        } else {
+            out.push(c);
+        }
+        at_name = c == '/';
     }
     out
 }
@@ -3315,13 +3603,15 @@ fn staff_reach(score: &Score, part: usize, staff: usize, measures: &[usize]) -> 
     let mut up = 0.0f32;
     let mut down = 0.0f32;
     let mut chords = false;
+    let mut chord_up = 0.0f32;
     let mut texts = false;
     for &m in measures {
         let clef = score.clef_at(part, staff, m);
         let Some(sm) = score.staff_measure(part, staff, m) else {
             continue;
         };
-        for v in &sm.voices {
+        let voices = sm.voices.iter().filter(|v| !v.events.is_empty()).count();
+        for (vi, v) in sm.voices.iter().enumerate() {
             for (e, on) in v.events.iter().zip(v.onsets()) {
                 let shift = f32::from(score.ottava_at(part, staff, m, on)) * 3.5;
                 let marks = if e.articulations.is_empty() { 0.0 } else { 1.6 };
@@ -3336,14 +3626,36 @@ fn staff_reach(score: &Score, part: usize, staff: usize, measures: &[usize]) -> 
                 } else {
                     0.0
                 };
-                for n in e.notes() {
-                    let y = note_y(clef, n.pitch) + shift;
+                // Stem direction as drawn: by voice when several sound, else away from the
+                // middle line (by the note farthest from it).
+                let ys: Vec<f32> = e.notes().iter().map(|n| note_y(clef, n.pitch) + shift).collect();
+                let far =
+                    ys.iter().copied().fold(
+                        2.0f32,
+                        |a, y| if (y - 2.0).abs() > (a - 2.0).abs() { y } else { a },
+                    );
+                let stem_up = if voices > 1 { vi % 2 == 0 } else { far >= 2.0 };
+                let stem = e.duration.value.has_stem();
+                for &y in &ys {
+                    let stem_top = if stem && stem_up { y - STEM_LEN } else { y - 0.5 };
+                    let stem_bottom = if stem && !stem_up { y + STEM_LEN } else { y + 0.5 };
                     up = up
-                        .max(-(y - STEM_LEN) + marks)
+                        .max(-stem_top + marks)
                         .max(-y + 1.0 + marks + above_marks + finger);
-                    down = down.max(y + STEM_LEN - 4.0).max(y - 4.0 + 1.0);
+                    down = down.max(stem_bottom - 4.0);
                 }
                 up = up.max(above_marks + 1.0);
+                if e.chord_symbol.is_some() {
+                    // The symbol stands over this event's notes (stems, marks).
+                    let local = ys
+                        .iter()
+                        .map(|&y| {
+                            let stem_top = if stem && stem_up { y - STEM_LEN } else { y - 0.5 };
+                            (-stem_top).max(0.0) + marks
+                        })
+                        .fold(0.0f32, f32::max);
+                    chord_up = chord_up.max(local);
+                }
                 chords |= e.chord_symbol.is_some();
                 texts |= e.text.is_some();
             }
@@ -3374,18 +3686,22 @@ fn staff_reach(score: &Score, part: usize, staff: usize, measures: &[usize]) -> 
             _ => {}
         }
     }
-    // Chord symbols sit on one row clear of the notes (at least 3 sp above the staff), staff
-    // texts above them.
+    // Chord symbols sit just above the staff, or clear of the notes (as MuseScore places
+    // them), staff texts above them.
     let f = Fonts::of(score);
     let mut reach = up;
     if chords {
-        reach = (up + 1.6).max(3.0) + f.size(TextKind::ChordSymbol, 2.2) * 0.8 + 0.3;
+        reach = up.max((chord_up + 1.0).max(CHORD_ABOVE) + f.size(TextKind::ChordSymbol, 2.2) * 0.75);
     }
     if texts {
         reach += f.size(TextKind::StaffText, 1.9) * 0.8 + 0.6;
     }
     (reach, down)
 }
+
+/// Baseline of chord symbols above the top staff line when no note is in the way (staff
+/// spaces; MuseScore's default puts the text's top 2.5 spaces above the staff).
+const CHORD_ABOVE: f32 = 0.7;
 
 /// One piece of a line on one system.
 #[derive(Clone, Copy, Debug)]

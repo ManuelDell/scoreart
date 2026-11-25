@@ -217,8 +217,10 @@ pub const DE: &[(&str, &str)] = &[
         "Chord symbol (e.g. Cmaj7, F#m7/C#)",
         "Akkordsymbol (z. B. Cmaj7, F#m7/C#)",
     ),
+    ("Chord symbol playback", "Wiedergabe der Akkordsymbole"),
     ("Chord symbols", "Akkordsymbole"),
     ("Chord symbol…", "Akkordsymbol…"),
+    ("Chord volume", "Lautstärke der Akkorde"),
     ("Clef", "Schlüssel"),
     ("Clefs", "Schlüssel"),
     (
@@ -452,6 +454,7 @@ pub const DE: &[(&str, &str)] = &[
     ("Hear notes", "Noten hören"),
     ("Help", "Hilfe"),
     ("Hide", "Ausblenden"),
+    ("Hide empty staves", "Leere Notenzeilen ausblenden"),
     ("Hide the ribbon    Ctrl+F1", "Ribbon ausblenden    Strg+F1"),
     (
         "Hold every text block at its place",
@@ -528,6 +531,10 @@ pub const DE: &[(&str, &str)] = &[
     (
         "Leave note input / clear selection",
         "Noteneingabe verlassen / Auswahl aufheben",
+    ),
+    (
+        "Leave this instrument out of systems in which it has nothing to play",
+        "Dieses Instrument in Systemen weglassen, in denen es nichts zu spielen hat",
     ),
     ("Left", "Links"),
     (
@@ -807,6 +814,7 @@ pub const DE: &[(&str, &str)] = &[
     ),
     ("Play", "Abspielen"),
     ("Play / stop", "Abspielen / Stopp"),
+    ("Play chord symbols", "Akkordsymbole abspielen"),
     (
         "Play from the selection (Space)",
         "Ab der Auswahl abspielen (Leertaste)",
@@ -833,6 +841,7 @@ pub const DE: &[(&str, &str)] = &[
     ("Preview", "Vorschau"),
     ("Previous measure", "Voriger Takt"),
     ("Previous note", "Vorige Note"),
+    ("Program {}", "Programm {}"),
     ("Properties", "Eigenschaften"),
     (
         "Provided by your administrator",
@@ -1069,6 +1078,10 @@ pub const DE: &[(&str, &str)] = &[
     (
         "The author asks that nobody links directly to his download files: link to his website or keep your own copy.",
         "Der Autor bittet, nicht direkt auf seine Download-Dateien zu verlinken: Verlinke seine Webseite oder behalte eine eigene Kopie.",
+    ),
+    (
+        "The chord symbols sound with an instrument of their own",
+        "Die Akkordsymbole erklingen mit einem eigenen Instrument",
     ),
     (
         "The copyright line at the foot of the first page",

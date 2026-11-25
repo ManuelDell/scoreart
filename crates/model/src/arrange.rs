@@ -216,6 +216,9 @@ impl Score {
                     measures: rebuild(&old, &new_map, n),
                     sound: PartSound::default(),
                     hidden: Vec::new(),
+                    hide_empty: Vec::new(),
+                    small: Vec::new(),
+                    harmony: Default::default(),
                 };
                 become_instrument(&mut fresh, inst);
                 fresh.sound = PartSound {

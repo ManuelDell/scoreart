@@ -8,6 +8,15 @@
   Finale, Dorico, ScoreArt — is read back into an editable score (staves, clefs, keys, times,
   notes, rests, voices, ties, slurs, lyrics, dynamics, titles); measures it is unsure about are
   listed. The command line converts too: `scoreart-cli convert score.pdf score.musicxml`.
+- **Chord symbols sound**: from each symbol to the next, bass and chord, with an instrument and
+  volume of their own per part (*Instruments* tab), as in MuseScore; MIDI export gives them a
+  track of their own.
+- **Songbooks from MuseScore look as there**: empty staves hidden per system, empty frames
+  keeping their room, rehearsal marks, segno/coda and jumps where they were moved to, German
+  chord names, instrument names as the style says, ♯ and ♭ in chord symbols of PDFs; systems
+  set as close as MuseScore sets them (least distance from staff to staff, more only where
+  lyrics and chord symbols would touch), chord symbols just above the staff, lyrics 3 spaces
+  below it, and lines no longer squeezed so far that lyrics overlap.
 - **LilyPond PDFs** are converted too: the glyph names of its music font are read from the
   PDF; octave-treble clefs with the "8" as a separate glyph, older LilyPond fonts, beams drawn
   with outlines and scores followed by their parts in the same file are handled.

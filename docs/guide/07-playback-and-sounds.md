@@ -8,6 +8,15 @@ breath marks, repeats and jumps, ornaments and tremolos, tempo changes and swing
 instrument family plays in its own way, and each note gets a natural attack and release.
 *Instruments → Sound optimization* switches this shaping off if you want plain notes.
 
+## Chord symbols
+
+Chord symbols sound too: each one from where it stands until the next one, as a bass note with
+the chord above it — "C", "Am7", "F#/E", "Bbmaj7", "Dsus4", "G7(b9)", German "Hm" and the rest
+of the usual spellings; "N.C." is silence. On the *Instruments* tab every instrument with chord
+symbols has **Play chord symbols**, the **instrument** they sound with (piano, guitar, organ …)
+and their **volume**, like MuseScore's chord-symbol channel. Scores from MuseScore keep the
+instrument chosen there.
+
 ## The mixer
 
 **Mixer** (`F10`) gives every instrument its own track: sound, volume, pan, mute, solo and a

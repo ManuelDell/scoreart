@@ -111,6 +111,8 @@ pub struct Tech {
     pub accent: bool,
     /// A note written out from an ornament, glissando or grace note.
     pub ornament: bool,
+    /// A note of a chord symbol (the part's harmony channel).
+    pub harmony: bool,
 }
 
 /// A technique word in staff text, and what it switches.

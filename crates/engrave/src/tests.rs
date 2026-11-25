@@ -191,3 +191,58 @@ fn continuous_views_have_one_endless_page() {
     let land = layout(&s, &Style::new(&fmt, crate::View::Page));
     assert!(land.pages[0].width > page.pages[0].width);
 }
+
+#[test]
+fn empty_staves_hide_and_frames_keep_room() {
+    // The flute plays only in measure 1; the piano everywhere.
+    let mut s = melody();
+    let flute = instrument("flute").unwrap();
+    s.add_part(flute);
+    let fl = s.parts.len() - 1;
+    s.parts[fl].hide_empty = vec![true];
+    if let Some(v) = s.voice_mut(fl, 0, 0, 0) {
+        v.events = vec![Event::note(
+            Pitch::new(Step::C, 0, 5),
+            Duration::new(NoteValue::Whole, 0),
+        )];
+    }
+    s.measures[0].system_break = true;
+    let l = layout(&s, &Style::default());
+    let flute_systems: std::collections::BTreeSet<usize> = l
+        .staves
+        .iter()
+        .filter(|b| b.part == fl)
+        .map(|b| b.system)
+        .collect();
+    assert_eq!(
+        flute_systems.into_iter().collect::<Vec<_>>(),
+        [0],
+        "only where it plays"
+    );
+    assert!(l.staves.iter().any(|b| b.part == 0 && b.system == 1));
+    // An empty frame after the first system pushes the next one down by its height.
+    let top_of = |l: &Layout, sys: usize| {
+        l.staves
+            .iter()
+            .find(|b| b.system == sys && b.part == 0)
+            .map(|b| b.top)
+            .unwrap()
+    };
+    let before = top_of(&l, 1) - top_of(&l, 0);
+    s.measures[0].frame_after = Some(20.0);
+    let l2 = layout(&s, &Style::default());
+    let pages = |l: &Layout| {
+        l.staves
+            .iter()
+            .filter(|b| b.part == 0)
+            .map(|b| (b.system, b.page))
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let after = top_of(&l2, 1) - top_of(&l2, 0);
+    // From staff to staff: a staff, 7 spaces, the frame, 7 spaces at least.
+    assert!(
+        after >= 4.0 + 7.0 + 20.0 + 7.0 - 0.01 && after > before,
+        "{before} {after}"
+    );
+    assert_eq!(pages(&l), pages(&l2));
+}

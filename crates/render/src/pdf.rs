@@ -140,14 +140,37 @@ pub fn pdf(layout: &Layout, style: &Style, title: &str) -> Result<Vec<u8>, Strin
                             ..Stroke::default()
                         }));
                     }
-                    s.draw_text(
-                        Point::from_xy(x0, *y),
-                        text.clone(),
-                        *size,
-                        t,
-                        false,
-                        TextDirection::Auto,
-                    );
+                    // Runs of text, with ♯ ♭ ♮ from the music font.
+                    let mut cx = x0;
+                    let mut run = String::new();
+                    for c in t.chars().chain(std::iter::once('\0')) {
+                        let acc = scoreart_engrave::text_accidental(c);
+                        if (acc.is_some() || c == '\0') && !run.is_empty() {
+                            s.draw_text(
+                                Point::from_xy(cx, *y),
+                                text.clone(),
+                                *size,
+                                &run,
+                                false,
+                                TextDirection::Auto,
+                            );
+                            cx += scoreart_engrave::text_width(&run, *size);
+                            run.clear();
+                        }
+                        if let Some((g, w, up)) = acc {
+                            s.draw_text(
+                                Point::from_xy(cx + 0.02 * size, y - up * size),
+                                music.clone(),
+                                *size,
+                                &g.to_string(),
+                                false,
+                                TextDirection::Auto,
+                            );
+                            cx += w * size;
+                        } else if c != '\0' {
+                            run.push(c);
+                        }
+                    }
                     s.set_stroke(None);
                     s.pop();
                 }

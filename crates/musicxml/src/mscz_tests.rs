@@ -869,3 +869,74 @@ fn reads_musescore_2_files() {
     // The measure rest fills measure 2.
     assert_eq!(s.voice(0, 0, 1, 0).unwrap().ticks(), 4 * TPQ);
 }
+
+/// A songbook page as MuseScore 4 lays it out: a melody with chord symbols over choir staves
+/// that hide when empty (and are small), marks placed by hand, an empty frame between
+/// systems, German chord names and instrument names switched off in the style.
+#[test]
+fn reads_songbook_layout_and_harmony() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<museScore version="4.40">
+  <Score>
+    <Division>480</Division>
+    <Style>
+      <hideInstrumentNameIfOneInstrument>1</hideInstrumentNameIfOneInstrument>
+      <firstSystemInstNameVisibility>2</firstSystemInstNameVisibility>
+      <subsSystemInstNameVisibility>2</subsSystemInstNameVisibility>
+      <useGermanNoteNames>1</useGermanNoteNames>
+    </Style>
+    <Part id="1">
+      <Staff id="1"><StaffType group="pitched"/></Staff>
+      <trackName>Soprano</trackName>
+      <Instrument id="soprano"><longName>Soprano</longName><Channel><program value="52"/></Channel><Channel name="harmony"><program value="24"/></Channel></Instrument>
+    </Part>
+    <Part id="2">
+      <Staff id="2"><StaffType group="pitched"><small>1</small></StaffType><hideWhenEmpty>1</hideWhenEmpty></Staff>
+      <trackName>Alto</trackName>
+      <Instrument id="alto"><longName>Alto</longName><Channel><program value="52"/></Channel></Instrument>
+    </Part>
+    <Staff id="1">
+      <Measure>
+        <voice>
+          <TimeSig><sigN>4</sigN><sigD>4</sigD></TimeSig>
+          <Harmony><root>14</root><name>m</name></Harmony>
+          <RehearsalMark><offset x="-5.5" y="-4.6"/><text>Vers</text></RehearsalMark>
+          <Chord><durationType>whole</durationType><Note><pitch>71</pitch><tpc>19</tpc></Note></Chord>
+        </voice>
+      </Measure>
+      <VBox><height>40</height></VBox>
+      <Measure>
+        <Marker><style>repeat_left</style><offset x="8.4" y="-4"/><text><sym>segno</sym></text><label>segno</label></Marker>
+        <voice>
+          <Chord><durationType>whole</durationType><Note><pitch>72</pitch><tpc>14</tpc></Note></Chord>
+        </voice>
+      </Measure>
+    </Staff>
+    <Staff id="2">
+      <Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure>
+      <Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure>
+    </Staff>
+  </Score>
+</museScore>
+"#;
+    let s = from_bytes(&mscz(xml)).unwrap();
+    assert_eq!(s.parts[0].harmony.program, 24);
+    assert!(s.parts[0].harmony.play);
+    assert_eq!(s.parts[1].hide_empty, vec![true]);
+    assert_eq!(s.parts[1].small, vec![true]);
+    assert!(!s.page.single_name && s.page.german_chords);
+    assert_eq!((s.page.first_names, s.page.later_names), (2, 2));
+    // The empty frame: a new line and its room after the first measure.
+    assert!(s.measures[0].system_break);
+    assert_eq!(s.measures[0].frame_after, Some(40.0));
+    let r = s.measures[0].rehearsal_place.unwrap();
+    assert_eq!((r.dx, r.dy), (-55, -46));
+    let m = s.measures[1].marker_place.unwrap();
+    assert_eq!((m.dx, m.dy), (84, -40));
+    // Everything survives MusicXML.
+    let back = from_str(&to_string(&s)).unwrap();
+    assert_eq!(back.parts[1].small, vec![true]);
+    assert_eq!(back.measures[1].marker_place, s.measures[1].marker_place);
+    assert_eq!(back.parts[1].hide_empty, vec![true]);
+    assert_eq!(back.parts[0].harmony.program, 24);
+}

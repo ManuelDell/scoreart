@@ -10,6 +10,10 @@ voices, choir (women, men, SATB), strings, woodwinds, brass and more.
 
 ![The Instruments tab, and the question when Women changes to Soprano](../images/instruments.png)
 
+**Hide empty staves** leaves an instrument out of every system in which it has nothing to play
+— a choir part that only sings the refrain appears only there. Scores from MuseScore keep
+this setting.
+
 An **instrument change inside a part** ("To Flute") is a mark on the *Instruments* tab: the
 music after it is played with the new sound. *Transpose* moves the selection up or down a
 semitone.

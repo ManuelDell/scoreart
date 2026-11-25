@@ -123,6 +123,15 @@ fn staves(lines: &[(f32, f32, f32)]) -> Vec<Staff> {
                     _ => continue 'cand,
                 }
             }
+            // The five lines of a staff run alike (a short line inside one is no staff line).
+            let len = |p: usize| lines.get(p).map_or(0.0, |l| l.2 - l.1);
+            let la = a.2 - a.1;
+            if picked.iter().any(|p| {
+                let lp = len(*p);
+                lp < 0.8 * la || la < 0.8 * lp
+            }) {
+                continue 'cand;
+            }
             // Evenly spaced: a line drawn a little off (rounding) is fine, a stray line is not.
             let ys: Vec<f32> = picked.iter().map(|p| lines[*p].0).collect();
             let gaps: Vec<f32> = ys.windows(2).map(|w| w[1] - w[0]).collect();
@@ -245,6 +254,74 @@ struct Reader {
     score_staves: Option<usize>,
     /// Pages after the score hold the instruments' parts: reading stopped there.
     parts_follow: bool,
+    /// The staves of the first system, to match the staves of systems that leave empty
+    /// ones out: name, clef at the start, whether a brace holds it.
+    reference: Option<Vec<(String, Option<ClefSym>, bool)>>,
+}
+
+/// Which staves of the full score a system with fewer staves shows (ascending indices):
+/// the choice where names, clefs and braces agree best; the top staves on a tie.
+fn match_staves(
+    sys: &[(String, Option<ClefSym>, bool)],
+    full: &[(String, Option<ClefSym>, bool)],
+) -> Vec<usize> {
+    let (k, n) = (sys.len(), full.len());
+    if k >= n || k == 0 {
+        return (0..k).collect();
+    }
+    // Is `short` an abbreviation of `long` (its letters in order)?
+    let abbrev = |short: &str, long: &str| {
+        let s: Vec<char> = short
+            .to_lowercase()
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect();
+        let l: Vec<char> = long
+            .to_lowercase()
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect();
+        if s.is_empty() || l.is_empty() || s.first() != l.first() {
+            return false;
+        }
+        let mut it = l.iter();
+        s.iter().all(|c| it.any(|x| x == c))
+    };
+    let score = |pick: &[usize]| -> i32 {
+        sys.iter()
+            .zip(pick)
+            .map(|(a, &r)| {
+                let Some(b) = full.get(r) else { return 0 };
+                let name = !a.0.is_empty() && !b.0.is_empty() && (abbrev(&a.0, &b.0) || abbrev(&b.0, &a.0));
+                3 * i32::from(name) + i32::from(a.1.is_some() && a.1 == b.1) + 2 * i32::from(a.2 == b.2)
+            })
+            .sum()
+    };
+    let mut best: (i32, Vec<usize>) = (i32::MIN, (0..k).collect());
+    let mut pick: Vec<usize> = (0..k).collect();
+    // Every ascending choice of k of n (few staves: at most a few hundred).
+    for _ in 0..5000 {
+        let sc = score(&pick);
+        if sc > best.0 {
+            best = (sc, pick.clone());
+        }
+        // Next combination.
+        let mut i = k;
+        loop {
+            if i == 0 {
+                return best.1;
+            }
+            i -= 1;
+            if pick[i] < n - k + i {
+                pick[i] += 1;
+                for j in i + 1..k {
+                    pick[j] = pick[j - 1] + 1;
+                }
+                break;
+            }
+        }
+    }
+    best.1
 }
 
 fn near(a: f32, b: f32, tol: f32) -> bool {
@@ -544,6 +621,41 @@ impl Reader {
             }
         }
         let _ = first_system;
+        // The staves this system shows, as staves of the full score.
+        let start_clef = |si: usize| {
+            mine.iter()
+                .filter(|e| {
+                    matches!(e.sym, Sym::Clef(_)) && staff_of(e.g.cy()) == si && e.g.cx() < x0 + 6.0 * sp
+                })
+                .find_map(|e| if let Sym::Clef(c) = e.sym { Some(c) } else { None })
+        };
+        let described: Vec<(String, Option<ClefSym>, bool)> = (0..n)
+            .map(|si| {
+                (
+                    sys.names.get(si).cloned().unwrap_or_default(),
+                    start_clef(si),
+                    sys.braces.iter().any(|b| si >= b.0 && si <= b.1),
+                )
+            })
+            .collect();
+        let full_n = match &self.reference {
+            None => {
+                self.reference = Some(described.clone());
+                n
+            }
+            Some(r) => r.len().max(n),
+        };
+        let map: Vec<usize> = match &self.reference {
+            Some(r) if n < r.len() => match_staves(&described, r),
+            _ => (0..n).collect(),
+        };
+        if self.clefs.len() < full_n {
+            self.clefs.resize(full_n, Clef::Treble);
+        }
+        if self.keys.len() < full_n {
+            self.keys.resize(full_n, self.key);
+        }
+        let to_full = |si: usize| map.get(si).copied().unwrap_or(si);
         // Measure by measure.
         let all_verts: Vec<Seg> = verts.iter().map(|s| **s).collect();
         for (mi, b) in bounds.iter().enumerate() {
@@ -562,7 +674,7 @@ impl Reader {
             for (si, &st) in staves.iter().enumerate().take(n) {
                 let es: Vec<&Elem> = cells.get(mi).and_then(|m| m.get(si)).cloned().unwrap_or_default();
                 let (cell, key, time) = self.cell(
-                    si,
+                    to_full(si),
                     &st,
                     &es,
                     &all_verts,
@@ -624,6 +736,21 @@ impl Reader {
         }
         // Ties and slurs from the curves.
         curves(&mut sys, &page.curves);
+        // As staves of the full score: the staves left out stay empty.
+        if full_n > n || map.iter().enumerate().any(|(i, m)| i != *m) {
+            for row in &mut sys.measures {
+                let mut full: Vec<Cell> = (0..full_n).map(|_| Cell::default()).collect();
+                for (si, c) in row.drain(..).enumerate() {
+                    if let Some(slot) = full.get_mut(to_full(si)) {
+                        *slot = c;
+                    }
+                }
+                *row = full;
+            }
+            for sl in &mut sys.slurs {
+                sl.0 = to_full(sl.0);
+            }
+        }
         self.systems.push(sys);
     }
 
@@ -1059,7 +1186,7 @@ impl Reader {
         let n = self
             .systems
             .iter()
-            .map(|s| s.staves.len())
+            .map(|s| s.measures.first().map_or(s.staves.len(), Vec::len))
             .fold(BTreeMap::<usize, usize>::new(), |mut m, k| {
                 *m.entry(k).or_default() += 1;
                 m
@@ -1070,7 +1197,7 @@ impl Reader {
             .clamp(1, limits::MAX_PARTS * 4);
         if self.systems.iter().any(|s| s.staves.len() != n) {
             notes.push(
-                "Some systems have a different number of staves; they were matched from the top.".into(),
+                "Some systems leave out empty staves; they were matched by name, clef and brace.".into(),
             );
         }
         // Instruments from the first system with all staves: braces join staves.
@@ -1124,6 +1251,9 @@ impl Reader {
                 measures: Vec::new(),
                 sound: PartSound::default(),
                 hidden: Vec::new(),
+                hide_empty: Vec::new(),
+                small: Vec::new(),
+                harmony: Default::default(),
             });
         }
         let mut uncertain = Vec::new();

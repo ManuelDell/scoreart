@@ -50,6 +50,16 @@ version that wrote it for everything the file does not store (MuseScore writes o
 differs from its defaults; those defaults were read off third-party style files and observed
 files).
 
+Layout that decides how a songbook page looks is read too: staves that hide when empty
+(`<hideWhenEmpty>`, or the style's `hideEmptyStaves`) are left out of systems in which they
+have nothing to play; empty vertical frames between systems keep their height; rehearsal
+marks, segno/coda markers and jumps moved by hand stand where their `<offset>` puts them (the
+offset replaces MuseScore's default position: measured from the start or end of the measure
+and the top staff line); instrument names follow `hideInstrumentNameIfOneInstrument` and the
+first/later system visibility; chord symbols use German note names when the style asks; the
+`harmony` channel's program becomes the instrument chord symbols play with. Small staves
+(`<small>`) are read and saved, but still drawn at full size.
+
 MuseScore 2 files are first rewritten into the layout of MuseScore 3 files (`mscz2.rs`), then
 read by the same code:
 
