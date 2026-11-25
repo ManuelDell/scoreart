@@ -1431,14 +1431,29 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
     // the systems spread too.
     if !endless {
         let last_page = placed.last().map_or(0, |p| p.page);
-        for pg in 0..last_page {
+        for pg in 0..=last_page {
             let on: Vec<usize> = (0..placed.len()).filter(|k| placed[*k].page == pg).collect();
             let Some(&last) = on.last() else { continue };
-            let [_, mbp, ..] = margins(pg, pw, ph);
+            let [mtp, mbp, ..] = margins(pg, pw, ph);
             let p = &placed[last];
+            // The last page is filled only when its music already takes most of it.
+            if pg == last_page {
+                let first_y = on.first().map_or(mtp, |k| placed[*k].y);
+                let used = p.y + p.sys_h - first_y;
+                if !style.page.vertical_justify || used < LAST_PAGE_FILL * (ph - mbp - first_y) {
+                    continue;
+                }
+            }
             let last_staff = p.y + p.tops.last().map_or(0.0, |t| t.2) + 4.0;
-            let room = (ph - mbp - style.page.music_bottom - last_staff)
-                .min(ph - mbp - (p.y + p.sys_h))
+            // An empty frame after the page's last system fills its part of the page.
+            let frame = systems
+                .get(p.si)
+                .and_then(|sy| sy.measures.last())
+                .and_then(|m| score.measures.get(*m))
+                .and_then(|i| i.frame_after)
+                .map_or(0.0, |h| h + 2.0 * FRAME_GAP);
+            let room = (ph - mbp - style.page.music_bottom - last_staff - frame)
+                .min(ph - mbp - (p.y + p.sys_h) - frame)
                 .max(0.0);
             // A forced page break leaves the rest of its page as it is.
             let forced = score
@@ -1694,6 +1709,14 @@ fn line_height(size: f32) -> f32 {
 }
 
 /// Height of a block (its lines) in sp.
+/// Size of segno and coda signs placed by hand, against the music font (MuseScore draws
+/// them in a text font at text size).
+const MARKER_SCALE: f32 = 0.6;
+
+/// How full the last page must be before its systems are spread like the others' (MuseScore
+/// spreads a last page that is well filled).
+const LAST_PAGE_FILL: f32 = 0.7;
+
 /// Least room between what hangs below one system (lyrics) and what stands above the next
 /// (chord symbols), staff spaces.
 const SYSTEM_CLEAR: f32 = 0.5;
@@ -2155,9 +2178,18 @@ fn draw_system(
                     match info.marker_place {
                         // Placed by hand: from the measure's barline (the system's start for
                         // its first measure) and the top staff line.
+                        // Drawn at text size, as MuseScore draws its markers' symbols.
                         Some(p) => {
                             let left = if k == 0 { x_start } else { m_start };
-                            o.glyph(c, left + p.dx_sp(), top + t0 + p.dy_sp() + lo, None);
+                            o.push(
+                                Shape::Glyph {
+                                    c,
+                                    x: left + p.dx_sp(),
+                                    y: top + t0 + p.dy_sp() + lo * MARKER_SCALE,
+                                    scale: MARKER_SCALE,
+                                },
+                                None,
+                            );
                         }
                         None => {
                             o.glyph(c, tx, ty + lo, None);
@@ -2531,6 +2563,45 @@ fn out_staff_box(
             };
             o.glyph(c, x, y, Some(ev));
             o.hit(x - 0.2, y - 0.3, x + w + 0.2, y + 0.8, Target::Rest { ev });
+            // What stands on the rest: a chord symbol at the start of the measure, a dynamic
+            // under it, a staff text over it.
+            if let Some(e) = v.events.first() {
+                let x0 = first;
+                if let Some(cs) = &e.chord_symbol {
+                    let text = chord_text(cs, o.f.german);
+                    let sh = o.f.shape(
+                        TextKind::ChordSymbol,
+                        &text,
+                        x0,
+                        d.top - CHORD_ABOVE,
+                        2.2,
+                        Align::Left,
+                    );
+                    o.push(sh, Some(ev));
+                }
+                if let Some(dy) = e.dynamic {
+                    let place = e.dynamic_place.unwrap_or_default();
+                    let mut dx = x0 - 0.2 + place.dx_sp();
+                    let yy = d.top + 4.0 + 3.0 + place.dy_sp();
+                    for ch in dy.id().chars() {
+                        if let Some((c, w)) = g::dynamic_letter(ch) {
+                            o.glyph(c, dx, yy, Some(ev));
+                            dx += w - 0.1;
+                        }
+                    }
+                }
+                if let Some(t) = &e.text {
+                    let place = e.text_place.unwrap_or_default();
+                    let yy = match e.text_place {
+                        Some(p) if p.below => d.top + 4.0 + 3.0,
+                        Some(_) => d.top - 1.5,
+                        None => d.top - CHORD_ABOVE - if e.chord_symbol.is_some() { 2.6 } else { 0.0 },
+                    } + place.dy_sp();
+                    let sh =
+                        o.f.shape(TextKind::StaffText, t, x0 + place.dx_sp(), yy, 1.9, Align::Left);
+                    o.push(sh, Some(ev));
+                }
+            }
             anchors.insert(
                 ev,
                 EvAnchor {

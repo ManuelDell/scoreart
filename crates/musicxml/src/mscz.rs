@@ -898,10 +898,25 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                             if dt == "measure" {
                                 // A whole-measure rest: fill the measure exactly.
                                 let len = score.measure_ticks(mi);
-                                for d in Duration::decompose(
+                                // What stands at its start (chord symbol, text, dynamic) goes
+                                // with its first rest.
+                                for (k, d) in Duration::decompose(
                                     len.saturating_sub(t.clamp(0, i64::from(u32::MAX)) as u32),
-                                ) {
-                                    push_event(&mut voice, &mut t, Event::rest(d));
+                                )
+                                .into_iter()
+                                .enumerate()
+                                {
+                                    let mut r = Event::rest(d);
+                                    if k == 0 {
+                                        r.chord_symbol = pending_chord.take();
+                                        r.text = pending_text.take();
+                                        r.text_place = pending_place.take();
+                                        if let Some(dy) = pending_dyn.take() {
+                                            r.dynamic = Some(dy);
+                                            r.dynamic_place = pending_dyn_place.take();
+                                        }
+                                    }
+                                    push_event(&mut voice, &mut t, r);
                                 }
                                 continue;
                             }

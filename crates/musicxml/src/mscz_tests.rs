@@ -914,7 +914,7 @@ fn reads_songbook_layout_and_harmony() {
     </Staff>
     <Staff id="2">
       <Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure>
-      <Measure><voice><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure>
+      <Measure><voice><Harmony><root>14</root></Harmony><Rest><durationType>measure</durationType><duration>4/4</duration></Rest></voice></Measure>
     </Staff>
   </Score>
 </museScore>
@@ -922,6 +922,9 @@ fn reads_songbook_layout_and_harmony() {
     let s = from_bytes(&mscz(xml)).unwrap();
     assert_eq!(s.parts[0].harmony.program, 24);
     assert!(s.parts[0].harmony.play);
+    // A chord symbol over a whole-measure rest.
+    let rest = &s.voice(1, 0, 1, 0).unwrap().events[0];
+    assert_eq!(rest.chord_symbol.as_deref(), Some("C"));
     assert_eq!(s.parts[1].hide_empty, vec![true]);
     assert_eq!(s.parts[1].small, vec![true]);
     assert!(!s.page.single_name && s.page.german_chords);
