@@ -54,6 +54,8 @@ const PAD_LEFT: f32 = 1.2;
 const STEM_LEN: f32 = 3.5;
 const NAME_SIZE: f32 = 1.9;
 const LYRIC_SIZE: f32 = 1.8;
+/// From a notehead's left edge to its centre, staff spaces.
+const NOTE_CENTER: f32 = 0.59;
 /// Distance between the lines of different verses.
 const LYRIC_LINE: f32 = 2.4;
 
@@ -96,11 +98,11 @@ fn syllable_width(f: &Fonts, l: &str) -> f32 {
 
 /// Baseline of the first verse below the bottom staff line, staff spaces: 3 spaces (as
 /// MuseScore places lyrics), lower when notes reach down so far that the syllables would touch
-/// them (1 space clear).
+/// them (half a space clear).
 fn lyric_base(score: &Score, part: usize, staff: usize, measures: &[usize]) -> f32 {
     let (_, down) = staff_reach(score, part, staff, measures);
     let size = Fonts::of(score).size(TextKind::Lyrics, LYRIC_SIZE);
-    (down + 1.0 + 0.75 * size).max(3.0)
+    (down + 0.75 + 0.75 * size).max(3.0)
 }
 
 /// Distance between the lines of different verses, for the lyrics' size.
@@ -1030,9 +1032,8 @@ fn stack_staves(score: &Score, style: &Style, sys: &System) -> Stack {
             // A mark placed by hand stands where it was put, not in the row.
             let rehearsal_row =
                 i.rehearsal.is_some() && Some(*m) != first_in_sys && i.rehearsal_place.is_none();
-            i.tempo.is_some()
+            (!i.tempo_hidden && (i.tempo.is_some() || i.tempo_text.is_some()))
                 || i.text.is_some()
-                || i.tempo_text.is_some()
                 || rehearsal_row
                 || i.jumps.iter().any(|j| {
                     if j.at_end() {
@@ -1397,10 +1398,18 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                 })
                 .collect()
         };
+        // Below text blocks, room for what stands above the first staff (tempo, rehearsal
+        // marks, chord symbols) so it stays clear of the text.
+        let blocks_clear = if above.is_empty() {
+            0.0
+        } else {
+            (top_reach + SYSTEM_CLEAR - above0).max(0.0)
+        };
         let blocks_h: f32 = above
             .iter()
             .map(|(_, b)| block_height(&fonts, &frame, b.kind, &b.text) + BLOCK_GAP)
-            .sum();
+            .sum::<f32>()
+            + blocks_clear;
         if si == 0 {
             // The first staff keeps the music top margin (below the titles, when any).
             y = if titled {
@@ -1457,6 +1466,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             blocks.push((*i, y));
             y += block_height(&fonts, &frame, b.kind, &b.text) + BLOCK_GAP;
         }
+        y += blocks_clear;
         placed.push(Placed {
             si,
             page: page_index,
@@ -1720,6 +1730,9 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             };
             draw_header_footer(&mut o, score, style, PageBox { mt, mb, ml, mr, ph }, pw, &info);
         }
+    }
+    if style.view == View::Page {
+        crate::collide::settle(&mut out);
     }
     out.collisions = crate::collide::collisions(&out);
     out
@@ -2297,7 +2310,7 @@ fn draw_system(
                     }
                 }
             }
-            if let Some(tt) = &info.tempo_text {
+            if let Some(tt) = info.tempo_text.as_ref().filter(|_| !info.tempo_hidden) {
                 let ts = o.styled(TextKind::Tempo, tt, tx, ty, 2.0, Align::Left);
                 tx += text_width(tt, ts) + 0.8;
             }
@@ -2342,7 +2355,7 @@ fn draw_system(
                     },
                 );
             }
-            if let Some(tempo) = info.tempo {
+            if let Some(tempo) = info.tempo.filter(|_| !info.tempo_hidden) {
                 // The beat unit: an eighth, quarter or half, perhaps dotted.
                 let (unit, dotted) = tempo.unit.parts();
                 let c = match unit {
@@ -2458,9 +2471,8 @@ fn draw_system(
         // right above what stands over the staff (chord symbols, high notes).
         let text_row = sys.measures.iter().any(|m| {
             score.measures.get(*m).is_some_and(|i| {
-                i.tempo.is_some()
+                (!i.tempo_hidden && (i.tempo.is_some() || i.tempo_text.is_some()))
                     || i.text.is_some()
-                    || i.tempo_text.is_some()
                     || i.rehearsal.is_some()
                     || !i.jumps.is_empty()
             })
@@ -2589,8 +2601,12 @@ fn draw_system(
                     }
                     *thick *= mag;
                 }
-                Shape::Text { x, y, .. } => {
-                    *x = col(*x);
+                Shape::Text { x, y, align, .. } => {
+                    // Texts keep their order and distances (a hyphen between two syllables
+                    // stays between them); centred ones follow their noteheads' centres.
+                    if *align == Align::Center && *x >= content_x {
+                        *x -= NOTE_CENTER * (1.0 - mag);
+                    }
                     *y = fy(*y);
                 }
             }
@@ -2811,10 +2827,14 @@ fn out_staff_box(
                     );
                     o.push(sh, Some(ev));
                 }
-                if let Some(dy) = e.dynamic {
+                if let Some(dy) = e.dynamic.filter(|_| !e.dynamic_hidden) {
                     let place = e.dynamic_place.unwrap_or_default();
                     let mut dx = x0 - 0.2 + place.dx_sp();
-                    let yy = d.top + 4.0 + 3.0 + place.dy_sp();
+                    let yy = match e.dynamic_place {
+                        Some(p) if p.below => d.top + 4.0 + p.dy_sp(),
+                        Some(p) => d.top + p.dy_sp(),
+                        None => d.top + 4.0 + 3.0,
+                    };
                     for ch in dy.id().chars() {
                         if let Some((c, w)) = g::dynamic_letter(ch) {
                             o.glyph(c, dx, yy, Some(ev));
@@ -2825,12 +2845,21 @@ fn out_staff_box(
                 if let Some(t) = &e.text {
                     let place = e.text_place.unwrap_or_default();
                     let yy = match e.text_place {
-                        Some(p) if p.below => d.top + 4.0 + 3.0,
-                        Some(_) => d.top - 1.5,
+                        Some(p) if p.below => d.top + 4.0 + p.dy_sp(),
+                        Some(p) => d.top + p.dy_sp(),
                         None => d.top - CHORD_ABOVE - if e.chord_symbol.is_some() { 2.6 } else { 0.0 },
-                    } + place.dy_sp();
-                    let sh =
-                        o.f.shape(TextKind::StaffText, t, x0 + place.dx_sp(), yy, 1.9, Align::Left);
+                    };
+                    let size = staff_text_size(e);
+                    let w = styled_width(&o.f, TextKind::StaffText, t, size);
+                    let (shift_x, yy) = text_align_shift(place, w, size, yy);
+                    let sh = o.f.shape(
+                        TextKind::StaffText,
+                        t,
+                        x0 + place.dx_sp() + shift_x,
+                        yy,
+                        size,
+                        Align::Left,
+                    );
                     o.push(sh, Some(ev));
                 }
             }
@@ -2935,6 +2964,10 @@ fn out_staff_box(
                     above = above.max(mid - h.1);
                     below = below.max(h.1 - mid);
                 }
+            }
+            // A beamed group all on the middle line has its stems up (as MuseScore draws it).
+            if gs.len() > 1 && above.abs() < 0.01 && below.abs() < 0.01 {
+                return true;
             }
             below > above
         };
@@ -3540,7 +3573,7 @@ fn out_staff_box(
             - 1.0;
         let chord_row = chord_row.min(d.top - CHORD_ABOVE);
         for (gg, e) in geos.iter().zip(v.events.iter()) {
-            if let Some(dy) = e.dynamic {
+            if let Some(dy) = e.dynamic.filter(|_| !e.dynamic_hidden) {
                 let place = e.dynamic_place.unwrap_or_default();
                 let x0 = gg.x - 0.2 + place.dx_sp();
                 let mut x = x0;
@@ -3551,18 +3584,23 @@ fn out_staff_box(
                 // A singer's staff has its lyrics below: the dynamic goes above (over the
                 // chord symbols when the measure has any), unless it was placed by hand.
                 let sung = v.events.iter().any(|x| x.verse_count() > 0);
-                let y = if sung && e.dynamic_place.is_none() {
-                    let high = anchors
-                        .get(&gg.ev)
-                        .map(|a| a.top.min(a.stem_end))
-                        .unwrap_or(d.top);
-                    if chord_row_used {
-                        chord_row - 2.6
-                    } else {
-                        (high - 1.2).min(d.top - 1.5)
+                let high = anchors
+                    .get(&gg.ev)
+                    .map(|a| a.top.min(a.stem_end))
+                    .unwrap_or(d.top);
+                let y = match e.dynamic_place {
+                    // Placed (as MuseScore stores it): from the top line, or below the staff
+                    // from the bottom line — kept clear of the note's own head and stem.
+                    Some(p) if p.below => (d.top + 4.0 + p.dy_sp()).max(low + 2.0),
+                    Some(p) => (d.top + p.dy_sp()).min(high - 0.6),
+                    None if sung => {
+                        if chord_row_used {
+                            chord_row - 2.6
+                        } else {
+                            (high - 1.2).min(d.top - 1.5)
+                        }
                     }
-                } else {
-                    (d.top + 4.0 + 3.0).max(low + 2.6) + place.dy_sp()
+                    None => (d.top + 4.0 + 3.0).max(low + 2.6),
                 };
                 for ch in dy.id().chars() {
                     if let Some((c, w)) = g::dynamic_letter(ch) {
@@ -3598,32 +3636,35 @@ fn out_staff_box(
                     false => reach.min(d.top - 2.2),
                 };
                 // Moved by the user: below the staff and/or by an offset.
-                // A moved text is measured from MuseScore's base: just above (or below) the staff.
+                // Placed (as MuseScore stores it): the baseline from the top line, or below
+                // the staff from the bottom line.
                 let place = e.text_place.unwrap_or_default();
                 let y = match e.text_place {
-                    Some(p) if p.below => d.top + 4.0 + 3.0,
-                    Some(_) => d.top - 1.5,
+                    Some(p) if p.below => d.top + 4.0 + p.dy_sp(),
+                    Some(p) => d.top + p.dy_sp(),
                     None => y,
-                } + place.dy_sp();
-                let w = styled_width(&o.f, TextKind::StaffText, t, 1.9);
+                };
+                let size = staff_text_size(e);
+                let w = styled_width(&o.f, TextKind::StaffText, t, size);
+                let (shift_x, y) = text_align_shift(place, w, size, y);
                 // Kept inside the system (an unmoved text never runs off the page).
-                let mut text_x = gg.x + place.dx_sp();
+                let mut text_x = gg.x + place.dx_sp() + shift_x;
                 if place.dx == 0 {
                     text_x = text_x.min(d.sys_x1 - w);
                 }
                 o.hit(
                     text_x - 0.2,
-                    y - 1.6,
+                    y - 0.85 * size,
                     text_x + w + 0.2,
                     y + 0.5,
                     Target::Text { ev: gg.ev },
                 );
-                let sh = o.f.shape(TextKind::StaffText, t, text_x, y, 1.9, Align::Left);
+                let sh = o.f.shape(TextKind::StaffText, t, text_x, y, size, Align::Left);
                 o.push(sh, Some(gg.ev));
             }
             for (verse, l) in e.lyrics.iter().enumerate().filter(|(_, l)| !l.is_empty()) {
                 let y = d.top + 4.0 + d.lyrics + lyric_line(&o.f) * verse as f32;
-                let cx = gg.x + 0.59;
+                let cx = gg.x + NOTE_CENTER;
                 let (number, l) = verse_number(l);
                 if let Some(n) = number {
                     let x = cx - syllable_width(&o.f, l) / 2.0 - 0.5;
@@ -3658,11 +3699,12 @@ fn out_staff_box(
                 }
             }
         }
-        // Hyphens whose next syllable is in a later measure: right after the syllable.
+        // Hyphens whose next syllable is in a later measure: right after the syllable, halfway
+        // to the barline (the next syllable may hang back to it).
         for (from, y) in hyphen_from.into_iter().flatten() {
-            o.styled(TextKind::Lyrics, "-", from + 1.0, y, LYRIC_SIZE, Align::Center);
+            let x = ((from + d.x1) / 2.0).clamp(from + 0.45, from + 1.0);
+            o.styled(TextKind::Lyrics, "-", x, y, LYRIC_SIZE, Align::Center);
         }
-        let _ = d.x1;
     }
 }
 
@@ -3929,12 +3971,56 @@ fn staff_reach(score: &Score, part: usize, staff: usize, measures: &[usize]) -> 
             continue;
         };
         let voices = sm.voices.iter().filter(|v| !v.events.is_empty()).count();
+        let group_ticks = score.time_at(m).beat_group_ticks().max(1);
         for (vi, v) in sm.voices.iter().enumerate() {
             let sung = v.events.iter().any(|x| x.verse_count() > 0);
-            for (e, on) in v.events.iter().zip(v.onsets()) {
-                // A sung staff's dynamics stand above it.
-                if sung && e.dynamic.is_some() && e.dynamic_place.is_none() {
+            let shift_at = |on: u32| f32::from(score.ottava_at(part, staff, m, on)) * 3.5;
+            let onsets = v.onsets();
+            let groups = beam_groups(v, &onsets, group_ticks);
+            // Per beamed event: the group's stem direction and its notes' highest and lowest
+            // place, so the beam's reach is counted on every stem of the group.
+            let mut group_dir: Vec<Option<(bool, f32, f32)>> = vec![None; v.events.len()];
+            for g in &groups {
+                let mut hi = f32::MAX;
+                let mut lo = f32::MIN;
+                for &i in g {
+                    let on = onsets.get(i).copied().unwrap_or(0);
+                    for n in v.events.get(i).map(|e| e.notes()).unwrap_or_default() {
+                        let y = note_y(clef, n.pitch) + shift_at(on);
+                        hi = hi.min(y);
+                        lo = lo.max(y);
+                    }
+                }
+                if hi > lo {
+                    continue;
+                }
+                let above = (2.0 - hi).max(0.0);
+                let below = (lo - 2.0).max(0.0);
+                let up = if voices > 1 {
+                    vi % 2 == 0
+                } else {
+                    below > above || (above < 0.01 && below < 0.01)
+                };
+                for &i in g {
+                    if let Some(slot) = group_dir.get_mut(i) {
+                        *slot = Some((up, hi, lo));
+                    }
+                }
+            }
+            for (ei, (e, on)) in v.events.iter().zip(v.onsets()).enumerate() {
+                // A sung staff's dynamics stand above it, and dynamics and texts placed above.
+                if sung && e.dynamic.is_some() && !e.dynamic_hidden && e.dynamic_place.is_none() {
                     up = up.max(3.0);
+                }
+                for p in [
+                    e.dynamic.filter(|_| !e.dynamic_hidden).and(e.dynamic_place),
+                    e.text.as_ref().and(e.text_place),
+                ]
+                .into_iter()
+                .flatten()
+                .filter(|p| !p.below && !p.free)
+                {
+                    up = up.max(-p.dy_sp() + 1.8);
                 }
                 let shift = f32::from(score.ottava_at(part, staff, m, on)) * 3.5;
                 let marks = if e.articulations.is_empty() { 0.0 } else { 1.6 };
@@ -3957,11 +4043,26 @@ fn staff_reach(score: &Score, part: usize, staff: usize, measures: &[usize]) -> 
                         2.0f32,
                         |a, y| if (y - 2.0).abs() > (a - 2.0).abs() { y } else { a },
                     );
-                let stem_up = if voices > 1 { vi % 2 == 0 } else { far >= 2.0 };
+                let group = group_dir.get(ei).copied().flatten();
+                let stem_up = match group {
+                    Some((up, ..)) => up,
+                    None if voices > 1 => vi % 2 == 0,
+                    None => far > 2.0,
+                };
                 let stem = e.duration.value.has_stem();
+                // Each beam (or flag) past the first lengthens the stem; the beam has thickness.
+                let stem_len = STEM_LEN
+                    + f32::from(e.duration.value.beams().saturating_sub(1)) * 0.75
+                    + if e.duration.value.beams() > 0 { 0.5 } else { 0.0 };
                 for &y in &ys {
-                    let stem_top = if stem && stem_up { y - STEM_LEN } else { y - 0.5 };
-                    let stem_bottom = if stem && !stem_up { y + STEM_LEN } else { y + 0.5 };
+                    let stem_top = if stem && stem_up { y - stem_len } else { y - 0.5 };
+                    let stem_bottom = if stem && !stem_up { y + stem_len } else { y + 0.5 };
+                    // The beam runs past the group's farthest note in the stems' direction.
+                    let (stem_top, stem_bottom) = match group {
+                        Some((true, hi, _)) => (stem_top.min(hi - stem_len), stem_bottom),
+                        Some((false, _, lo)) => (stem_top, stem_bottom.max(lo + stem_len)),
+                        None => (stem_top, stem_bottom),
+                    };
                     up = up
                         .max(-stem_top + marks)
                         .max(-y + 1.0 + marks + above_marks + finger);
@@ -4619,4 +4720,51 @@ fn draw_spanners(ctx: &Ctx, out: &mut Layout, last_page: &mut Page, last_index: 
             });
         }
     }
+}
+
+/// A staff text's size in staff spaces (1.9 at the default 10 points).
+fn staff_text_size(e: &Event) -> f32 {
+    e.text_size.map_or(1.9, |pt| 1.9 * f32::from(pt.max(1)) / 10.0)
+}
+
+/// The beamed groups of a voice (event indices), as the drawing joins them: beamable notes in
+/// a row within one beat group; a group of one is not beamed.
+fn beam_groups(v: &scoreart_model::Voice, onsets: &[u32], group_ticks: u32) -> Vec<Vec<usize>> {
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    let mut prev: Option<(u32, u32)> = None;
+    for (i, (e, &on)) in v.events.iter().zip(onsets).enumerate() {
+        let beamable = !e.is_rest() && e.duration.value.beams() > 0;
+        let gi = on / group_ticks;
+        let end = on + e.ticks();
+        let same = end.saturating_sub(1) / group_ticks == gi;
+        if beamable && same {
+            match (prev, groups.last_mut()) {
+                (Some((pg, pend)), Some(g)) if pg == gi && pend == on => g.push(i),
+                _ => groups.push(vec![i]),
+            }
+            prev = Some((gi, end));
+        } else {
+            prev = None;
+        }
+    }
+    groups.retain(|g| g.len() > 1);
+    groups
+}
+
+/// Where a left-aligned text on its baseline goes for a placed text's alignment: the shift to
+/// its left edge and its baseline.
+fn text_align_shift(p: scoreart_model::Placement, w: f32, size: f32, y: f32) -> (f32, f32) {
+    use scoreart_model::{HAlign, VAlign};
+    let dx = match p.halign {
+        HAlign::Left => 0.0,
+        HAlign::Center => -w / 2.0,
+        HAlign::Right => -w,
+    };
+    let y = match p.valign {
+        VAlign::Baseline => y,
+        VAlign::Top => y + 0.7 * size,
+        VAlign::Middle => y + 0.35 * size,
+        VAlign::Bottom => y - 0.2 * size,
+    };
+    (dx, y)
 }

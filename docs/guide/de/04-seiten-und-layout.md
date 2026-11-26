@@ -56,6 +56,11 @@ gedrängte Stelle vor dem Drucken nicht unter. Die Markierung gibt es nur am Bil
 wird sie nie. *Ansicht → Überschneidungen* (oder ein Klick auf die Zahl) schaltet sie aus und
 ein; ScoreArt merkt sich die Wahl.
 
+Viele Überschneidungen vermeidet ScoreArt auch selbst: Dynamik und Notenzeilentexte, die auf
+Noten, Balken oder anderen Texten landen, rücken ein Stück nach oben oder unten an die nächste
+freie Stelle, für Balken und Hälse über und unter einer Notenzeile wird Platz gehalten, und
+Silbentrennstriche bleiben zwischen ihren Silben.
+
 ## Kopf- und Fußzeilen
 
 *Format → Kopf- & Fußzeile…* hat ein linkes, mittleres und rechtes Feld für den oberen und

@@ -50,6 +50,10 @@ spot does not go unnoticed before you print. The marking is only on the screen, 
 *View → Overlaps* (or a click on the count) switches it off and on; ScoreArt remembers your
 choice.
 
+ScoreArt also avoids many overlaps by itself: dynamics and staff texts that land on notes, beams
+or other texts move up or down a little to the nearest free place, room is kept for beams and
+stems below and above a staff, and lyric hyphens stay between their syllables.
+
 ## Headers and footers
 
 *Format → Header & footer…* has a left, middle and right field for the top and the bottom of

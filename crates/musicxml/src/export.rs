@@ -472,10 +472,35 @@ pub fn write_laid_out(score: &Score, starts: &[(usize, bool)]) -> String {
             })
         })
         .collect();
+    // Dynamics and tempo marks that are heard but not shown.
+    let mut hidden: Vec<serde_json::Value> = score
+        .measures
+        .iter()
+        .enumerate()
+        .filter(|(_, i)| i.tempo_hidden)
+        .map(|(m, _)| serde_json::json!({ "tempo": m }))
+        .collect();
+    for (pi, p) in score.parts.iter().enumerate() {
+        for (m, pm) in p.measures.iter().enumerate() {
+            for (si, sm) in pm.staves.iter().enumerate() {
+                for (vi, v) in sm.voices.iter().enumerate() {
+                    for (ei, e) in v.events.iter().enumerate() {
+                        if e.dynamic_hidden && e.dynamic.is_some() {
+                            hidden.push(serde_json::json!({ "dynamic": [pi, si, vi, m, ei] }));
+                        }
+                        if e.text.is_some() && e.text_place.is_some_and(|p| p.free) {
+                            hidden.push(serde_json::json!({ "free": [pi, si, vi, m, ei] }));
+                        }
+                    }
+                }
+            }
+        }
+    }
     for (name, v) in [
         ("scoreart-sections", sections),
         ("scoreart-spacers", spacers),
         ("scoreart-parts", parts_extra),
+        ("scoreart-hidden", hidden),
     ] {
         if !v.is_empty() {
             let _ = write!(
@@ -780,6 +805,24 @@ pub fn write_laid_out(score: &Score, starts: &[(usize, bool)]) -> String {
 }
 
 /// `relative-x`/`relative-y` (tenths, y up) and the placement of a moved text.
+/// `justify` and `valign` of a placed staff text, when not left on the baseline.
+fn words_align(p: Placement) -> String {
+    use scoreart_model::{HAlign, VAlign};
+    let mut a = String::new();
+    match p.halign {
+        HAlign::Left => {}
+        HAlign::Center => a.push_str(" justify=\"center\""),
+        HAlign::Right => a.push_str(" justify=\"right\""),
+    }
+    match p.valign {
+        VAlign::Baseline => {}
+        VAlign::Top => a.push_str(" valign=\"top\""),
+        VAlign::Middle => a.push_str(" valign=\"middle\""),
+        VAlign::Bottom => a.push_str(" valign=\"bottom\""),
+    }
+    a
+}
+
 fn place_attrs(p: Option<Placement>) -> (&'static str, String) {
     match p {
         Some(p) => (
@@ -980,14 +1023,27 @@ fn write_event(
                 d.id()
             )
         };
-        direction(x, "below", &body, staff, "");
+        let side = if e.dynamic_place.is_some_and(|p| !p.below) {
+            "above"
+        } else {
+            "below"
+        };
+        direction(x, side, &body, staff, "");
     }
     if let Some(t) = &e.text {
         let (placement, rel) = place_attrs(e.text_place);
         direction(
             x,
             placement,
-            &format!("<words font-style=\"italic\"{rel}>{}</words>", esc(t)),
+            &format!(
+                "<words font-style=\"italic\"{size}{rel}{align}>{}</words>",
+                esc(t),
+                size = e
+                    .text_size
+                    .map(|z| format!(" font-size=\"{z}\""))
+                    .unwrap_or_default(),
+                align = e.text_place.map(words_align).unwrap_or_default()
+            ),
             staff,
             "",
         );

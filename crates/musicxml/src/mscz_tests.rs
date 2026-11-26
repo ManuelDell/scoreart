@@ -943,3 +943,92 @@ fn reads_songbook_layout_and_harmony() {
     assert_eq!(back.parts[1].hide_empty, vec![true]);
     assert_eq!(back.parts[0].harmony.program, 24);
 }
+
+/// Dynamics and tempo marks set invisible in MuseScore are heard, not shown — also after
+/// saving.
+#[test]
+fn invisible_dynamics_and_tempo() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<museScore version="3.01">
+  <Score>
+    <Division>480</Division>
+    <Part><Staff id="1"><StaffType group="pitched"/></Staff><trackName>Voice</trackName>
+      <Instrument><longName>Voice</longName><Channel><program value="52"/></Channel></Instrument></Part>
+    <Staff id="1">
+      <Measure>
+        <voice>
+          <TimeSig><sigN>4</sigN><sigD>4</sigD></TimeSig>
+          <Tempo><tempo>2</tempo><visible>0</visible><text>Allegro</text></Tempo>
+          <Dynamic><subtype>p</subtype><visible>0</visible></Dynamic>
+          <Chord><durationType>half</durationType><Note><pitch>72</pitch><tpc>14</tpc></Note></Chord>
+          <Dynamic><subtype>f</subtype><placement>above</placement></Dynamic>
+          <Chord><durationType>half</durationType><Note><pitch>72</pitch><tpc>14</tpc></Note></Chord>
+        </voice>
+      </Measure>
+    </Staff>
+  </Score>
+</museScore>
+"#;
+    let s = from_bytes(&mscz(xml)).unwrap();
+    assert!(s.measures[0].tempo_hidden);
+    let ev = &s.voice(0, 0, 0, 0).unwrap().events;
+    assert!(ev[0].dynamic_hidden && ev[0].dynamic.is_some());
+    assert!(!ev[1].dynamic_hidden);
+    // Placed above without an offset: MuseScore's default, 1.5 spaces above the staff.
+    let p = ev[1].dynamic_place.unwrap();
+    assert!(!p.below && p.dy == -15);
+    let back = from_str(&to_string(&s)).unwrap();
+    assert!(back.measures[0].tempo_hidden);
+    let be = &back.voice(0, 0, 0, 0).unwrap().events;
+    assert!(be[0].dynamic_hidden && !be[1].dynamic_hidden);
+    assert_eq!(be[1].dynamic_place, ev[1].dynamic_place);
+}
+
+#[test]
+fn tempo_unit_and_staff_text_layout() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<museScore version="4.20">
+  <Score>
+    <Division>480</Division>
+    <Part><Staff id="1"><StaffType group="pitched"/></Staff><trackName>Voice</trackName>
+      <Instrument><longName>Voice</longName><Channel><program value="52"/></Channel></Instrument></Part>
+    <Staff id="1">
+      <Measure>
+        <voice>
+          <TimeSig><sigN>4</sigN><sigD>4</sigD></TimeSig>
+          <Tempo><tempo>1.433333</tempo><text><sym>metNote8thUp</sym> = 172</text></Tempo>
+          <StaffText><minDistance>-999</minDistance><size>6</size><offset x="3.6" y="-9.2"/><text>Hint</text></StaffText>
+          <Chord><durationType>half</durationType><Note><pitch>72</pitch><tpc>14</tpc></Note></Chord>
+          <StaffText><placement>below</placement><align>right,center</align><offset x="-5" y="6"/><text>Solo:</text></StaffText>
+          <Chord><durationType>half</durationType><Note><pitch>72</pitch><tpc>14</tpc><head>heavy-cross</head></Note></Chord>
+        </voice>
+      </Measure>
+    </Staff>
+  </Score>
+</museScore>
+"#;
+    let s = from_bytes(&mscz(xml)).unwrap();
+    // Counted in the eighths the mark shows.
+    let t = s.measures[0].tempo.unwrap();
+    assert_eq!((t.bpm, t.unit), (172, scoreart_model::BeatUnit::Eighth));
+    let ev = &s.voice(0, 0, 0, 0).unwrap().events;
+    // A negative least distance: the text takes no room; its size is kept.
+    assert!(ev[0].text_place.is_some_and(|p| p.free));
+    assert_eq!(ev[0].text_size, Some(6));
+    let p = ev[1].text_place.unwrap();
+    assert_eq!(
+        (p.halign, p.valign, p.below),
+        (
+            scoreart_model::HAlign::Right,
+            scoreart_model::VAlign::Middle,
+            true
+        )
+    );
+    assert_eq!(ev[1].notes()[0].head, scoreart_model::NoteHead::X);
+    let back = from_str(&to_string(&s)).unwrap();
+    let be = &back.voice(0, 0, 0, 0).unwrap().events;
+    assert_eq!(be[0].text_place, ev[0].text_place);
+    assert_eq!(be[0].text_size, Some(6));
+    assert_eq!(be[1].text_place, ev[1].text_place);
+    assert_eq!(back.measures[0].tempo, s.measures[0].tempo);
+}

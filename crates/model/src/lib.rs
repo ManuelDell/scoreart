@@ -294,9 +294,15 @@ pub struct Event {
     /// Where the staff text was moved to.
     #[serde(default)]
     pub text_place: Option<Placement>,
+    /// The staff text's size in points, when not the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_size: Option<u8>,
     /// How far the dynamic was moved from its place under the staff.
     #[serde(default)]
     pub dynamic_place: Option<Placement>,
+    /// The dynamic is heard but not shown (MuseScore's invisible dynamics).
+    #[serde(default)]
+    pub dynamic_hidden: bool,
 }
 
 /// Most lyric verses kept per note.
@@ -349,7 +355,9 @@ impl Event {
             chord_symbol: None,
             text: None,
             text_place: None,
+            text_size: None,
             dynamic_place: None,
+            dynamic_hidden: false,
         }
     }
 
@@ -742,6 +750,9 @@ pub struct MeasureInfo {
     /// Tempo word shown before the metronome mark ("Allegro").
     #[serde(default)]
     pub tempo_text: Option<String>,
+    /// The tempo is kept but not shown (MuseScore's invisible tempo marks).
+    #[serde(default)]
+    pub tempo_hidden: bool,
     /// Boxed rehearsal mark ("A", "12").
     #[serde(default)]
     pub rehearsal: Option<String>,
@@ -814,6 +825,37 @@ pub struct Placement {
     pub dx: i16,
     pub dy: i16,
     pub below: bool,
+    /// Takes no room: the staves are spaced as if it were not there (MuseScore's negative
+    /// minimum distance), it may overlap what is near.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub free: bool,
+    /// Which side of the text sits at the place (left edge, centre, right edge).
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub halign: HAlign,
+    /// Which height of the text sits at the place (baseline, top, middle, bottom).
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub valign: VAlign,
+}
+
+/// Horizontal alignment of a placed text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+/// Vertical alignment of a placed text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VAlign {
+    #[default]
+    Baseline,
+    Top,
+    Middle,
+    Bottom,
 }
 
 impl Placement {
@@ -824,6 +866,9 @@ impl Placement {
             dx: t(dx),
             dy: t(dy),
             below,
+            free: false,
+            halign: HAlign::Left,
+            valign: VAlign::Baseline,
         }
     }
 
@@ -1653,3 +1698,11 @@ pub fn clip(s: &str) -> String {
 
 #[cfg(test)]
 mod tests;
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+    *v == T::default()
+}

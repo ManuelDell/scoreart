@@ -8,9 +8,10 @@ use std::collections::{BTreeMap, HashMap};
 
 use scoreart_model::marks::MARKS;
 use scoreart_model::{
-    Anchor, Arpeggio, Articulation, Barline, Clef, Duration, Dynamic, Event, Grace, Jump, KeySig,
-    MeasureInfo, Meta, Note, NoteHead, NoteValue, Part, PartMeasure, Pitch, Placement, Score, Spanner,
-    SpannerKind, StaffMeasure, Step, TPQ, Tempo, TimeSig, TimeSymbol, Tremolo, Tuplet, Voice, clip, limits,
+    Anchor, Arpeggio, Articulation, Barline, BeatUnit, Clef, Duration, Dynamic, Event, Grace, HAlign, Jump,
+    KeySig, MeasureInfo, Meta, Note, NoteHead, NoteValue, Part, PartMeasure, Pitch, Placement, Score,
+    Spanner, SpannerKind, StaffMeasure, Step, TPQ, Tempo, TimeSig, TimeSymbol, Tremolo, Tuplet, VAlign,
+    Voice, clip, limits,
 };
 
 use crate::Error;
@@ -114,7 +115,7 @@ fn mark_by_legacy(name: &str) -> Option<Articulation> {
 
 fn head_of(s: &str) -> NoteHead {
     match s.trim() {
-        "cross" | "x" => NoteHead::X,
+        "cross" | "x" | "heavy-cross" => NoteHead::X,
         "diamond" | "diamond-old" => NoteHead::Diamond,
         "slash" => NoteHead::Slash,
         "triangle-up" | "triangle-down" | "triangle" => NoteHead::Triangle,
@@ -216,6 +217,44 @@ fn placement_of(e: &Element) -> Option<Placement> {
     };
     let (x, y) = (num("x"), num("y"));
     (below || x != 0.0 || y != 0.0).then(|| Placement::from_sp(x, y, below))
+}
+
+/// Where MuseScore put a staff text or dynamic: its `<offset>` is the whole position (dx from
+/// the note; dy to the baseline from the top line, or below the staff from the bottom line),
+/// written only when it differs from the default; `above` is the default height above the
+/// staff for one placed above without an offset (None: ours).
+fn ms_place(e: &Element, above: Option<f64>) -> Option<Placement> {
+    let placement = e.child_text("placement").map(str::trim);
+    let below = placement == Some("below");
+    if e.child("offset").is_some() {
+        return placement_of(e).map(|p| Placement { below, ..p });
+    }
+    match (placement, above) {
+        (Some("above"), Some(y)) => Some(Placement::from_sp(0.0, y, false)),
+        _ => None,
+    }
+}
+
+/// The note a tempo mark counts in, from its symbols (metNote8thUp, metAugmentationDot …).
+fn tempo_unit(e: &Element) -> Option<BeatUnit> {
+    let syms: Vec<String> = e
+        .child("text")?
+        .children_named("sym")
+        .map(|x| x.text.trim().to_string())
+        .collect();
+    let i = syms.iter().position(|n| n.starts_with("metNote"))?;
+    let dotted = syms.get(i + 1).is_some_and(|n| n == "metAugmentationDot");
+    let value = match syms[i]
+        .trim_start_matches("metNote")
+        .trim_end_matches("Up")
+        .trim_end_matches("Down")
+    {
+        "8th" => "eighth",
+        "Quarter" => "quarter",
+        "Half" => "half",
+        _ => return None,
+    };
+    BeatUnit::from_parts(value, dotted)
 }
 
 fn jump_of_label(label: &str) -> Option<Jump> {
@@ -587,9 +626,11 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                 let mut tuplets_by_id: HashMap<String, Tuplet> = HashMap::new();
                 let mut pending_dyn: Option<Dynamic> = None;
                 let mut pending_dyn_place: Option<Placement> = None;
+                let mut pending_dyn_hidden = false;
                 let mut pending_marks: Vec<Articulation> = Vec::new();
                 let mut pending_text: Option<String> = None;
                 let mut pending_place: Option<Placement> = None;
+                let mut pending_text_size: Option<u8> = None;
                 let mut pending_chord: Option<String> = None;
                 // Pending moves of the voice position by <location>; MuseScore may step back
                 // to anchor a line and forward again, so only the net move counts.
@@ -648,9 +689,14 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                         "Tempo" if top_staff => {
                             let text = flat_text(c.child("text").unwrap_or(c));
                             if let Some(info) = score.measures.get_mut(mi) {
+                                info.tempo_hidden = c.child_text("visible").is_some_and(|v| v.trim() == "0");
                                 if let Some(qps) = c.child_num("tempo") {
-                                    info.tempo =
-                                        Some(Tempo::quarter((qps * 60.0).round().clamp(10.0, 400.0) as u16));
+                                    // Counted in the note the mark shows (♪ = 172), else in quarters.
+                                    let unit = tempo_unit(c).unwrap_or(BeatUnit::Quarter);
+                                    info.tempo = Some(Tempo {
+                                        bpm: (qps * 60.0 / unit.quarters()).round().clamp(10.0, 400.0) as u16,
+                                        unit,
+                                    });
                                 }
                                 // The element tree keeps no order between text and child elements:
                                 // prefer the formatted runs (<b>Allegro</b>) when there are any.
@@ -721,7 +767,33 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                                 }
                             } else if !txt.is_empty() {
                                 if pending_text.is_none() {
-                                    pending_place = placement_of(c);
+                                    pending_place = ms_place(c, None);
+                                    // A negative least distance lets the text sit anywhere,
+                                    // taking no room.
+                                    if c.child_num("minDistance").is_some_and(|d| d < 0.0) {
+                                        pending_place = pending_place.map(|p| Placement { free: true, ..p });
+                                    }
+                                    // Its alignment ("right,center"): which side sits at the place.
+                                    if let Some(a) = c.child_text("align") {
+                                        let mut it = a.split(',').map(str::trim);
+                                        let halign = match it.next() {
+                                            Some("right") => HAlign::Right,
+                                            Some("center") | Some("hcenter") => HAlign::Center,
+                                            _ => HAlign::Left,
+                                        };
+                                        let valign = match it.next() {
+                                            Some("top") => VAlign::Top,
+                                            Some("center") | Some("vcenter") => VAlign::Middle,
+                                            Some("bottom") => VAlign::Bottom,
+                                            _ => VAlign::Baseline,
+                                        };
+                                        pending_place =
+                                            pending_place.map(|p| Placement { halign, valign, ..p });
+                                    }
+                                    pending_text_size = c
+                                        .child_num("size")
+                                        .filter(|v| v.is_finite() && *v >= 1.0)
+                                        .map(|v| v.round().min(96.0) as u8);
                                 }
                                 pending_text = Some(match pending_text.take() {
                                     Some(p) => format!("{p} {txt}"),
@@ -732,10 +804,8 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                         "Harmony" => pending_chord = harmony_text(c),
                         "Dynamic" => {
                             pending_dyn = c.child_text("subtype").and_then(Dynamic::from_id);
-                            // Only a real move; which side of the staff is ours to choose.
-                            pending_dyn_place = placement_of(c)
-                                .filter(|p| p.dx != 0 || p.dy != 0)
-                                .map(|p| Placement { below: false, ..p });
+                            pending_dyn_place = ms_place(c, Some(-1.5));
+                            pending_dyn_hidden = c.child_text("visible").is_some_and(|v| v.trim() == "0");
                         }
                         "Fermata" => {
                             if let Some(a) = c
@@ -919,9 +989,11 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                                         r.chord_symbol = pending_chord.take();
                                         r.text = pending_text.take();
                                         r.text_place = pending_place.take();
+                                        r.text_size = pending_text_size.take();
                                         if let Some(dy) = pending_dyn.take() {
                                             r.dynamic = Some(dy);
                                             r.dynamic_place = pending_dyn_place.take();
+                                            r.dynamic_hidden = std::mem::take(&mut pending_dyn_hidden);
                                         }
                                     }
                                     push_event(&mut voice, &mut t, r);
@@ -1109,9 +1181,11 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                             if let Some(d) = pending_dyn.take() {
                                 e.dynamic = Some(d);
                                 e.dynamic_place = pending_dyn_place.take();
+                                e.dynamic_hidden = std::mem::take(&mut pending_dyn_hidden);
                             }
                             e.text = pending_text.take();
                             e.text_place = pending_place.take();
+                            e.text_size = pending_text_size.take();
                             e.chord_symbol = pending_chord.take();
                             push_event(&mut voice, &mut t, e);
                         }

@@ -15,6 +15,23 @@ use crate::Error;
 
 /// Placement of a moved text: the direction's `placement` and the element's
 /// `relative-x`/`relative-y` (tenths, y up).
+/// A staff text's `justify` and `valign` on its placement.
+fn words_alignment(el: &Element, p: Placement) -> Placement {
+    use scoreart_model::{HAlign, VAlign};
+    let halign = match el.attr("justify").map(str::trim) {
+        Some("center") => HAlign::Center,
+        Some("right") => HAlign::Right,
+        _ => HAlign::Left,
+    };
+    let valign = match el.attr("valign").map(str::trim) {
+        Some("top") => VAlign::Top,
+        Some("middle") => VAlign::Middle,
+        Some("bottom") => VAlign::Bottom,
+        _ => VAlign::Baseline,
+    };
+    Placement { halign, valign, ..p }
+}
+
 fn placement_attrs(direction: &Element, el: &Element) -> Option<Placement> {
     let below = direction.attr("placement") == Some("below");
     let num = |k: &str| {
@@ -300,6 +317,35 @@ fn read_layout(root: &Element, score: &mut Score, ours: bool) {
             sm.spacer_up = f(&v, "up");
             sm.spacer_down = f(&v, "down");
             sm.spacer_fixed = f(&v, "fixed");
+        }
+    }
+    for v in json("scoreart-hidden") {
+        if let Some(info) = n(&v, "tempo").and_then(|m| score.measures.get_mut(m)) {
+            info.tempo_hidden = true;
+        }
+        // Staff texts that take no room.
+        let free: Vec<usize> = v
+            .get("free")
+            .and_then(|d| d.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_u64()).map(|x| x as usize).collect())
+            .unwrap_or_default();
+        if let [p, s, vi, m, ei] = free[..]
+            && let Some(pl) = score
+                .voice_mut(p, s, m, vi)
+                .and_then(|v| v.events.get_mut(ei))
+                .and_then(|e| e.text_place.as_mut())
+        {
+            pl.free = true;
+        }
+        let at: Vec<usize> = v
+            .get("dynamic")
+            .and_then(|d| d.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_u64()).map(|x| x as usize).collect())
+            .unwrap_or_default();
+        if let [p, s, vi, m, ei] = at[..]
+            && let Some(e) = score.voice_mut(p, s, m, vi).and_then(|v| v.events.get_mut(ei))
+        {
+            e.dynamic_hidden = true;
         }
     }
     for v in json("scoreart-parts") {
@@ -944,6 +990,7 @@ fn read_part(
         let mut instrument_change: Option<InstrumentChange> = None;
         // Moved staff texts: (staff, time, placement).
         let mut pending_place: Vec<(usize, u64, Placement)> = Vec::new();
+        let mut pending_size: Vec<(usize, u64, u8)> = Vec::new();
         let mut dir_marks: Vec<(usize, u64, DirMark)> = Vec::new();
         let mut graces: HashMap<(usize, u32), Vec<Grace>> = HashMap::new();
         let mut t: u64 = 0;
@@ -1376,12 +1423,15 @@ fn read_part(
                         || c.child("sound").is_some_and(|s| s.attr("tempo").is_some());
                     let mut words_here: Option<String> = None;
                     let mut words_place: Option<Placement> = None;
+                    let mut words_size: Option<u8> = None;
                     for dt in c.children_named("direction-type") {
                         for k in &dt.children {
                             match k.name.as_str() {
                                 "dynamics" => {
+                                    // Moved: above or below the staff, as the direction says.
+                                    let below = c.attr("placement") != Some("above");
                                     let moved = placement_attrs(&Element::default(), k)
-                                        .map(|p| Placement { below: false, ..p });
+                                        .map(|p| Placement { below, ..p });
                                     for d in &k.children {
                                         let id = if d.name == "other-dynamics" {
                                             d.text.trim().to_string()
@@ -1396,7 +1446,15 @@ fn read_part(
                                 "words" => {
                                     let w = k.text.trim();
                                     if words_here.is_none() {
-                                        words_place = placement_attrs(c, k);
+                                        words_place = placement_attrs(c, k).map(|p| words_alignment(k, p));
+                                        // Only a size other than the default 10 points is kept.
+                                        words_size = k
+                                            .attr("font-size")
+                                            .and_then(|v| v.trim().parse::<f64>().ok())
+                                            .filter(|v| {
+                                                v.is_finite() && *v >= 1.0 && (*v - 10.0).abs() > 0.01
+                                            })
+                                            .map(|v| v.round().min(96.0) as u8);
                                     }
                                     if !w.is_empty() {
                                         words_here = Some(match words_here.take() {
@@ -1658,6 +1716,9 @@ fn read_part(
                             if let Some(p) = words_place {
                                 pending_place.push((staff, at, p));
                             }
+                            if let Some(z) = words_size {
+                                pending_size.push((staff, at, z));
+                            }
                             pending_text.push((staff, at, w, false));
                         }
                     }
@@ -1753,6 +1814,13 @@ fn read_part(
                 && let Some(r) = raws.get_mut(i)
             {
                 r.event.text_place = Some(p);
+            }
+        }
+        for (staff, at, z) in pending_size {
+            if let Some(i) = target(&mut raws, staff, at)
+                && let Some(r) = raws.get_mut(i)
+            {
+                r.event.text_size = Some(z);
             }
         }
         for (staff, at, text, chord) in pending_text {

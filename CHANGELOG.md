@@ -21,7 +21,13 @@
   switchable under *View → Overlaps*: texts, lyrics, chord symbols, rehearsal marks, dynamics
   and notes that run into each other. Fixed on the way: dynamics of sung staves go above the
   staff, staves inside a system keep lyrics clear of the next staff, a clef change at the end
-  of a MuseScore measure holds from the next one.
+  of a MuseScore measure holds from the next one. Then many fewer of them: dynamics and staff
+  texts move clear of notes, beams and texts; room is kept for beams (also slanted ones) and
+  multi-beam stems; text blocks above the first system leave room for its tempo mark; lyric
+  hyphens stay between their syllables, also on small staves. From MuseScore: dynamics and
+  staff texts where their offset puts them, invisible dynamics and tempo marks (heard, not
+  shown), staff texts that take no room, their size and alignment, tempo marks counted in the
+  note they show, heavy-cross noteheads, beamed groups on the middle line with stems up.
 - **Layout settings in ScoreArt**: instrument names (full/short/none, first and other
   systems), naming a single instrument and German chord names in the page settings; *Blank
   space…* after a system; rehearsal marks, segno/coda and jumps dragged with the hand (and

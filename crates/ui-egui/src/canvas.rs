@@ -1026,23 +1026,25 @@ fn drop_mark(app: &mut ScoreApp, layout: &scoreart_engrave::Layout, d: MarkDrag)
         return;
     };
     let round = |v: f32| (f64::from(v) * 10.0).round() / 10.0;
-    let (dx, dy) = if d.text {
-        // A moved text is measured from just above (or below) the staff.
-        let place = e.text_place.unwrap_or_default();
-        let Some(sb) = layout.staff_box(d.ev.part, d.ev.staff, d.ev.measure) else {
-            return;
-        };
-        let base = if place.below { sb.top + 7.0 } else { sb.top - 1.5 };
-        let baseline = d.hit.y1 - 0.5;
-        (place.dx_sp() + d.delta.0, baseline + d.delta.1 - base)
+    // Stored as MuseScore stores it: the baseline from the top line, or (below the staff)
+    // from the bottom line.
+    let Some(sb) = layout.staff_box(d.ev.part, d.ev.staff, d.ev.measure) else {
+        return;
+    };
+    let place = if d.text { e.text_place } else { e.dynamic_place };
+    let baseline = d.hit.y1 - 0.5 + d.delta.1;
+    let bottom = sb.top + 4.0 * sb.mag;
+    let below = baseline > bottom;
+    let dx = place.map_or(0.0, |p| p.dx_sp()) + d.delta.0;
+    let dy = if below {
+        baseline - bottom
     } else {
-        let place = e.dynamic_place.unwrap_or_default();
-        (place.dx_sp() + d.delta.0, place.dy_sp() + d.delta.1)
+        baseline - sb.top
     };
     let kind = if d.text { "text" } else { "dynamic" };
     app.run(
         "note.place",
-        json!({ "kind": kind, "dx": round(dx), "dy": round(dy) }),
+        json!({ "kind": kind, "dx": round(dx), "dy": round(dy), "below": below }),
     );
 }
 
