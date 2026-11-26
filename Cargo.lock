@@ -3607,7 +3607,6 @@ dependencies = [
  "eframe",
  "egui",
  "js-sys",
- "rfd",
  "scoreart-engine",
  "scoreart-synth",
  "scoreart-ui-egui",

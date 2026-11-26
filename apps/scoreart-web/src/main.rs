@@ -33,6 +33,8 @@ mod audio;
 #[cfg(target_arch = "wasm32")]
 mod midi;
 #[cfg(target_arch = "wasm32")]
+mod picker;
+#[cfg(target_arch = "wasm32")]
 mod web;
 
 #[cfg(target_arch = "wasm32")]

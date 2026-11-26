@@ -37,6 +37,9 @@
   short label like "Name:"), and fields side by side in one row. Fields take room of their own:
   the music moves aside, also when a field is dragged, and a field between two systems no
   longer runs into the one above. New command `block.look`.
+- **Opening files in the browser** goes straight to the system's file dialog; where the
+  browser does not allow that, a small window in ScoreArt's look (with dropping a file onto it)
+  replaces the plain, unstyled one.
 - **LilyPond PDFs** are converted too: the glyph names of its music font are read from the
   PDF; octave-treble clefs with the "8" as a separate glyph, older LilyPond fonts, beams drawn
   with outlines and scores followed by their parts in the same file are handled.

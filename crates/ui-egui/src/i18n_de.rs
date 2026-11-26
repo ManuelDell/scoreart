@@ -1393,4 +1393,16 @@ pub const DE: &[(&str, &str)] = &[
         "Text fields take room of their own: the music moves aside, also when you drag them.",
         "Textfelder bekommen eigenen Platz: Die Noten weichen aus, auch wenn du sie verschiebst.",
     ),
+    ("Open score", "Partitur öffnen"),
+    (
+        "MusicXML, MuseScore, MIDI or PDF",
+        "MusicXML, MuseScore, MIDI oder PDF",
+    ),
+    ("Load sounds", "Klänge laden"),
+    (
+        "SoundFont (.sf2) or a zip of an SFZ library",
+        "SoundFont (.sf2) oder eine SFZ-Bibliothek als Zip",
+    ),
+    ("Choose file…", "Datei auswählen…"),
+    ("or drop it here", "oder hierher ziehen"),
 ];

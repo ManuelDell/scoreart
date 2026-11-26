@@ -342,17 +342,16 @@ impl Host for WebHost {
     fn request_open(&mut self) {
         let inbox = self.inbox.clone();
         let ctx = self.ctx.clone();
+        let dark = ctx.theme() == eframe::egui::Theme::Dark;
         wasm_bindgen_futures::spawn_local(async move {
-            let file = rfd::AsyncFileDialog::new()
-                .add_filter(
-                    "Scores (MusicXML, MuseScore, MIDI, PDF)",
-                    &["musicxml", "mxl", "xml", "mscz", "mscx", "mid", "midi", "pdf"],
-                )
-                .pick_file()
-                .await;
-            if let Some(f) = file {
-                let name = f.file_name();
-                let bytes = f.read().await;
+            let file = crate::picker::pick(crate::picker::Ask {
+                extensions: &["musicxml", "mxl", "xml", "mscz", "mscx", "mid", "midi", "pdf"],
+                title: "Open score",
+                what: "MusicXML, MuseScore, MIDI or PDF",
+                dark,
+            })
+            .await;
+            if let Some((name, bytes)) = file {
                 inbox.borrow_mut().push((name, bytes));
                 ctx.request_repaint();
             }
@@ -373,15 +372,17 @@ impl Host for WebHost {
     fn request_sounds(&mut self, _folder: bool) {
         let inbox = self.sounds.clone();
         let ctx = self.ctx.clone();
+        let dark = ctx.theme() == eframe::egui::Theme::Dark;
         wasm_bindgen_futures::spawn_local(async move {
             // Browsers cannot open folders: SFZ libraries come as a zip with their samples.
-            let file = rfd::AsyncFileDialog::new()
-                .add_filter("Sound libraries (SoundFont .sf2, zip of SFZ)", &["sf2", "zip"])
-                .pick_file()
-                .await;
-            if let Some(f) = file {
-                let name = f.file_name();
-                let bytes = f.read().await;
+            let file = crate::picker::pick(crate::picker::Ask {
+                extensions: &["sf2", "zip"],
+                title: "Load sounds",
+                what: "SoundFont (.sf2) or a zip of an SFZ library",
+                dark,
+            })
+            .await;
+            if let Some((name, bytes)) = file {
                 let bank =
                     scoreart_synth::SoundBank::from_bytes(&name, bytes).map_err(|e| format!("{name}: {e}"));
                 inbox.borrow_mut().push(bank);
