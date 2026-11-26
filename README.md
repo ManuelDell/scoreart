@@ -14,6 +14,7 @@
   <img alt="Runs on Windows, macOS, Linux and the web" src="https://img.shields.io/badge/runs%20on-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Web-7048e8?style=flat-square">
   <img alt="Free: MIT or Apache-2.0" src="https://img.shields.io/badge/free-MIT%20%2F%20Apache--2.0-7048e8?style=flat-square">
   <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-orange?style=flat-square">
+  <a href="https://buymeacoffee.com/manueldell"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=flat-square&logo=buy-me-a-coffee&logoColor=black"></a>
 </p>
 
 ![ScoreArt showing the song "Ode to Joy" for voice and piano](docs/images/app.png)
@@ -108,6 +109,12 @@ The [**technical documentation**](docs/technical/README.md) explains how it is b
 
 Contributing: read [AGENTS.md](AGENTS.md) first — it holds the rules for this repository, above
 all the **clean-room rules** (no MuseScore or other GPL notation code is ever read or used).
+
+## Support
+
+ScoreArt is free and stays free. If it is useful to you and you would like to say thanks, you
+can [buy me a coffee](https://buymeacoffee.com/manueldell) ☕ — bug reports and ideas in the
+[issues](https://github.com/ManuelDell/scoreart/issues) help just as much.
 
 ## Licence
 

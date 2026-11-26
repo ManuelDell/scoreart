@@ -619,7 +619,7 @@ fn read_defaults(d: &Element) -> PageFormat {
             }
         }
         let [t, b, l, r] = f.margins_mm(1);
-        let [et, eb, el, er] = even.map_or([None; 4], |e| e);
+        let [et, eb, el, er] = even.unwrap_or([None; 4]);
         (
             f.even_margin_top_mm,
             f.even_margin_bottom_mm,
