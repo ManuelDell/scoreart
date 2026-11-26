@@ -952,7 +952,7 @@ struct Placed {
     y: f32,
     tops: Vec<(usize, usize, f32)>,
     sys_h: f32,
-    blocks: Vec<(usize, f32)>,
+    blocks: Vec<BlockSlot>,
     /// Below each staff: whether a fixed spacer sets the distance (the last: to the next system),
     /// which filling the page leaves as it is.
     fixed: Vec<bool>,
@@ -1405,11 +1405,11 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
         } else {
             (top_reach + SYSTEM_CLEAR - above0).max(0.0)
         };
-        let blocks_h: f32 = above
-            .iter()
-            .map(|(_, b)| block_height(&fonts, &frame, b.kind, &b.text) + BLOCK_GAP)
-            .sum::<f32>()
-            + blocks_clear;
+        // Text fields in rows (side by side where asked), each row as high as its highest
+        // field, a field moved down taking its room along.
+        let rows = block_rows(&above);
+        let row_h: Vec<f32> = rows.iter().map(|r| row_height(&fonts, &frame, r)).collect();
+        let blocks_h: f32 = row_h.iter().map(|h| h + BLOCK_GAP).sum::<f32>() + blocks_clear;
         if si == 0 {
             // The first staff keeps the music top margin (below the titles, when any).
             y = if titled {
@@ -1435,6 +1435,11 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             // above the other would come closer than SYSTEM_CLEAR.
             let d = style.system_gap.max(prev_reach + SYSTEM_CLEAR + top_reach);
             y = line + d - above0 - blocks_h;
+            // Text fields between two systems take room of their own: they start below what
+            // hangs under the system before.
+            if !above.is_empty() {
+                y = y.max(line + prev_reach + SYSTEM_CLEAR + BLOCK_GAP);
+            }
         }
         if let Some((pg, line, below)) = prev_staff_end
             && pg == page_index
@@ -1461,10 +1466,17 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
         }
         let [_, _, mlp, mrp] = margins(page_index, pw, ph);
         let frame = Frame { ml: mlp, mr: mrp, pw };
+        // How far up a field may be moved: not into the system before (or the top margin).
+        let ceiling = match prev_staff_end {
+            Some((pg, line, _)) if pg == page_index => line + prev_reach + SYSTEM_CLEAR,
+            // Below the titles: into the room left under them, not onto them.
+            _ if titled && si == 0 => y - 2.5,
+            _ => margins(page_index, pw, ph)[0],
+        };
         let mut blocks = Vec::new();
-        for (i, b) in &above {
-            blocks.push((*i, y));
-            y += block_height(&fonts, &frame, b.kind, &b.text) + BLOCK_GAP;
+        for (r, h) in rows.iter().zip(&row_h) {
+            blocks.extend(row_slots(&frame, r, y, ceiling));
+            y += h + BLOCK_GAP;
         }
         y += blocks_clear;
         placed.push(Placed {
@@ -1562,8 +1574,8 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                         shift += sys_extra;
                     }
                     let p = &mut placed[*k];
-                    for (_, by) in &mut p.blocks {
-                        *by += shift;
+                    for b in &mut p.blocks {
+                        b.y += shift;
                     }
                     p.y += shift;
                     let mut grow = 0.0;
@@ -1588,8 +1600,8 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                     }
                     let p = &mut placed[*k];
                     p.y += shift;
-                    for (_, by) in &mut p.blocks {
-                        *by += shift;
+                    for b in &mut p.blocks {
+                        b.y += shift;
                     }
                 }
             }
@@ -1608,8 +1620,7 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
             };
             page_index = p.page;
         }
-        let [_, _, mlp, mrp] = margins(page_index, pw, ph);
-        let frame = Frame { ml: mlp, mr: mrp, pw };
+        let [_, _, mlp, _] = margins(page_index, pw, ph);
         if !p.blocks.is_empty() {
             let mut o = Out {
                 page: &mut page,
@@ -1617,9 +1628,9 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                 hits: &mut out.hits,
                 f: fonts,
             };
-            for (i, by) in &p.blocks {
-                if let Some(b) = score.blocks.get(*i) {
-                    draw_block(&mut o, &frame, b.kind, &b.text, *by, BlockRef::Added(*i));
+            for slot in &p.blocks {
+                if let Some(b) = score.blocks.get(slot.i) {
+                    draw_field(&mut o, b, slot);
                 }
             }
         }
@@ -1683,10 +1694,16 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
     // Text after the last system (a poem at the end).
     if style.view != View::Horizontal {
         let n = score.measures.len();
-        for (i, b) in score.blocks.iter().enumerate().filter(|(_, b)| b.measure >= n) {
-            let [_, mbp, mlp, mrp] = margins(page_index, pw, ph);
+        let after: Vec<(usize, &scoreart_model::TextBlock)> = score
+            .blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.measure >= n)
+            .collect();
+        for row in block_rows(&after) {
+            let [mt, mbp, mlp, mrp] = margins(page_index, pw, ph);
             let frame = Frame { ml: mlp, mr: mrp, pw };
-            let h = block_height(&fonts, &frame, b.kind, &b.text);
+            let h = row_height(&fonts, &frame, &row);
             if !endless && y + h > ph - mbp && !page.items.is_empty() {
                 out.pages.push(std::mem::take(&mut page));
                 page = Page {
@@ -1703,7 +1720,17 @@ pub fn layout(score: &Score, style: &Style) -> Layout {
                 hits: &mut out.hits,
                 f: fonts,
             };
-            y += draw_block(&mut o, &frame, b.kind, &b.text, y, BlockRef::Added(i)) + BLOCK_GAP;
+            let ceiling = if o.page.items.is_empty() {
+                mt
+            } else {
+                y - BLOCK_GAP
+            };
+            for slot in row_slots(&frame, &row, y, ceiling) {
+                if let Some(b) = score.blocks.get(slot.i) {
+                    draw_field(&mut o, b, &slot);
+                }
+            }
+            y += h + BLOCK_GAP;
         }
     }
     if endless {
@@ -2547,7 +2574,7 @@ fn draw_system(
             let (y0, y1, x0) = match &it.shape {
                 Shape::Glyph { x, y, .. } => (*y, *y, *x),
                 Shape::Line { x1, y1, x2, y2, .. } => (y1.min(*y2), y1.max(*y2), x1.min(*x2)),
-                Shape::Rect { x, y, h, .. } => (*y, y + h, *x),
+                Shape::Rect { x, y, h, .. } | Shape::Shade { x, y, h, .. } => (*y, y + h, *x),
                 Shape::Quad { p } | Shape::Curve { p, .. } => (
                     p.iter().map(|q| q.1).fold(f32::MAX, f32::min),
                     p.iter().map(|q| q.1).fold(f32::MIN, f32::max),
@@ -2583,7 +2610,7 @@ fn draw_system(
                     *y2 = fy(*y2);
                     *width *= mag.max(0.85);
                 }
-                Shape::Rect { x, y, w, h } => {
+                Shape::Rect { x, y, w, h } | Shape::Shade { x, y, w, h } => {
                     let (a, b) = (fy(*y), fy(*y + *h));
                     *x = col(*x);
                     *w *= mag;
@@ -4223,7 +4250,9 @@ fn glyph_run(items: &mut Vec<(usize, Shape)>, page: usize, name: &str, x0: f32, 
 /// Moves a shape up or down.
 fn shift_y(sh: &mut Shape, dy: f32) {
     match sh {
-        Shape::Glyph { y, .. } | Shape::Rect { y, .. } | Shape::Text { y, .. } => *y += dy,
+        Shape::Glyph { y, .. } | Shape::Rect { y, .. } | Shape::Shade { y, .. } | Shape::Text { y, .. } => {
+            *y += dy
+        }
         Shape::Line { y1, y2, .. } => {
             *y1 += dy;
             *y2 += dy;
@@ -4247,7 +4276,7 @@ fn bounds(sh: &Shape) -> Option<(f32, f32, f32, f32)> {
             Some((*x - 0.3, y - 2.0 * scale, x + 2.5 * scale, y + 1.0 * scale))
         }
         Shape::Line { x1, y1, x2, y2, .. } => pts(&[(*x1, *y1), (*x2, *y2)]),
-        Shape::Rect { x, y, w, h } => Some((*x, *y, x + w, y + h)),
+        Shape::Rect { x, y, w, h } | Shape::Shade { x, y, w, h } => Some((*x, *y, x + w, y + h)),
         Shape::Quad { p } | Shape::Curve { p, .. } => pts(p),
         Shape::Text {
             text,
@@ -4767,4 +4796,273 @@ fn text_align_shift(p: scoreart_model::Placement, w: f32, size: f32, y: f32) -> 
         VAlign::Bottom => y - 0.2 * size,
     };
     (dx, y)
+}
+
+/// Where one added text block (a text field) stands: its top (with its own offset), its left
+/// edge and its width, staff spaces.
+#[derive(Clone, Copy, Debug)]
+struct BlockSlot {
+    i: usize,
+    y: f32,
+    x: f32,
+    w: f32,
+}
+
+/// Room inside a framed or shaded field, staff spaces.
+const FIELD_PAD: f32 = 0.8;
+/// Room between fields side by side, staff spaces.
+const FIELD_GAP: f32 = 1.5;
+
+/// The style a field is drawn in and its size in staff spaces.
+fn field_style(f: &Fonts, b: &scoreart_model::TextBlock) -> (scoreart_model::TextStyle, f32) {
+    let st = b.look.style.unwrap_or_else(|| f.styles.get(b.kind));
+    (st, st.size_sp(f.space).clamp(0.3, 60.0))
+}
+
+fn field_pad(b: &scoreart_model::TextBlock) -> f32 {
+    if b.look.border || b.look.shade {
+        FIELD_PAD
+    } else {
+        0.0
+    }
+}
+
+/// Distance of the lines to write on, for the field's text size.
+fn write_gap(size: f32) -> f32 {
+    (line_height(size) * 1.8).max(3.0)
+}
+
+/// Width of a text line in a field's style.
+fn field_text_width(st: &scoreart_model::TextStyle, text: &str, size: f32) -> f32 {
+    let sans = if st.font == scoreart_model::TextFont::Sans {
+        1.1
+    } else {
+        1.0
+    };
+    text_width(text, size) * sans
+}
+
+/// The lines of a field's text, broken to its inner width.
+fn field_lines(f: &Fonts, b: &scoreart_model::TextBlock, w: f32) -> Vec<String> {
+    let (st, size) = field_style(f, b);
+    let sans = if st.font == scoreart_model::TextFont::Sans {
+        1.1
+    } else {
+        1.0
+    };
+    if b.text.trim().is_empty() {
+        return Vec::new();
+    }
+    block_lines(&b.text, size * sans, (w - 2.0 * field_pad(b)).max(2.0))
+}
+
+/// Whether a field's first line to write on runs on beside its text ("Name: ______"): a short
+/// left-aligned label of one line.
+fn label_line(f: &Fonts, b: &scoreart_model::TextBlock, w: f32) -> bool {
+    let (st, size) = field_style(f, b);
+    let lines = field_lines(f, b, w);
+    b.look.lines > 0
+        && st.align == scoreart_model::TextAlign::Left
+        && lines.len() == 1
+        && lines
+            .first()
+            .is_some_and(|l| field_text_width(&st, l, size) < 0.6 * (w - 2.0 * field_pad(b)))
+}
+
+/// Height of a field `w` wide: its text, its lines to write on and its frame.
+fn field_height(f: &Fonts, b: &scoreart_model::TextBlock, w: f32) -> f32 {
+    let (_, size) = field_style(f, b);
+    let n = field_lines(f, b, w).len();
+    let text = if n == 0 {
+        0.0
+    } else {
+        size + (n as f32 - 1.0) * line_height(size) + size * 0.25
+    };
+    let own_lines = b.look.lines.saturating_sub(u8::from(label_line(f, b, w)));
+    let lines = f32::from(own_lines) * write_gap(size);
+    let pad = field_pad(b);
+    if text + lines <= 0.0 && pad <= 0.0 {
+        return 0.0;
+    }
+    text + lines + 2.0 * pad
+}
+
+/// The blocks in rows: one below the other, a block "beside" the one before joins its row.
+fn block_rows<'b>(
+    list: &[(usize, &'b scoreart_model::TextBlock)],
+) -> Vec<Vec<(usize, &'b scoreart_model::TextBlock)>> {
+    let mut rows: Vec<Vec<(usize, &scoreart_model::TextBlock)>> = Vec::new();
+    for &(i, b) in list {
+        match rows.last_mut() {
+            Some(r) if b.look.beside => r.push((i, b)),
+            _ => rows.push(vec![(i, b)]),
+        }
+    }
+    rows
+}
+
+/// The widths of a row's fields: their share of the line, narrower together if they would not
+/// fit side by side.
+fn row_widths(frame: &Frame, row: &[(usize, &scoreart_model::TextBlock)]) -> Vec<f32> {
+    let line = frame.width().max(1.0);
+    let gaps = FIELD_GAP * row.len().saturating_sub(1) as f32;
+    let want: Vec<f32> = row
+        .iter()
+        .map(|(_, b)| line * f32::from(b.look.width.clamp(10, 100)) / 100.0)
+        .collect();
+    let sum: f32 = want.iter().sum();
+    let k = if sum + gaps > line && sum > 0.0 {
+        ((line - gaps) / sum).max(0.05)
+    } else {
+        1.0
+    };
+    want.into_iter().map(|w| w * k).collect()
+}
+
+/// A row's height: its highest field, a field moved down counting its offset.
+fn row_height(f: &Fonts, frame: &Frame, row: &[(usize, &scoreart_model::TextBlock)]) -> f32 {
+    row.iter()
+        .zip(row_widths(frame, row))
+        .map(|((_, b), w)| field_height(f, b, w) + (f32::from(b.dy) / 10.0).max(0.0))
+        .fold(0.0, f32::max)
+}
+
+/// Where the fields of a row stand, its top at `y`: side by side from the left, the row placed
+/// by its first field's alignment; each moved by its offset, kept on the page and never above
+/// `ceiling` (what stands before it).
+fn row_slots(
+    frame: &Frame,
+    row: &[(usize, &scoreart_model::TextBlock)],
+    y: f32,
+    ceiling: f32,
+) -> Vec<BlockSlot> {
+    let widths = row_widths(frame, row);
+    let total = widths.iter().sum::<f32>() + FIELD_GAP * row.len().saturating_sub(1) as f32;
+    let line = frame.width();
+    let align = row
+        .first()
+        .and_then(|(_, b)| b.look.style.map(|s| s.align))
+        .unwrap_or(scoreart_model::TextAlign::Left);
+    // A field narrower than the line stands where its alignment puts it; a full-width one
+    // aligns its text inside.
+    let start = match align {
+        _ if total >= line - 0.01 => frame.ml,
+        scoreart_model::TextAlign::Left => frame.ml,
+        scoreart_model::TextAlign::Center => frame.ml + (line - total) / 2.0,
+        scoreart_model::TextAlign::Right => frame.ml + line - total,
+    };
+    let mut x = start;
+    let mut out = Vec::new();
+    for ((i, b), w) in row.iter().zip(widths) {
+        let (dx, dy) = (f32::from(b.dx) / 10.0, f32::from(b.dy) / 10.0);
+        // Kept on the paper.
+        let fx = (x + dx).clamp(0.0, (frame.pw - w).max(0.0));
+        out.push(BlockSlot {
+            i: *i,
+            y: (y + dy).max(ceiling.min(y)),
+            x: fx,
+            w,
+        });
+        x += w + FIELD_GAP;
+    }
+    out
+}
+
+/// Draws a text field in its slot: background, frame, text in its style (wrapped, aligned in
+/// the field, underlined if asked) and the lines to write on. Its box can be picked up.
+fn draw_field(o: &mut Out, b: &scoreart_model::TextBlock, slot: &BlockSlot) {
+    let w = slot.w;
+    let h = field_height(&o.f, b, w);
+    if h <= 0.0 {
+        return;
+    }
+    let (st, size) = field_style(&o.f, b);
+    let pad = field_pad(b);
+    let (x0, top) = (slot.x, slot.y);
+    if b.look.shade {
+        o.push(Shape::Shade { x: x0, y: top, w, h }, None);
+    }
+    if b.look.border {
+        let t = 0.12;
+        for (a, c, d, e) in [
+            (x0, top, x0 + w, top),
+            (x0, top + h, x0 + w, top + h),
+            (x0, top, x0, top + h),
+            (x0 + w, top, x0 + w, top + h),
+        ] {
+            o.line(a, c, d, e, t, None);
+        }
+    }
+    let inner = (w - 2.0 * pad).max(0.5);
+    let (tx, align) = match st.align {
+        scoreart_model::TextAlign::Left => (x0 + pad, Align::Left),
+        scoreart_model::TextAlign::Center => (x0 + w / 2.0, Align::Center),
+        scoreart_model::TextAlign::Right => (x0 + pad + inner, Align::Right),
+    };
+    let lines = field_lines(&o.f, b, w);
+    let beside_label = label_line(&o.f, b, w);
+    let mut by = top + pad + size;
+    for l in &lines {
+        if !l.is_empty() {
+            let lw = field_text_width(&st, l, size);
+            o.push(
+                Shape::Text {
+                    text: l.clone(),
+                    x: tx,
+                    y: by,
+                    size,
+                    align,
+                    bold: st.bold,
+                    italic: st.italic,
+                    serif: st.font == scoreart_model::TextFont::Serif,
+                    kind: Some(b.kind),
+                },
+                None,
+            );
+            if b.look.underline {
+                let lx = match align {
+                    Align::Left => tx,
+                    Align::Center => tx - lw / 2.0,
+                    Align::Right => tx - lw,
+                };
+                o.line(
+                    lx,
+                    by + size * 0.15,
+                    lx + lw,
+                    by + size * 0.15,
+                    (size * 0.06).max(0.08),
+                    None,
+                );
+            }
+        }
+        by += line_height(size);
+    }
+    // Lines to write on: from the last text line on, one writing distance apart.
+    let text_end = if lines.is_empty() {
+        top + pad
+    } else {
+        top + pad + size + (lines.len() as f32 - 1.0) * line_height(size) + size * 0.25
+    };
+    let gap = write_gap(size);
+    let mut rest = b.look.lines;
+    if beside_label && let Some(l) = lines.first() {
+        // The first line runs on from the label, on its baseline.
+        let lw = field_text_width(&st, l, size);
+        let ly = top + pad + size + size * 0.15;
+        o.line(x0 + pad + lw + 0.6, ly, x0 + w - pad, ly, 0.1, None);
+        rest = rest.saturating_sub(1);
+    }
+    for k in 1..=rest {
+        let ly = text_end + gap * f32::from(k) - gap * 0.15;
+        o.line(x0 + pad, ly, x0 + w - pad, ly, 0.1, None);
+    }
+    o.hit(
+        x0 - 0.2,
+        top - 0.2,
+        x0 + w + 0.2,
+        top + h + 0.2,
+        Target::Block {
+            block: BlockRef::Added(slot.i),
+        },
+    );
 }

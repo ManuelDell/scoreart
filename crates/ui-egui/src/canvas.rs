@@ -330,6 +330,14 @@ pub(crate) fn paint_shape(
                 color,
             );
         }
+        Shape::Shade { x, y, w, h } => {
+            // Behind the text; grey on paper, dimmed on a dark page.
+            painter.rect_filled(
+                Rect::from_min_size(map(*x, *y), Vec2::new(w * zoom, h * zoom)),
+                0.0,
+                color.gamma_multiply(0.1),
+            );
+        }
         Shape::Quad { p } => {
             painter.add(EShape::convex_polygon(
                 p.iter().map(|(a, b)| map(*a, *b)).collect(),

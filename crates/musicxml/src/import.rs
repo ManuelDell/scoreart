@@ -569,14 +569,9 @@ fn read_credits(root: &Element, score: &mut Score) {
             .or_else(|| systems.iter().find(|(p, ..)| *p > pg))
             .map_or(n, |s| s.1);
         if score.blocks.len() < scoreart_model::limits::MAX_BLOCKS {
-            score.blocks.push(scoreart_model::TextBlock {
-                kind: TextKind::Heading,
-                text,
-                measure,
-                dx: 0,
-                dy: 0,
-                locked: false,
-            });
+            score
+                .blocks
+                .push(scoreart_model::TextBlock::new(TextKind::Heading, text, measure));
         }
     }
 }

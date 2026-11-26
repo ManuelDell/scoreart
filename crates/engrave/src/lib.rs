@@ -166,6 +166,13 @@ pub enum Shape {
         w: f32,
         h: f32,
     },
+    /// A light grey area behind texts (a shaded text field).
+    Shade {
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+    },
     /// A filled convex quadrilateral (beams).
     Quad {
         p: [(f32, f32); 4],

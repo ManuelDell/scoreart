@@ -11,6 +11,26 @@ ein Gedicht, einen Hinweis an die Spieler — fügst du mit *Format → Übersch
 *Textblock* über dem gewählten Takt ein. Ein Doppelklick auf einen Text bearbeitet ihn; `Entf`
 entfernt den gewählten.
 
+## Textfelder und Arbeitsblätter
+
+Ein Textblock ist ein **Textfeld** mit eigenem Aussehen — genug für ein Arbeitsblatt im
+Musikunterricht. Im Dialog (Doppelklick auf das Feld oder beim Anlegen):
+
+- **Eigene Formatierung**: Schrift, Größe, fett, kursiv, unterstrichen und Ausrichtung nur für
+  dieses Feld (ohne sie folgt das Feld dem Stil für Überschriften oder Textblöcke unter
+  *Schriften*);
+- **Rahmen** und **grauer Hintergrund**, für eine Aufgabe oder ein Antwortfeld;
+- **Breite** in Prozent der Zeile; ein schmaleres Feld steht links, mittig oder rechts, je nach
+  Ausrichtung;
+- **Schreiblinien** unter dem Text — nach einer kurzen Beschriftung wie „Name:“ läuft die erste
+  Linie gleich daneben weiter; ein Feld mit Linien oder Rahmen darf ganz ohne Text sein (ein
+  Antwortfeld);
+- **Neben dem Feld davor**: Felder stehen nebeneinander in einer Zeile, z. B. *Name* und *Datum*.
+
+Textfelder **bekommen eigenen Platz**: Die Noten weichen aus und laufen nie darunter. Ziehst du
+ein Feld nach unten, wandern die Noten darunter mit; nach oben hält es unter dem System davor an.
+Was sich doch überschneidet, wird rot markiert (*Ansicht → Überschneidungen*).
+
 ## Texte verschieben und sperren
 
 Mit der **Hand** lässt sich jeder Textblock aufnehmen und frei verschieben.

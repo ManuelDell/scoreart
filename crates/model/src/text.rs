@@ -246,6 +246,100 @@ pub struct TextBlock {
     /// Held at its place: the hand cannot drag it until it is unlocked.
     #[serde(default)]
     pub locked: bool,
+    /// How this block looks (its own font, a frame, lines to write on …).
+    #[serde(default, flatten)]
+    pub look: BlockLook,
+}
+
+impl TextBlock {
+    /// A block of `kind` above the system with `measure`, in its kind's style, not moved.
+    pub fn new(kind: TextKind, text: impl Into<String>, measure: usize) -> TextBlock {
+        TextBlock {
+            kind,
+            text: text.into(),
+            measure,
+            dx: 0,
+            dy: 0,
+            locked: false,
+            look: BlockLook::default(),
+        }
+    }
+}
+
+/// Most lines to write on below a text block.
+pub const MAX_BLOCK_LINES: u8 = 30;
+
+/// The look of one text block — a text field of a worksheet: its own formatting (else its
+/// kind's style), a frame, a grey background, a width, empty lines to write on, and whether it
+/// stands beside the block before it.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BlockLook {
+    /// Its own font, size, weight, slant and alignment; None: the style of its kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<TextStyle>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub underline: bool,
+    /// A frame around it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub border: bool,
+    /// A light grey background.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub shade: bool,
+    /// Its width in percent of the line (10–100).
+    #[serde(default = "full_width", skip_serializing_if = "is_full_width")]
+    pub width: u8,
+    /// Empty ruled lines to write on below the text.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub lines: u8,
+    /// Stands beside the block before it (in one row), not below it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub beside: bool,
+}
+
+impl Default for BlockLook {
+    fn default() -> BlockLook {
+        BlockLook {
+            style: None,
+            underline: false,
+            border: false,
+            shade: false,
+            width: 100,
+            lines: 0,
+            beside: false,
+        }
+    }
+}
+
+impl BlockLook {
+    /// Within bounds (a file may hold anything).
+    pub fn clamped(mut self) -> BlockLook {
+        self.width = self.width.clamp(10, 100);
+        self.lines = self.lines.min(MAX_BLOCK_LINES);
+        if let Some(s) = &mut self.style {
+            s.size = if s.size.is_finite() {
+                s.size.clamp(4.0, 96.0)
+            } else {
+                10.0
+            };
+        }
+        self
+    }
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+fn is_zero(v: &u8) -> bool {
+    *v == 0
+}
+
+fn full_width() -> u8 {
+    100
+}
+
+fn is_full_width(v: &u8) -> bool {
+    *v == 100
 }
 
 /// Which block: the title page's texts and the page number by kind, added blocks by index.
@@ -290,7 +384,14 @@ impl TextSettings {
 
     pub fn apply(self, score: &mut crate::Score) {
         score.text_styles = self.styles;
-        score.blocks = self.blocks;
+        score.blocks = self
+            .blocks
+            .into_iter()
+            .map(|mut b| {
+                b.look = b.look.clamped();
+                b
+            })
+            .collect();
         score.block_offsets = self.offsets;
         score.hide_page_numbers = self.hide_page_numbers;
         score.header_footer = self.header_footer.clipped();

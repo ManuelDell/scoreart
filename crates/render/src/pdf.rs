@@ -85,6 +85,21 @@ pub fn pdf(layout: &Layout, style: &Style, title: &str) -> Result<Vec<u8>, Strin
                         }
                     }
                 }
+                Shape::Shade { x, y, w, h } => {
+                    if let Some(r) = krilla::geom::Rect::from_xywh(*x, *y, w.max(0.001), h.max(0.001)) {
+                        let mut b = PathBuilder::new();
+                        b.push_rect(r);
+                        if let Some(path) = b.finish() {
+                            let [r, g, bl] = crate::SHADE_RGB;
+                            s.set_fill(Some(Fill {
+                                paint: krilla::color::rgb::Color::new(r, g, bl).into(),
+                                ..Fill::default()
+                            }));
+                            s.draw_path(&path);
+                            s.set_fill(Some(Fill::default()));
+                        }
+                    }
+                }
                 Shape::Quad { p } => {
                     let mut b = PathBuilder::new();
                     b.move_to(p[0].0, p[0].1);

@@ -517,14 +517,9 @@ pub fn from_mscx_styled(xml: &str, mss: Option<&str>) -> Result<Score, Error> {
                             _ => scoreart_model::TextKind::Text,
                         };
                         if top_staff && score.blocks.len() < limits::MAX_BLOCKS {
-                            score.blocks.push(scoreart_model::TextBlock {
-                                kind,
-                                text: v,
-                                measure: measures_before,
-                                dx: 0,
-                                dy: 0,
-                                locked: false,
-                            });
+                            score
+                                .blocks
+                                .push(scoreart_model::TextBlock::new(kind, v, measures_before));
                         }
                     }
                     if measures_before == 0 {

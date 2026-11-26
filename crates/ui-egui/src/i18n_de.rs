@@ -1375,4 +1375,22 @@ pub const DE: &[(&str, &str)] = &[
         "● Note input · {}{} · Voice {}",
         "● Noteneingabe · {}{} · Stimme {}",
     ),
+    ("Format text field", "Textfeld formatieren"),
+    ("Formatting", "Formatierung"),
+    ("Own formatting", "Eigene Formatierung"),
+    ("Underline", "Unterstrichen"),
+    ("Field", "Feld"),
+    ("Frame", "Rahmen"),
+    ("Grey background", "Grauer Hintergrund"),
+    ("Width", "Breite"),
+    ("Lines to write on", "Schreiblinien"),
+    ("Beside the field before", "Neben dem Feld davor"),
+    (
+        "In one row with the text field before it, e.g. name and date.",
+        "In einer Zeile mit dem Textfeld davor, z. B. Name und Datum.",
+    ),
+    (
+        "Text fields take room of their own: the music moves aside, also when you drag them.",
+        "Textfelder bekommen eigenen Platz: Die Noten weichen aus, auch wenn du sie verschiebst.",
+    ),
 ];

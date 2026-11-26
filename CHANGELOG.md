@@ -32,6 +32,11 @@
   systems), naming a single instrument and German chord names in the page settings; *Blank
   space…* after a system; rehearsal marks, segno/coda and jumps dragged with the hand (and
   reset); **small staves** (70 %) per instrument, also from MuseScore files.
+- **Text fields for worksheets**: text blocks get a look of their own — font, size, bold,
+  italic, underlined, alignment, frame, grey background, width, lines to write on (beside a
+  short label like "Name:"), and fields side by side in one row. Fields take room of their own:
+  the music moves aside, also when a field is dragged, and a field between two systems no
+  longer runs into the one above. New command `block.look`.
 - **LilyPond PDFs** are converted too: the glyph names of its music font are read from the
   PDF; octave-treble clefs with the "8" as a separate glyph, older LilyPond fonts, beams drawn
   with outlines and scores followed by their parts in the same file are handled.

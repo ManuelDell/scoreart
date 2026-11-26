@@ -8,7 +8,10 @@ use egui::{Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use serde_json::json;
 
 use scoreart_engrave::{Align, Layout, Shape, Style, View};
-use scoreart_model::{BlockRef, PageFormat, Score, TextAlign, TextFont, TextKind, TextStyles};
+use scoreart_model::{
+    BlockLook, BlockRef, MAX_BLOCK_LINES, PageFormat, Score, TextAlign, TextFont, TextKind, TextStyle,
+    TextStyles,
+};
 
 use crate::i18n::{t, tf};
 use crate::{Dialog, ScoreApp, canvas, glyph, theme};
@@ -92,14 +95,7 @@ fn sample(styles: &TextStyles, page: PageFormat) -> Score {
             }
         }
     }
-    let block = |kind, text: &str, measure| scoreart_model::TextBlock {
-        kind,
-        text: text.into(),
-        measure,
-        dx: 0,
-        dy: 0,
-        locked: false,
-    };
+    let block = |kind, text: &str, measure| scoreart_model::TextBlock::new(kind, text, measure);
     s.blocks = vec![
         block(
             TextKind::Text,
@@ -502,6 +498,8 @@ pub(crate) struct BlockDialog {
     block: Option<BlockRef>,
     kind: TextKind,
     value: String,
+    /// How an added block looks (title-page texts take their kind's style).
+    look: BlockLook,
 }
 
 /// Opens the dialog for a new heading or text block (a header or footer opens the header and
@@ -515,20 +513,25 @@ pub(crate) fn add_block(app: &mut ScoreApp, kind: TextKind) {
         block: None,
         kind,
         value: String::new(),
+        look: BlockLook::default(),
     }));
 }
 
 /// Opens the dialog for an existing block (the page number opens the Fonts window instead).
 pub(crate) fn edit_block(app: &mut ScoreApp, block: BlockRef) {
     let score = &app.session.score;
-    let (kind, value) = match block {
+    let (kind, value, look) = match block {
         BlockRef::Fixed(TextKind::PageNumber | TextKind::Header | TextKind::Footer) => {
             open_header_footer(app);
             return;
         }
-        BlockRef::Fixed(k) => (k, meta_text(score, k).unwrap_or_default().to_string()),
+        BlockRef::Fixed(k) => (
+            k,
+            meta_text(score, k).unwrap_or_default().to_string(),
+            BlockLook::default(),
+        ),
         BlockRef::Added(i) => match score.blocks.get(i) {
-            Some(b) => (b.kind, b.text.clone()),
+            Some(b) => (b.kind, b.text.clone(), b.look),
             None => return,
         },
     };
@@ -536,6 +539,7 @@ pub(crate) fn edit_block(app: &mut ScoreApp, block: BlockRef) {
         block: Some(block),
         kind,
         value,
+        look,
     }));
 }
 
@@ -588,6 +592,12 @@ pub(crate) fn block_dialog(app: &mut ScoreApp, ctx: &egui::Context, mut d: Block
         } else {
             r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
         };
+        // Added blocks: a text field's own look.
+        if !matches!(d.block, Some(BlockRef::Fixed(_))) {
+            ui.add_space(6.0);
+            let style_of_kind = app.session.score.text_styles.get(d.kind);
+            look_editor(ui, &mut d.look, style_of_kind);
+        }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             let ok = ui.button(t("OK")).clicked() || enter;
@@ -601,13 +611,27 @@ pub(crate) fn block_dialog(app: &mut ScoreApp, ctx: &egui::Context, mut d: Block
     let (ok, cancel, remove, fonts) = resp.inner;
     if ok {
         let text = d.value.trim_end().to_string();
+        // An empty field stays when it has lines to write on or a frame (an answer field).
+        let field = d.look.lines > 0 || d.look.border || d.look.shade;
         match d.block {
-            None if text.trim().is_empty() => {}
-            None => app.run(
-                "block.add",
-                json!({ "kind": d.kind.id(), "text": text, "measure": measure }),
-            ),
-            Some(b @ BlockRef::Added(_)) if text.trim().is_empty() => remove_block(app, b),
+            None if text.trim().is_empty() && !field => {}
+            None => {
+                let mut p = look_params(&d.look);
+                p["kind"] = json!(d.kind.id());
+                p["text"] = json!(text);
+                p["measure"] = json!(measure);
+                app.run("block.add", p);
+            }
+            Some(b @ BlockRef::Added(_)) if text.trim().is_empty() && !field => remove_block(app, b),
+            Some(b @ BlockRef::Added(_)) => {
+                app.run("block.edit", json!({ "block": block_param(b), "text": text }));
+                let mut p = look_params(&d.look);
+                p["block"] = block_param(b);
+                if d.look.style.is_none() {
+                    p["style"] = json!("kind");
+                }
+                app.run("block.look", p);
+            }
             Some(b) => app.run("block.edit", json!({ "block": block_param(b), "text": text })),
         }
         return true;
@@ -825,4 +849,98 @@ pub(crate) fn header_footer_dialog(app: &mut ScoreApp, ctx: &egui::Context) {
     if !close {
         app.header_footer = Some(e);
     }
+}
+
+/// The parameters of `block.add` / `block.look` for a look.
+fn look_params(l: &BlockLook) -> serde_json::Value {
+    let mut p = json!({
+        "underline": l.underline, "border": l.border, "shade": l.shade,
+        "width": l.width, "lines": l.lines, "beside": l.beside,
+    });
+    if let Some(st) = l.style {
+        p["font"] = json!(if st.font == TextFont::Sans {
+            "sans"
+        } else {
+            "serif"
+        });
+        p["size"] = json!(st.size);
+        p["bold"] = json!(st.bold);
+        p["italic"] = json!(st.italic);
+        p["align"] = json!(match st.align {
+            TextAlign::Left => "left",
+            TextAlign::Center => "center",
+            TextAlign::Right => "right",
+        });
+    }
+    p
+}
+
+/// Formatting of a text field: its own font or its kind's style, frame, background, width,
+/// lines to write on and the row it stands in.
+fn look_editor(ui: &mut egui::Ui, l: &mut BlockLook, kind_style: TextStyle) {
+    egui::Grid::new("field-look")
+        .num_columns(2)
+        .spacing([10.0, 6.0])
+        .show(ui, |ui| {
+            ui.label(t("Formatting"));
+            let mut own = l.style.is_some();
+            if ui.checkbox(&mut own, t("Own formatting")).changed() {
+                l.style = own.then_some(l.style.unwrap_or(kind_style));
+            }
+            ui.end_row();
+            if let Some(st) = &mut l.style {
+                ui.label(t("Font"));
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut st.font, TextFont::Serif, t("Serif"));
+                    ui.selectable_value(&mut st.font, TextFont::Sans, t("Sans-serif"));
+                    ui.add(
+                        egui::DragValue::new(&mut st.size)
+                            .range(4.0..=96.0)
+                            .speed(0.5)
+                            .suffix(" pt"),
+                    );
+                });
+                ui.end_row();
+                ui.label(t("Style"));
+                ui.horizontal(|ui| {
+                    ui.toggle_value(&mut st.bold, RichText::new(t("Bold")).strong());
+                    ui.toggle_value(&mut st.italic, RichText::new(t("Italic")).italics());
+                    ui.toggle_value(&mut l.underline, RichText::new(t("Underline")).underline());
+                });
+                ui.end_row();
+                ui.label(t("Alignment"));
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut st.align, TextAlign::Left, t("Left"));
+                    ui.selectable_value(&mut st.align, TextAlign::Center, t("Centre"));
+                    ui.selectable_value(&mut st.align, TextAlign::Right, t("Right"));
+                });
+                ui.end_row();
+            } else {
+                ui.label("");
+                ui.toggle_value(&mut l.underline, RichText::new(t("Underline")).underline());
+                ui.end_row();
+            }
+            ui.label(t("Field"));
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut l.border, t("Frame"));
+                ui.checkbox(&mut l.shade, t("Grey background"));
+            });
+            ui.end_row();
+            ui.label(t("Width"));
+            ui.add(egui::Slider::new(&mut l.width, 10..=100).suffix(" %"));
+            ui.end_row();
+            ui.label(t("Lines to write on"));
+            ui.add(egui::DragValue::new(&mut l.lines).range(0..=MAX_BLOCK_LINES));
+            ui.end_row();
+            ui.label("");
+            ui.checkbox(&mut l.beside, t("Beside the field before"))
+                .on_hover_text(t("In one row with the text field before it, e.g. name and date."));
+            ui.end_row();
+        });
+    ui.label(
+        RichText::new(t(
+            "Text fields take room of their own: the music moves aside, also when you drag them.",
+        ))
+        .small(),
+    );
 }

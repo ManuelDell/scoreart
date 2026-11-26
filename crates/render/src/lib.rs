@@ -156,6 +156,16 @@ pub fn page_svg(page: &Page, style: &Style) -> String {
                     f(*h)
                 );
             }
+            Shape::Shade { x, y, w, h } => {
+                let _ = writeln!(
+                    body,
+                    "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#{SHADE_HEX}\"/>",
+                    f(*x),
+                    f(*y),
+                    f(*w),
+                    f(*h)
+                );
+            }
             Shape::Quad { p } => {
                 let pts: Vec<String> = p.iter().map(|(x, y)| format!("{},{}", f(*x), f(*y))).collect();
                 let _ = writeln!(body, "<polygon points=\"{}\"/>", pts.join(" "));
@@ -240,6 +250,10 @@ pub fn page_svg(page: &Page, style: &Style) -> String {
 pub fn svg_pages(layout: &Layout, style: &Style) -> Vec<String> {
     layout.pages.iter().map(|p| page_svg(p, style)).collect()
 }
+
+/// The grey of shaded text fields, as RGB (light enough to write on in print).
+pub const SHADE_RGB: [u8; 3] = [236, 236, 236];
+const SHADE_HEX: &str = "ececec";
 
 #[cfg(test)]
 mod tests {

@@ -27,8 +27,8 @@ pub use marks::{
 };
 pub use pitch::{Accidental, Pitch, Step};
 pub use text::{
-    BlockRef, DateStyle, DocInfo, HeaderFooter, PageInfo, TextAlign, TextBlock, TextFont, TextKind,
-    TextSettings, TextStyle, TextStyles, expand_macros,
+    BlockLook, BlockRef, DateStyle, DocInfo, HeaderFooter, MAX_BLOCK_LINES, PageInfo, TextAlign, TextBlock,
+    TextFont, TextKind, TextSettings, TextStyle, TextStyles, expand_macros,
 };
 pub use time::{Duration, NoteValue, TPQ, Tuplet};
 

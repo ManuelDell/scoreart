@@ -1983,3 +1983,115 @@ fn frames_and_name_settings_by_command() {
             .is_err()
     );
 }
+
+#[test]
+fn worksheet_text_fields() {
+    use scoreart_engrave::{Shape, Target};
+    use scoreart_model::BlockRef;
+    let mut s = Session::default();
+    let hit = |s: &mut Session, i: usize| {
+        s.layout()
+            .hits
+            .iter()
+            .find(|h| {
+                h.target
+                    == Target::Block {
+                        block: BlockRef::Added(i),
+                    }
+            })
+            .copied()
+    };
+    // A long task text above the second system, framed, with its own font.
+    let task = "Aufgabe 1: Bestimme die Intervalle zwischen den Noten und schreibe ihre Namen \
+                darunter. Achte auf die Vorzeichen der Tonart und benenne jede Terz und Quinte."
+        .repeat(3);
+    s.execute(
+        "block.add",
+        &json!({ "kind": "text", "text": task, "measure": 4, "border": true, "font": "sans", "size": 12, "bold": true }),
+    )
+    .unwrap();
+    let b = &s.score.blocks[0];
+    assert!(b.look.border && b.look.style.is_some_and(|st| st.bold && st.size == 12.0));
+    // Name and date side by side, and an empty answer field with lines to write on.
+    s.execute(
+        "block.add",
+        &json!({ "kind": "text", "text": "Name:", "measure": 4, "width": 60, "lines": 1 }),
+    )
+    .unwrap();
+    s.execute(
+        "block.add",
+        &json!({ "kind": "text", "text": "Datum:", "measure": 4, "width": 35, "lines": 1, "beside": true }),
+    )
+    .unwrap();
+    s.execute(
+        "block.add",
+        &json!({ "kind": "text", "measure": 4, "lines": 4, "shade": true }),
+    )
+    .unwrap();
+    assert!(
+        s.execute("block.add", &json!({ "kind": "text", "measure": 4 }))
+            .is_err()
+    );
+    let l = s.layout();
+    let (Some(a), Some(name), Some(date), Some(answer)) =
+        (hit(&mut s, 0), hit(&mut s, 1), hit(&mut s, 2), hit(&mut s, 3))
+    else {
+        panic!("every field can be picked");
+    };
+    // Side by side: same top, the date right of the name.
+    assert!((name.y0 - date.y0).abs() < 0.01 && date.x0 > name.x1);
+    // One below the other, nothing overlapping: task, name row, answer, then the music.
+    assert!(a.y1 <= name.y0 && name.y1 <= answer.y0);
+    let sys = l.staves.iter().find(|b| b.measure == 4).unwrap();
+    let above = l
+        .staves
+        .iter()
+        .filter(|b| b.page == sys.page && b.top < sys.top)
+        .map(|b| b.top + 4.0)
+        .fold(0.0f32, f32::max);
+    assert!(a.y0 >= above, "the task stays below the system before");
+    assert!(answer.y1 <= sys.top, "the answer field ends above its system");
+    assert!(
+        l.pages[sys.page]
+            .items
+            .iter()
+            .any(|it| matches!(it.shape, Shape::Shade { .. }))
+    );
+    // Moving the answer field down moves the music below it too.
+    let top_before = sys.top;
+    s.execute("block.move", &json!({ "block": 3, "dx": 0, "dy": 6 }))
+        .unwrap();
+    let l2 = s.layout();
+    let sys2 = l2.staves.iter().find(|b| b.measure == 4).unwrap();
+    let moved = hit(&mut s, 3).unwrap();
+    assert!(sys2.page != sys.page || sys2.top >= top_before + 5.9);
+    assert!(sys2.page != moved.page || moved.y1 <= sys2.top);
+    // Moving it far up stops below the system before.
+    s.execute("block.move", &json!({ "block": 0, "dx": 0, "dy": -40 }))
+        .unwrap();
+    assert!(hit(&mut s, 0).unwrap().y0 >= above);
+    // The look: read back, back to the style of its kind, bad values refused.
+    let r = s
+        .execute(
+            "block.look",
+            &json!({ "block": 0, "style": "kind", "underline": true }),
+        )
+        .unwrap();
+    assert_eq!(r["style"], serde_json::Value::Null);
+    assert_eq!(r["underline"], true);
+    assert!(
+        s.execute("block.look", &json!({ "block": 0, "align": "up" }))
+            .is_err()
+    );
+    assert!(
+        s.execute("block.look", &json!({ "block": "title", "border": true }))
+            .is_err()
+    );
+    let r = s
+        .execute("block.look", &json!({ "block": 0, "lines": 500, "width": 1 }))
+        .unwrap();
+    assert_eq!((r["lines"].as_u64(), r["width"].as_u64()), (Some(30), Some(10)));
+    // Saved and read back with the score.
+    let back = scoreart_musicxml::from_str(&scoreart_musicxml::to_string(&s.score)).unwrap();
+    assert_eq!(back.blocks, s.score.blocks);
+}

@@ -4,7 +4,9 @@
 
 use serde_json::{Value, json};
 
-use scoreart_model::{BlockRef, TextAlign, TextBlock, TextFont, TextKind, clip, limits};
+use scoreart_model::{
+    BlockLook, BlockRef, MAX_BLOCK_LINES, TextAlign, TextBlock, TextFont, TextKind, clip, limits,
+};
 
 use super::{CommandSpec, always, need_str, p_str, p_usize};
 use crate::{Error, Result, Session};
@@ -191,7 +193,7 @@ pub fn commands() -> Vec<CommandSpec> {
             label: "Add text block",
             menu: &[],
             shortcut: None,
-            params: "kind: heading|text (above the system with the measure; measure = the number of measures: after the last system) or header|footer (the middle of the header or footer), text, measure? (default: the selected one)",
+            params: "kind: heading|text (above the system with the measure; measure = the number of measures: after the last system) or header|footer (the middle of the header or footer), text, measure? (default: the selected one); and any look of block.look",
             enabled: always,
             run: |s, p| {
                 let k = kind(p)?;
@@ -201,8 +203,11 @@ pub fn commands() -> Vec<CommandSpec> {
                 ) {
                     return Err(Error::Param("kind: heading, text, header or footer".into()));
                 }
-                let text = clip(need_str(p, "text")?.trim_end());
-                if text.trim().is_empty() {
+                let text = clip(p_str(p, "text").unwrap_or("").trim_end());
+                // An answer field may be empty: lines to write on, or a frame.
+                let empty_ok = matches!(k, TextKind::Heading | TextKind::Text)
+                    && look(p, BlockLook::default(), k).is_ok_and(|l| l.lines > 0 || l.border || l.shade);
+                if text.trim().is_empty() && !empty_ok {
                     return Err(Error::Param("the text is empty".into()));
                 }
                 // A header or footer text goes into the middle of the header or footer.
@@ -225,15 +230,38 @@ pub fn commands() -> Vec<CommandSpec> {
                 // The number of measures: after the last system.
                 let last = s.score.measures.len();
                 let measure = p_usize(p, "measure").unwrap_or_else(|| s.focus().2).min(last);
-                s.score.blocks.push(TextBlock {
-                    kind: k,
-                    text,
-                    measure,
-                    dx: 0,
-                    dy: 0,
-                    locked: false,
-                });
+                let mut b = TextBlock::new(k, text, measure);
+                b.look = look(p, b.look, k)?;
+                s.score.blocks.push(b);
                 Ok(json!({ "index": s.score.blocks.len() - 1 }))
+            },
+            undoable: true,
+        },
+        CommandSpec {
+            id: "block.look",
+            label: "Format text field",
+            menu: &[],
+            shortcut: None,
+            params: LOOK_PARAMS,
+            enabled: always,
+            run: |s, p| {
+                let i = match block(s, p)? {
+                    BlockRef::Added(i) => i,
+                    BlockRef::Fixed(_) => {
+                        return Err(Error::Param(
+                            "only added text blocks have a look of their own (title-page texts: text.style)"
+                                .into(),
+                        ));
+                    }
+                };
+                let Some(b) = s.score.blocks.get(i) else {
+                    return Err(Error::Param(format!("no text block {i}")));
+                };
+                let new = look(p, b.look, b.kind)?;
+                if let Some(b) = s.score.blocks.get_mut(i) {
+                    b.look = new;
+                }
+                Ok(look_json(&new))
             },
             undoable: true,
         },
@@ -269,7 +297,12 @@ pub fn commands() -> Vec<CommandSpec> {
                         }
                     }
                     BlockRef::Added(i) => {
-                        if text.trim().is_empty() {
+                        let field = s
+                            .score
+                            .blocks
+                            .get(i)
+                            .is_some_and(|b| b.look.lines > 0 || b.look.border || b.look.shade);
+                        if text.trim().is_empty() && !field {
                             return Err(Error::Param(
                                 "the text is empty (remove the block instead)".into(),
                             ));
@@ -468,7 +501,7 @@ pub fn commands() -> Vec<CommandSpec> {
                     .enumerate()
                     .map(|(i, b)| {
                         json!({ "index": i, "kind": b.kind.id(), "text": b.text, "measure": b.measure,
-                                "dx": f32::from(b.dx) / 10.0, "dy": f32::from(b.dy) / 10.0 })
+                                "dx": f32::from(b.dx) / 10.0, "dy": f32::from(b.dy) / 10.0, "look": look_json(&b.look) })
                     })
                     .collect();
                 Ok(json!({ "blocks": added, "page_numbers": !s.score.hide_page_numbers }))
@@ -476,4 +509,96 @@ pub fn commands() -> Vec<CommandSpec> {
             undoable: false,
         },
     ]
+}
+
+const LOOK_PARAMS: &str = "block (the index of an added block); any of: font sans|serif, size (pt, 4…96), bold, italic, underline, align left|center|right (its own formatting; style: kind goes back to the style of its kind), border, shade (light grey background), width (percent of the line, 10…100), lines (empty lines to write on below the text, 0…30), beside (stands beside the block before it)";
+
+/// A block's look with the parameters of `p` applied; its own style starts from its kind's.
+fn look(p: &Value, mut l: BlockLook, kind: TextKind) -> Result<BlockLook> {
+    let flag = |k: &str| -> Result<Option<bool>> {
+        match p.get(k) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::Bool(b)) => Ok(Some(*b)),
+            Some(_) => Err(Error::Param(format!("{k}: true or false"))),
+        }
+    };
+    if p_str(p, "style") == Some("kind") {
+        l.style = None;
+    }
+    let own = ["font", "size", "bold", "italic", "align"]
+        .iter()
+        .any(|k| p.get(*k).is_some_and(|v| !v.is_null()));
+    if own {
+        let mut st = l.style.unwrap_or_else(|| kind.default_style());
+        if let Some(f) = p_str(p, "font") {
+            st.font = match f {
+                "sans" => TextFont::Sans,
+                "serif" => TextFont::Serif,
+                other => return Err(Error::Param(format!("font: sans or serif, not {other}"))),
+            };
+        }
+        if let Some(v) = p.get("size").filter(|v| !v.is_null()) {
+            let v = v
+                .as_f64()
+                .filter(|v| v.is_finite())
+                .ok_or_else(|| Error::Param("size: points, 4…96".into()))?;
+            st.size = ((v.clamp(4.0, 96.0) * 2.0).round() / 2.0) as f32;
+        }
+        if let Some(v) = flag("bold")? {
+            st.bold = v;
+        }
+        if let Some(v) = flag("italic")? {
+            st.italic = v;
+        }
+        if let Some(a) = p_str(p, "align") {
+            st.align = match a {
+                "left" => TextAlign::Left,
+                "center" => TextAlign::Center,
+                "right" => TextAlign::Right,
+                other => return Err(Error::Param(format!("align: left, center or right, not {other}"))),
+            };
+        }
+        l.style = Some(st);
+    }
+    for (k, slot) in [
+        ("underline", &mut l.underline),
+        ("border", &mut l.border),
+        ("shade", &mut l.shade),
+        ("beside", &mut l.beside),
+    ] {
+        if let Some(v) = flag(k)? {
+            *slot = v;
+        }
+    }
+    let num = |k: &str, lo: f64, hi: f64| -> Result<Option<u8>> {
+        match p.get(k) {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => v
+                .as_f64()
+                .filter(|v| v.is_finite())
+                .map(|v| Some(v.round().clamp(lo, hi) as u8))
+                .ok_or_else(|| Error::Param(format!("{k}: a number, {lo}…{hi}"))),
+        }
+    };
+    if let Some(w) = num("width", 10.0, 100.0)? {
+        l.width = w;
+    }
+    if let Some(n) = num("lines", 0.0, f64::from(MAX_BLOCK_LINES))? {
+        l.lines = n;
+    }
+    Ok(l.clamped())
+}
+
+fn look_json(l: &BlockLook) -> Value {
+    let st = l.style.map(|s| {
+        json!({
+            "font": if s.font == TextFont::Sans { "sans" } else { "serif" },
+            "size": s.size, "bold": s.bold, "italic": s.italic,
+            "align": match s.align { TextAlign::Left => "left", TextAlign::Center => "center", TextAlign::Right => "right" },
+        })
+    });
+    json!({
+        "style": st, "underline": l.underline, "border": l.border, "shade": l.shade,
+        "width": l.width, "lines": l.lines, "beside": l.beside,
+    })
 }
