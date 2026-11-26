@@ -2095,3 +2095,51 @@ fn worksheet_text_fields() {
     let back = scoreart_musicxml::from_str(&scoreart_musicxml::to_string(&s.score)).unwrap();
     assert_eq!(back.blocks, s.score.blocks);
 }
+
+#[test]
+fn chord_symbols_move_by_hand() {
+    use scoreart_engrave::Target;
+    let mut s = Session::default();
+    s.execute(
+        "select.event",
+        &json!({ "part": 0, "staff": 0, "voice": 0, "measure": 1, "index": 0 }),
+    )
+    .unwrap();
+    s.execute("note.chord-symbol", &json!({ "text": "Am7" })).unwrap();
+    let ev = |s: &Session| match s.selection {
+        Some(Selection::Event { ev, .. }) => ev,
+        _ => panic!("a note is selected"),
+    };
+    let e = ev(&s);
+    let chord_hit = |s: &mut Session| {
+        s.layout()
+            .hits
+            .iter()
+            .find(|h| h.target == Target::Chord { ev: e })
+            .copied()
+    };
+    // Measured from the top line of its staff (moved up, the system makes room for it).
+    let top = |s: &mut Session| s.layout().staff_box(e.part, e.staff, e.measure).unwrap().top;
+    let before = chord_hit(&mut s).expect("the chord symbol can be picked up");
+    let top0 = top(&mut s);
+    s.execute("note.place", &json!({ "kind": "chord", "dx": 1.5, "dy": -2 }))
+        .unwrap();
+    assert_eq!(
+        s.score.event(e).unwrap().chord_place.map(|p| (p.dx, p.dy)),
+        Some((15, -20))
+    );
+    let after = chord_hit(&mut s).unwrap();
+    let top1 = top(&mut s);
+    assert!((after.x0 - before.x0 - 1.5).abs() < 0.01);
+    assert!(((after.y0 - top1) - (before.y0 - top0) + 2.0).abs() < 0.01);
+    // Saved and read back.
+    let back = scoreart_musicxml::from_str(&scoreart_musicxml::to_string(&s.score)).unwrap();
+    assert_eq!(
+        back.event(e).unwrap().chord_place,
+        s.score.event(e).unwrap().chord_place
+    );
+    // Back to its own place.
+    s.execute("note.place", &json!({ "kind": "chord", "reset": true }))
+        .unwrap();
+    assert_eq!(s.score.event(e).unwrap().chord_place, None);
+}

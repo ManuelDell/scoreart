@@ -33,7 +33,12 @@ Was sich doch überschneidet, wird rot markiert (*Ansicht → Überschneidungen*
 
 ## Texte verschieben und sperren
 
-Mit der **Hand** lässt sich jeder Textblock aufnehmen und frei verschieben.
+Mit der **Hand** lässt sich jeder Textblock aufnehmen und frei verschieben — ebenso
+Notenzeilentexte, Dynamik und **Akkordsymbole**. Während du eines davon ziehst, führt eine
+gestrichelte Linie zur Note, zu der es gehört, und ihr Takt ist gestrichelt umrandet: Dort bleibt
+es verknüpft, wo immer du es hinstellst. Ein nach oben geschobenes Akkordsymbol nimmt seinen Platz
+mit, das System rückt also nach unten statt hineinzulaufen. *Eigenschaften → Von Hand verschoben →
+Position zurücksetzen* stellt es zurück.
 
 Steht ein Text, wo er hingehört, **sperre** ihn: wähle ihn an und klicke *Format → Position
 sperren*. Ein Schloss erscheint, und der Text lässt sich nicht mehr versehentlich verschieben.

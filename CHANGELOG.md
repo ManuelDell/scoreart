@@ -37,6 +37,12 @@
   short label like "Name:"), and fields side by side in one row. Fields take room of their own:
   the music moves aside, also when a field is dragged, and a field between two systems no
   longer runs into the one above. New command `block.look`.
+- **Chord symbols move by hand** like texts; while a text, dynamic or chord symbol (or a
+  rehearsal mark) is dragged, a dashed line shows the note it stays attached to and its measure
+  is outlined. Saved in MusicXML (`relative-x`/`relative-y` of `<harmony>`).
+- **Tied notes are held in playback** also where the tie goes on in another voice or staff of
+  the instrument (as in piano music); a tie that leads nowhere no longer swallows a later note
+  of the same pitch — that one is played again.
 - **Opening files in the browser** goes straight to the system's file dialog; where the
   browser does not allow that, a small window in ScoreArt's look (with dropping a file onto it)
   replaces the plain, unstyled one.

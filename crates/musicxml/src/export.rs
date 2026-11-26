@@ -240,7 +240,8 @@ fn line_stop_direction(x: &mut String, sp: &Spanner, number: usize, staff: Optio
 }
 
 /// `<harmony>` from chord-symbol text such as "F#m7/C#".
-fn harmony(x: &mut String, text: &str, staff: Option<usize>) {
+/// A chord symbol; `place`: moved from its own place (relative-x/-y, tenths, y up).
+fn harmony(x: &mut String, text: &str, staff: Option<usize>, place: Option<Placement>) {
     let mut chars = text.chars().peekable();
     let Some(root) = chars
         .next()
@@ -286,8 +287,11 @@ fn harmony(x: &mut String, text: &str, staff: Option<usize>) {
         "5" => "power",
         _ => "other",
     };
+    let rel = place
+        .map(|p| format!(" relative-x=\"{}\" relative-y=\"{}\"", p.dx, -p.dy))
+        .unwrap_or_default();
     let mut h = format!(
-        "      <harmony><root><root-step>{}</root-step>",
+        "      <harmony{rel}><root><root-step>{}</root-step>",
         root.to_ascii_uppercase()
     );
     if alter != 0 {
@@ -1049,7 +1053,7 @@ fn write_event(
         );
     }
     if let Some(c) = &e.chord_symbol {
-        harmony(x, c, staff);
+        harmony(x, c, staff, e.chord_place);
     }
     let staff_el = staff.map(|s| format!("<staff>{s}</staff>")).unwrap_or_default();
     // Grace notes come first; graces after the note follow it (taking time from it).

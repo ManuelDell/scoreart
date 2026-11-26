@@ -986,6 +986,7 @@ fn read_part(
         // Moved staff texts: (staff, time, placement).
         let mut pending_place: Vec<(usize, u64, Placement)> = Vec::new();
         let mut pending_size: Vec<(usize, u64, u8)> = Vec::new();
+        let mut pending_chord_place: Vec<(usize, u64, Placement)> = Vec::new();
         let mut dir_marks: Vec<(usize, u64, DirMark)> = Vec::new();
         let mut graces: HashMap<(usize, u32), Vec<Grace>> = HashMap::new();
         let mut t: u64 = 0;
@@ -1401,6 +1402,9 @@ fn read_part(
                     let staff = c.child_num("staff").map(|s| (s as usize).max(1) - 1).unwrap_or(0);
                     if let Some(text) = harmony_text(c) {
                         pending_text.push((staff, t, text, true));
+                        if let Some(p) = placement_attrs(&Element::default(), c) {
+                            pending_chord_place.push((staff, t, p));
+                        }
                     }
                 }
                 "direction" => {
@@ -1809,6 +1813,13 @@ fn read_part(
                 && let Some(r) = raws.get_mut(i)
             {
                 r.event.text_place = Some(p);
+            }
+        }
+        for (staff, at, p) in pending_chord_place {
+            if let Some(i) = target(&mut raws, staff, at)
+                && let Some(r) = raws.get_mut(i)
+            {
+                r.event.chord_place = Some(p);
             }
         }
         for (staff, at, z) in pending_size {

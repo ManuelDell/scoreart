@@ -229,6 +229,10 @@ pub enum Target {
     Dynamic {
         ev: EventRef,
     },
+    /// The chord symbol of an event.
+    Chord {
+        ev: EventRef,
+    },
     /// A piece of a line (`score.spanners[index]`); whether it holds the line's start or end.
     Line {
         index: usize,
@@ -392,6 +396,7 @@ impl Layout {
             Target::Note { .. } => 0,
             Target::Text { .. }
             | Target::Dynamic { .. }
+            | Target::Chord { .. }
             | Target::Block { .. }
             | Target::MeasureMark { .. } => 1,
             Target::Line { .. } => 2,
@@ -431,6 +436,7 @@ impl Layout {
                 Target::Note { ev: e, .. } | Target::Rest { ev: e } => e == ev,
                 Target::Text { .. }
                 | Target::Dynamic { .. }
+                | Target::Chord { .. }
                 | Target::Line { .. }
                 | Target::Measure { .. }
                 | Target::MeasureMark { .. }

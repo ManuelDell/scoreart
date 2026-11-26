@@ -2844,14 +2844,19 @@ fn out_staff_box(
                 let x0 = first;
                 if let Some(cs) = &e.chord_symbol {
                     let text = chord_text(cs, o.f.german);
-                    let sh = o.f.shape(
-                        TextKind::ChordSymbol,
-                        &text,
-                        x0,
-                        d.top - CHORD_ABOVE,
-                        2.2,
-                        Align::Left,
+                    let place = e.chord_place.unwrap_or_default();
+                    let (cx, cy) = (x0 + place.dx_sp(), d.top - CHORD_ABOVE + place.dy_sp());
+                    let w = styled_width(&o.f, TextKind::ChordSymbol, &text, 2.2);
+                    let size = o.f.size(TextKind::ChordSymbol, 2.2);
+                    let cev = EventRef { index: 0, ..ev };
+                    o.hit(
+                        cx - 0.2,
+                        cy - 0.8 * size,
+                        cx + w + 0.2,
+                        cy + 0.3 * size,
+                        Target::Chord { ev: cev },
                     );
+                    let sh = o.f.shape(TextKind::ChordSymbol, &text, cx, cy, 2.2, Align::Left);
                     o.push(sh, Some(ev));
                 }
                 if let Some(dy) = e.dynamic.filter(|_| !e.dynamic_hidden) {
@@ -3647,8 +3652,20 @@ fn out_staff_box(
                     .filter(|h| h.x >= gg.x - 0.6 && h.x <= gg.x + w)
                     .filter_map(|h| anchors.get(&h.ev).map(|a| a.top.min(a.stem_end)))
                     .fold(d.top, f32::min);
-                let y = (local - 1.0).min(d.top - CHORD_ABOVE);
-                let sh = o.f.shape(TextKind::ChordSymbol, &text, gg.x, y, 2.2, Align::Left);
+                let place = e.chord_place.unwrap_or_default();
+                let (cx, y) = (
+                    gg.x + place.dx_sp(),
+                    (local - 1.0).min(d.top - CHORD_ABOVE) + place.dy_sp(),
+                );
+                let size = o.f.size(TextKind::ChordSymbol, 2.2);
+                o.hit(
+                    cx - 0.2,
+                    y - 0.8 * size,
+                    cx + w + 0.2,
+                    y + 0.3 * size,
+                    Target::Chord { ev: gg.ev },
+                );
+                let sh = o.f.shape(TextKind::ChordSymbol, &text, cx, y, 2.2, Align::Left);
                 o.push(sh, Some(gg.ev));
             }
             if let Some(t) = &e.text {
@@ -4105,7 +4122,9 @@ fn staff_reach(score: &Score, part: usize, staff: usize, measures: &[usize]) -> 
                             (-stem_top).max(0.0) + marks
                         })
                         .fold(0.0f32, f32::max);
-                    chord_up = chord_up.max(local);
+                    // A symbol moved up takes its room along.
+                    let moved_up = e.chord_place.map_or(0.0, |p| (-p.dy_sp()).max(0.0));
+                    chord_up = chord_up.max(local + moved_up);
                 }
                 chords |= e.chord_symbol.is_some();
                 texts |= e.text.is_some();

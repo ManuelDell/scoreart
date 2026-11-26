@@ -30,7 +30,11 @@ Overlaps that remain are marked in red (*View → Overlaps*).
 
 ## Moving and locking texts
 
-With the **hand**, every text block can be picked up and moved freely.
+With the **hand**, every text block can be picked up and moved freely — and so can staff texts,
+dynamics and **chord symbols**. While you drag one of these, a dashed line leads to the note it
+belongs to and its measure is outlined dashed: it stays attached there wherever you put it. A
+chord symbol moved up takes its room along, so the system moves down instead of running into it.
+*Properties → Moved by hand → Reset position* puts it back.
 
 When a text is where it should be, **lock** it: pick it and click *Format → Lock position*. A
 padlock appears, and the text can no longer be dragged by accident. Click the same button

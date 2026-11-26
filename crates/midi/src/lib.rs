@@ -232,8 +232,9 @@ pub fn sequence(score: &Score) -> Sequence {
     let covers = |sp: &Spanner, here: u64| {
         local(sp.start.measure, sp.start.tick) <= here && here <= local(sp.end.measure, sp.end.tick)
     };
-    // Open (tied) notes: (part, staff, voice, key) → index into seq.notes.
-    let mut open: HashMap<(usize, usize, usize, u8), usize> = HashMap::new();
+    // Open (tied) notes: (part, staff, voice, key) → (index into seq.notes, the tick where the
+    // written note ends: only a note starting there continues it).
+    let mut open: HashMap<(usize, usize, usize, u8), (usize, u64)> = HashMap::new();
     let parts = score.parts.len();
     let mut level: Vec<u8> = vec![80; parts];
     let mut technique: Vec<Technique> = vec![Technique::Normal; parts];
@@ -586,9 +587,24 @@ pub fn sequence(score: &Score) -> Sequence {
                                 Arpeggio::Down => (n_notes - 1 - ni) as u64 * u64::from(TPQ) / 16,
                                 _ => 0,
                             };
-                            if let Some(&idx) = open.get(&k)
+                            // The tie goes on in this voice, or (as in piano music) in another
+                            // voice or staff of the part: a note of the key right where it ends.
+                            let tied_from = open
+                                .get(&k)
+                                .filter(|(_, end)| *end == t)
+                                .map(|(i, _)| (k, *i))
+                                .or_else(|| {
+                                    open.iter()
+                                        .filter(|(o, (_, end))| o.0 == pi && o.3 == k.3 && *end == t)
+                                        .map(|(o, (i, _))| (*o, *i))
+                                        .min_by_key(|(o, _)| (o.1 != si, o.1, o.2))
+                                });
+                            let continued: Option<usize>;
+                            if let Some((from, idx)) = tied_from
                                 && let Some(prev) = seq.notes.get_mut(idx)
                             {
+                                open.remove(&from);
+                                continued = Some(idx);
                                 // A tie: the note goes on.
                                 prev.ticks = (t + length(d))
                                     .saturating_sub(prev.start)
@@ -653,16 +669,20 @@ pub fn sequence(score: &Score) -> Sequence {
                                         repeat,
                                     }),
                                 }
-                                open.insert(k, seq.notes.len() - 1);
+                                continued = Some(seq.notes.len() - 1);
                             }
-                            if !n.tie {
-                                open.remove(&k);
+                            // A tie leads on to the note that starts where this one ends.
+                            match continued {
+                                Some(idx) if n.tie => {
+                                    open.insert(k, (idx, t + d));
+                                }
+                                _ => {
+                                    open.remove(&k);
+                                }
                             }
                         }
-                        // Rests and untied notes close ties in this voice.
-                        if e.is_rest() {
-                            open.retain(|o, _| !(o.0 == pi && o.1 == si && o.2 == vi));
-                        }
+                        // (A rest needs no closing: a tie only goes on into a note that starts
+                        // where the tied one ends — in this voice or another of the part.)
                         t += d;
                     }
                 }
@@ -1007,6 +1027,47 @@ mod tests {
         let secs = seq.seconds_at(u64::from(TPQ) * 4);
         assert!((secs - 2.4).abs() < 1e-9, "4 quarters at 100 bpm");
         assert_eq!(seq.tick_at(secs), u64::from(TPQ) * 4);
+    }
+
+    #[test]
+    fn ties_go_on_in_another_voice_and_only_where_the_note_ends() {
+        let flute = instrument("flute").unwrap();
+        let mut s = Score::new("T", &[flute], TimeSig::default(), KeySig::default(), 3);
+        let whole = Duration::new(NoteValue::Whole, 0);
+        let half = Duration::new(NoteValue::Half, 0);
+        let c = Pitch::new(Step::C, 0, 5);
+        let d = Pitch::new(Step::D, 0, 5);
+        let tied = |p: Pitch| {
+            let mut n = Note::new(p);
+            n.tie = true;
+            n
+        };
+        // Measure 1: a whole C tied over the barline into voice 2 of measure 2.
+        s.voice_mut(0, 0, 0, 0).unwrap().events = vec![Event::chord(vec![tied(c)], whole)];
+        s.voice_mut(0, 0, 1, 0).unwrap().events = vec![Event::rest(whole)];
+        let sm = s.staff_measure_mut(0, 0, 1).unwrap();
+        while sm.voices.len() < 2 {
+            sm.voices.push(Voice::default());
+        }
+        s.voice_mut(0, 0, 1, 1).unwrap().events = vec![Event::chord(vec![Note::new(c)], whole)];
+        // Measure 3: a C with a tie that leads nowhere (a D follows), then a C again: played anew.
+        s.voice_mut(0, 0, 2, 0).unwrap().events = vec![
+            Event::chord(vec![tied(c)], Duration::new(NoteValue::Quarter, 0)),
+            Event::chord(vec![Note::new(d)], Duration::new(NoteValue::Quarter, 0)),
+            Event::chord(vec![Note::new(c)], half),
+        ];
+        let seq = sequence(&s);
+        let cs: Vec<&PlayNote> = seq.notes.iter().filter(|n| n.key == 72).collect();
+        assert_eq!(
+            cs.len(),
+            3,
+            "{:?}",
+            cs.iter().map(|n| (n.start, n.ticks)).collect::<Vec<_>>()
+        );
+        // The first C holds through both measures.
+        assert_eq!(cs[0].start, 0);
+        assert!(cs[0].ticks > u64::from(TPQ) * 7, "{}", cs[0].ticks);
+        assert!(cs[2].start == u64::from(TPQ) * 10);
     }
 
     /// A flute line of quarter notes in 4/4 (C D E F | G A B C …), `measures` long.

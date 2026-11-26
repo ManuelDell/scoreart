@@ -1266,6 +1266,36 @@ pub fn properties_content(app: &mut ScoreApp, ui: &mut egui::Ui) {
     }
     egui::ScrollArea::vertical().show(ui, |ui| {
             ui.add_space(6.0);
+            // Marks of the selected note moved by hand: back to their own place.
+            if let Some(Selection::Event { ev, .. }) = app.session.selection
+                && let Some(e) = app.session.score.event(ev).cloned()
+            {
+                let moved: Vec<(&str, &str)> = [
+                    (e.chord_symbol.is_some() && e.chord_place.is_some(), "chord", t("Chord symbol")),
+                    (e.text.is_some() && e.text_place.is_some(), "text", t("Staff text")),
+                    (e.dynamic.is_some() && e.dynamic_place.is_some(), "dynamic", t("Dynamic")),
+                ]
+                .into_iter()
+                .filter(|x| x.0)
+                .map(|x| (x.1, x.2))
+                .collect();
+                if !moved.is_empty() {
+                    ui.label(RichText::new(t("Moved by hand")).strong());
+                    for (kind, label) in moved {
+                        ui.horizontal(|ui| {
+                            ui.label(label);
+                            if ui
+                                .small_button(t("Reset position"))
+                                .on_hover_text(t("Back to its default place"))
+                                .clicked()
+                            {
+                                app.run("note.place", json!({ "kind": kind, "reset": true }));
+                            }
+                        });
+                    }
+                    ui.add_space(6.0);
+                }
+            }
             // Marks of the selected measure moved by hand: back to their default place.
             let m = app.session.focus().2;
             if let Some(info) = app.session.score.measures.get(m).cloned() {

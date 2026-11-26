@@ -680,7 +680,10 @@ pub const DE: &[(&str, &str)] = &[
     ("Move measure mark", "Taktzeichen verschieben"),
     ("Move note", "Note verschieben"),
     ("Move text block", "Textblock verschieben"),
-    ("Move text or dynamic", "Text oder Dynamik verschieben"),
+    (
+        "Move text, dynamic or chord symbol",
+        "Text, Dynamik oder Akkordsymbol verschieben",
+    ),
     ("Move the end of a line", "Ende einer Linie verschieben"),
     ("Move to voice", "In Stimme verschieben"),
     ("Move up", "Nach oben"),

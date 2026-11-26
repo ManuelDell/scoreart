@@ -288,6 +288,9 @@ pub struct Event {
     /// Chord symbol above the staff ("Cmaj7", "F#m7b5/E" …).
     #[serde(default)]
     pub chord_symbol: Option<String>,
+    /// How far the chord symbol was moved from its own place (dx, dy in tenths; `below` unused).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chord_place: Option<Placement>,
     /// Staff text / expression ("dolce", "pizz." …).
     #[serde(default)]
     pub text: Option<String>,
@@ -353,6 +356,7 @@ impl Event {
             tremolo: Tremolo::None,
             arpeggio: Arpeggio::None,
             chord_symbol: None,
+            chord_place: None,
             text: None,
             text_place: None,
             text_size: None,

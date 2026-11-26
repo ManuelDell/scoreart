@@ -329,10 +329,10 @@ pub fn commands() -> Vec<CommandSpec> {
         },
         CommandSpec {
             id: "note.place",
-            label: "Move text or dynamic",
+            label: "Move text, dynamic or chord symbol",
             menu: &["Format"],
             shortcut: None,
-            params: "kind: text|dynamic, dx and dy (staff spaces, as MuseScore stores them: dx from the note, dy from the top staff line — or with below: true from the bottom line — to the baseline), below? (default: as it was), reset: true puts it back",
+            params: "kind: text|dynamic|chord, dx and dy (staff spaces; text and dynamic as MuseScore stores them: dx from the note, dy from the top staff line — or with below: true from the bottom line — to the baseline; chord: how far from its own place), below? (default: as it was), reset: true puts it back",
             enabled: has_selection,
             run: |s, p| {
                 let kind = need_str(p, "kind")?;
@@ -363,6 +363,11 @@ pub fn commands() -> Vec<CommandSpec> {
                             .and_then(Value::as_bool)
                             .unwrap_or(e.dynamic_place.is_none_or(|p| p.below));
                         e.dynamic_place = (!reset).then(|| Placement::from_sp(num("dx"), num("dy"), below));
+                    }
+                    "chord" => {
+                        let (dx, dy) = (num("dx"), num("dy"));
+                        e.chord_place = (!reset && (dx.abs() >= 0.05 || dy.abs() >= 0.05))
+                            .then(|| Placement::from_sp(dx, dy, false));
                     }
                     other => return Err(Error::Param(format!("unknown kind {other}"))),
                 }

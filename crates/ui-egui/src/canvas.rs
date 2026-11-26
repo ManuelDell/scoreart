@@ -66,12 +66,20 @@ pub(crate) struct NoteDrag {
     target: Option<(usize, usize, usize, u32, i32)>,
 }
 
-/// A staff text or dynamic picked up with the hand: where it was grabbed and how far the
-/// pointer has moved since (staff spaces).
+/// Which mark of an event is dragged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MarkKind {
+    Text,
+    Dynamic,
+    Chord,
+}
+
+/// A staff text, dynamic or chord symbol picked up with the hand: where it was grabbed and how
+/// far the pointer has moved since (staff spaces).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct MarkDrag {
     ev: scoreart_model::edit::EventRef,
-    text: bool,
+    kind: MarkKind,
     page: usize,
     grab: (f32, f32),
     delta: (f32, f32),
@@ -271,17 +279,75 @@ fn notes_between(
     0
 }
 
-/// The hit box of an event's staff text or dynamic.
+/// The hit box of an event's staff text, dynamic or chord symbol.
 fn mark_box(
     layout: &scoreart_engrave::Layout,
     ev: scoreart_model::edit::EventRef,
-    text: bool,
+    kind: MarkKind,
 ) -> Option<scoreart_engrave::Hit> {
     layout.hits.iter().copied().find(|h| match h.target {
-        Target::Text { ev: e } => text && e == ev,
-        Target::Dynamic { ev: e } => !text && e == ev,
+        Target::Text { ev: e } => kind == MarkKind::Text && e == ev,
+        Target::Dynamic { ev: e } => kind == MarkKind::Dynamic && e == ev,
+        Target::Chord { ev: e } => kind == MarkKind::Chord && e == ev,
         _ => false,
     })
+}
+
+/// While a mark is dragged: a dashed line from it to the note (or measure) it belongs to, and
+/// that measure outlined dashed — so it is clear where the mark stays attached.
+fn paint_attachment(
+    painter: &egui::Painter,
+    layout: &scoreart_engrave::Layout,
+    map: &dyn Fn(f32, f32) -> Pos2,
+    page: usize,
+    ev: scoreart_model::edit::EventRef,
+    mark: Rect,
+    color: Color32,
+) {
+    let Some(sb) = layout
+        .staff_box(ev.part, ev.staff, ev.measure)
+        .filter(|s| s.page == page)
+    else {
+        return;
+    };
+    let stroke = Stroke::new(1.2, color);
+    let measure = Rect::from_min_max(map(sb.x0, sb.top - 0.4), map(sb.x1, sb.top + 4.0 * sb.mag + 0.4));
+    let corners = [
+        measure.left_top(),
+        measure.right_top(),
+        measure.right_bottom(),
+        measure.left_bottom(),
+        measure.left_top(),
+    ];
+    painter.extend(egui::Shape::dashed_line(
+        &corners,
+        Stroke::new(1.0, color.linear_multiply(0.7)),
+        5.0,
+        4.0,
+    ));
+    // To the note itself (its heads or rest), else to the start of the measure.
+    let target = layout.event_box(ev).filter(|h| h.page == page).map_or(
+        Rect::from_min_max(map(sb.x0, sb.top), map(sb.x0 + 1.0, sb.top + 4.0 * sb.mag)),
+        |h| Rect::from_min_max(map(h.x0, h.y0), map(h.x1, h.y1)),
+    );
+    let to = Pos2::new(
+        target.center().x,
+        if mark.center().y < target.center().y {
+            target.top()
+        } else {
+            target.bottom()
+        },
+    );
+    let from = Pos2::new(
+        to.x.clamp(mark.left(), mark.right()),
+        if mark.center().y < to.y {
+            mark.bottom()
+        } else {
+            mark.top()
+        },
+    );
+    painter.extend(egui::Shape::dashed_line(&[from, to], stroke, 5.0, 4.0));
+    painter.circle_filled(to, 2.5, color);
 }
 
 /// The tick under `x` in a staff box: an existing note column or a multiple of `step`,
@@ -540,14 +606,18 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                             );
                             app.note_drag = Some(NoteDrag { ev, y0: sy, target: None });
                         }
-                        Some(Target::Text { ev }) | Some(Target::Dynamic { ev }) => {
-                            let text = matches!(layout.hit(pi, sx, sy), Some(Target::Text { .. }));
+                        Some(Target::Text { ev }) | Some(Target::Dynamic { ev }) | Some(Target::Chord { ev }) => {
+                            let kind = match layout.hit(pi, sx, sy) {
+                                Some(Target::Text { .. }) => MarkKind::Text,
+                                Some(Target::Chord { .. }) => MarkKind::Chord,
+                                _ => MarkKind::Dynamic,
+                            };
                             let _ = app.session.execute(
                                 "select.event",
                                 &json!({ "part": ev.part, "staff": ev.staff, "voice": ev.voice, "measure": ev.measure, "index": ev.index }),
                             );
-                            if let Some(hit) = mark_box(&layout, ev, text) {
-                                app.mark_drag = Some(MarkDrag { ev, text, page: pi, grab: (sx, sy), delta: (0.0, 0.0), hit });
+                            if let Some(hit) = mark_box(&layout, ev, kind) {
+                                app.mark_drag = Some(MarkDrag { ev, kind, page: pi, grab: (sx, sy), delta: (0.0, 0.0), hit });
                             }
                         }
                         Some(t @ Target::MeasureMark { .. }) => {
@@ -825,13 +895,27 @@ pub fn show(app: &mut ScoreApp, ui: &mut egui::Ui) {
                     let r = Rect::from_min_max(map(h.x0 + d.delta.0, h.y0 + d.delta.1), map(h.x1 + d.delta.0, h.y1 + d.delta.1));
                     painter.rect_filled(r, 3.0, tk.accent.linear_multiply(0.12));
                     painter.rect_stroke(r, 3.0, Stroke::new(1.2, tk.accent), egui::StrokeKind::Outside);
+                    // What it stays attached to: its measure (on the top staff) and the anchor.
+                    if let Target::MeasureMark { measure, ax, ay, .. } = d.target
+                        && let Some(sb) = layout.staves.iter().filter(|b| b.page == pi && b.measure == measure).min_by(|a, b| a.top.total_cmp(&b.top))
+                    {
+                        let m = Rect::from_min_max(map(sb.x0, sb.top - 0.4), map(sb.x1, sb.top + 4.0 * sb.mag + 0.4));
+                        let corners = [m.left_top(), m.right_top(), m.right_bottom(), m.left_bottom(), m.left_top()];
+                        painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(1.0, tk.accent.linear_multiply(0.7)), 5.0, 4.0));
+                        let to = map(ax, ay);
+                        let from = Pos2::new(to.x.clamp(r.left(), r.right()), if r.center().y < to.y { r.bottom() } else { r.top() });
+                        painter.extend(egui::Shape::dashed_line(&[from, to], Stroke::new(1.2, tk.accent), 5.0, 4.0));
+                        painter.circle_filled(to, 2.5, tk.accent);
+                    }
                 }
-                // Where a dragged text or dynamic would go.
+                // Where a dragged text, dynamic or chord symbol would go, and what it stays
+                // attached to.
                 if let Some(d) = app.mark_drag.filter(|d| d.page == pi) {
                     let h = d.hit;
                     let r = Rect::from_min_max(map(h.x0 + d.delta.0, h.y0 + d.delta.1), map(h.x1 + d.delta.0, h.y1 + d.delta.1));
                     painter.rect_filled(r, 3.0, tk.accent.linear_multiply(0.12));
                     painter.rect_stroke(r, 3.0, Stroke::new(1.2, tk.accent), egui::StrokeKind::Outside);
+                    paint_attachment(&painter, &layout, &map, pi, d.ev, r, tk.accent);
                 }
                 // Overlaps: both boxes tinted, where they meet stronger (never printed).
                 if app.show_collisions {
@@ -1039,7 +1123,18 @@ fn drop_mark(app: &mut ScoreApp, layout: &scoreart_engrave::Layout, d: MarkDrag)
     let Some(sb) = layout.staff_box(d.ev.part, d.ev.staff, d.ev.measure) else {
         return;
     };
-    let place = if d.text { e.text_place } else { e.dynamic_place };
+    if d.kind == MarkKind::Chord {
+        // A chord symbol keeps how far it was moved from its own place.
+        let old = e.chord_place.unwrap_or_default();
+        let (dx, dy) = (old.dx_sp() + d.delta.0, old.dy_sp() + d.delta.1);
+        app.run(
+            "note.place",
+            json!({ "kind": "chord", "dx": round(dx), "dy": round(dy) }),
+        );
+        return;
+    }
+    let text = d.kind == MarkKind::Text;
+    let place = if text { e.text_place } else { e.dynamic_place };
     let baseline = d.hit.y1 - 0.5 + d.delta.1;
     let bottom = sb.top + 4.0 * sb.mag;
     let below = baseline > bottom;
@@ -1049,7 +1144,7 @@ fn drop_mark(app: &mut ScoreApp, layout: &scoreart_engrave::Layout, d: MarkDrag)
     } else {
         baseline - sb.top
     };
-    let kind = if d.text { "text" } else { "dynamic" };
+    let kind = if text { "text" } else { "dynamic" };
     app.run(
         "note.place",
         json!({ "kind": kind, "dx": round(dx), "dy": round(dy), "below": below }),
@@ -1113,7 +1208,7 @@ fn handle_click(
             ),
             None => Ok(serde_json::Value::Null),
         },
-        Some(Target::Text { ev } | Target::Dynamic { ev }) => s.execute(
+        Some(Target::Text { ev } | Target::Dynamic { ev } | Target::Chord { ev }) => s.execute(
             "select.event",
             &json!({ "part": ev.part, "staff": ev.staff, "voice": ev.voice, "measure": ev.measure, "index": ev.index }),
         ),
