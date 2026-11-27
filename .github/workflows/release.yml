@@ -29,17 +29,55 @@ jobs:
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          # The Mac build holds both Apple Silicon and Intel.
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p scoreart -p scoreart-cli
-      - name: Package (Linux, macOS)
-        if: runner.os != 'Windows'
+      - if: runner.os != 'macOS'
+        run: cargo build --release -p scoreart -p scoreart-cli
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           dir="scoreart-${GITHUB_REF_NAME}-${{ matrix.name }}"
           mkdir "$dir"
           cp target/release/scoreart target/release/scoreart-cli "$dir/"
-          cp README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "$dir/"
+          cp docs/START-HERE.txt README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "$dir/"
           tar czf "$dir.tar.gz" "$dir"
+      - name: Build and package (macOS app, Apple Silicon and Intel)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --target "$t" -p scoreart -p scoreart-cli
+          done
+          dir="scoreart-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          app="$dir/ScoreArt.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          lipo -create -output "$app/Contents/MacOS/ScoreArt" \
+            target/aarch64-apple-darwin/release/scoreart target/x86_64-apple-darwin/release/scoreart
+          lipo -create -output "$dir/scoreart-cli" \
+            target/aarch64-apple-darwin/release/scoreart-cli target/x86_64-apple-darwin/release/scoreart-cli
+          version="${GITHUB_REF_NAME#v}"
+          cat > "$app/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>ScoreArt</string>
+            <key>CFBundleDisplayName</key><string>ScoreArt</string>
+            <key>CFBundleIdentifier</key><string>io.github.manueldell.scoreart</string>
+            <key>CFBundleExecutable</key><string>ScoreArt</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>${version}</string>
+            <key>CFBundleVersion</key><string>${version}</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+          # Signed ad hoc (no paid certificate): macOS asks once, then opens it.
+          codesign --force --deep --sign - "$app"
+          cp docs/START-HERE.txt README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "$dir/"
+          ditto -c -k --keepParent "$dir" "$dir.zip"
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -47,7 +85,7 @@ jobs:
           $dir = "scoreart-$env:GITHUB_REF_NAME-windows"
           New-Item -ItemType Directory $dir | Out-Null
           Copy-Item target/release/scoreart.exe, target/release/scoreart-cli.exe $dir
-          Copy-Item README.md, CHANGELOG.md, LICENSE-MIT, LICENSE-APACHE, NOTICE, ATTRIBUTION.md $dir
+          Copy-Item docs/START-HERE.txt, README.md, CHANGELOG.md, LICENSE-MIT, LICENSE-APACHE, NOTICE, ATTRIBUTION.md $dir
           Compress-Archive -Path $dir -DestinationPath "$dir.zip"
       - uses: actions/upload-artifact@v4
         with:
@@ -69,12 +107,25 @@ jobs:
       - run: |
           dir="scoreart-${GITHUB_REF_NAME}-web"
           cp -r dist/web "$dir"
-          cp README.md LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "$dir/"
+          cp docs/START-HERE.txt README.md LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "$dir/"
           zip -r "$dir.zip" "$dir"
       - uses: actions/upload-artifact@v4
         with:
           name: web
           path: scoreart-*-web.zip
+      # The browser version to try: published on the gh-pages branch (GitHub Pages).
+      - name: Publish the web version (GitHub Pages)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          cd dist/web
+          touch .nojekyll
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Web version ${GITHUB_REF_NAME}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
 
   release:
     needs: [desktop, web]
@@ -86,8 +137,11 @@ jobs:
         with:
           path: out
           merge-multiple: true
-      - name: Release notes from the changelog
-        run: awk '/^## /{n++} n==1' CHANGELOG.md > notes.md
+      - name: "Release notes: how to start, then the changelog"
+        run: |
+          cp .github/release-intro.md notes.md
+          echo "### What's in it" >> notes.md
+          awk '/^## /{n++} n==1' CHANGELOG.md | tail -n +2 >> notes.md
       - uses: softprops/action-gh-release@v2
         with:
           body_path: notes.md

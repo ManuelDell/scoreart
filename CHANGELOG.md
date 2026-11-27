@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-11-27
 
 - **PDF export**: every page, with Bravura and Crimson Text embedded (krilla).
 - **PDFs as originals**: opening a PDF shows it in a panel beside the score (*View → PDF*).

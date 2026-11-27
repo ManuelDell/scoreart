@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 0.1" src="https://img.shields.io/badge/version-0.1-7048e8?style=flat-square">
+  <a href="https://github.com/ManuelDell/scoreart/releases/latest"><img alt="Version 0.2" src="https://img.shields.io/badge/version-0.2-7048e8?style=flat-square"></a>
   <img alt="Runs on Windows, macOS, Linux and the web" src="https://img.shields.io/badge/runs%20on-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Web-7048e8?style=flat-square">
   <img alt="Free: MIT or Apache-2.0" src="https://img.shields.io/badge/free-MIT%20%2F%20Apache--2.0-7048e8?style=flat-square">
   <img alt="Status: alpha" src="https://img.shields.io/badge/status-alpha-orange?style=flat-square">
@@ -40,10 +40,12 @@ every other notation program understands.
 
 ## Get started
 
-1. **Download** ScoreArt for your computer from the
-   [Releases page](https://github.com/ManuelDell/scoreart/releases) (Windows, macOS, Linux), or
-   use the **web version** from the same page in your browser.
-2. **Start it** — a sample song opens, so you can look around and press **Space** to listen.
+1. **Try it in your browser**, no installation: **https://manueldell.github.io/scoreart/** —
+   or **download** it for Windows, macOS or Linux from the
+   [latest release](https://github.com/ManuelDell/scoreart/releases/latest).
+2. **Start it** — the release page (and `START-HERE.txt` in every download) says how, including
+   the one-time warning of Windows or macOS for apps without a paid signature. A sample song
+   opens, so you can look around and press **Space** to listen.
 3. **Make your own score**: *File → New*, choose your instruments, and start writing.
 
 The [**user guide**](docs/guide/README.md) walks you through everything, with pictures —

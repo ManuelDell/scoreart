@@ -1,0 +1,92 @@
+ScoreArt — write, print and play sheet music (alpha)
+=====================================================
+
+  Deutsch: siehe unten.
+
+HOW TO START
+------------
+
+Windows
+  1. Unzip the download (right-click → "Extract All…").
+  2. Double-click scoreart.exe.
+  3. Windows may say "Windows protected your PC": click "More info", then "Run anyway".
+     (ScoreArt is not signed with a paid certificate; that is all the warning means.)
+
+macOS (Apple Silicon and Intel)
+  1. Unzip the download and drag ScoreArt.app into your Applications folder.
+  2. Open it. macOS will say it cannot check the app for malware:
+     open System Settings → Privacy & Security, scroll down and click "Open Anyway",
+     then confirm. (Or right-click the app → "Open" → "Open".)
+     This is needed once, because ScoreArt is not notarised by Apple.
+
+Linux
+  1. Unpack:      tar xzf scoreart-*-linux.tar.gz
+  2. Start:       ./scoreart-*-linux/scoreart
+  Sound needs ALSA (installed on almost every desktop; else: sudo apt install libasound2).
+
+In the browser (no installation)
+  Open https://manueldell.github.io/scoreart/ — the same program, running in your browser.
+  The web download (…-web.zip) is for hosting it yourself on a web server; it does not run
+  by double-clicking index.html.
+
+FIRST STEPS
+-----------
+  - A sample song opens. Press Space to listen, Space again to stop.
+  - File → Open: MuseScore (.mscz, .mscx), MusicXML (.musicxml, .mxl), MIDI, PDF.
+  - File → New: choose your instruments and start writing.
+  - Writing notes: press N (or the pen), then type the letters C D E F G A B;
+    the keys 1–8 choose the note value (5 = quarter). Esc ends note input.
+  - File → PDF (.pdf) exports every page.
+  - View → Language: English or German (Deutsch).
+
+The full user guide with pictures: https://github.com/ManuelDell/scoreart/tree/main/docs/guide
+
+This is an early alpha: please save often, and report problems or ideas at
+https://github.com/ManuelDell/scoreart/issues
+
+The command-line tool scoreart-cli converts files without opening a window, e.g.
+  scoreart-cli convert song.mscz song.pdf
+
+
+SO STARTEST DU SCOREART
+=======================
+
+Windows
+  1. Download entpacken (Rechtsklick → „Alle extrahieren…“).
+  2. Doppelklick auf scoreart.exe.
+  3. Meldet Windows „Der Computer wurde durch Windows geschützt“: „Weitere Informationen“,
+     dann „Trotzdem ausführen“. (ScoreArt hat kein kostenpflichtiges Zertifikat; mehr
+     bedeutet die Warnung nicht.)
+
+macOS (Apple Silicon und Intel)
+  1. Download entpacken und ScoreArt.app in den Ordner „Programme“ ziehen.
+  2. Öffnen. macOS meldet, dass es die App nicht auf Schadsoftware prüfen kann:
+     Systemeinstellungen → Datenschutz & Sicherheit, nach unten scrollen, „Dennoch öffnen“
+     klicken und bestätigen. (Oder Rechtsklick auf die App → „Öffnen“ → „Öffnen“.)
+     Das ist einmal nötig, weil ScoreArt nicht von Apple beglaubigt ist.
+
+Linux
+  1. Entpacken:   tar xzf scoreart-*-linux.tar.gz
+  2. Starten:     ./scoreart-*-linux/scoreart
+  Für Ton braucht es ALSA (auf fast jedem Desktop vorhanden; sonst: sudo apt install libasound2).
+
+Im Browser (ohne Installation)
+  https://manueldell.github.io/scoreart/ öffnen — dasselbe Programm, im Browser.
+  Der Web-Download (…-web.zip) ist zum Selbst-Hosten auf einem Webserver gedacht; ein
+  Doppelklick auf index.html startet ihn nicht.
+
+ERSTE SCHRITTE
+--------------
+  - Ein Beispiellied öffnet sich. Leertaste spielt ab, noch einmal Leertaste stoppt.
+  - Datei → Öffnen: MuseScore (.mscz, .mscx), MusicXML (.musicxml, .mxl), MIDI, PDF.
+  - Datei → Neu: Instrumente wählen und losschreiben.
+  - Noten schreiben: N drücken (oder den Stift), dann die Buchstaben C D E F G A B tippen
+    (B für das H); die Tasten 1–8 wählen den Notenwert (5 = Viertel). Esc beendet die
+    Noteneingabe.
+  - Datei → PDF (.pdf) exportiert alle Seiten.
+  - Ansicht → Sprache: Deutsch oder Englisch.
+
+Das ganze Handbuch mit Bildern: https://github.com/ManuelDell/scoreart/tree/main/docs/guide/de
+
+Das ist eine frühe Alpha-Version: bitte oft speichern, und Probleme oder Ideen gern unter
+https://github.com/ManuelDell/scoreart/issues melden.

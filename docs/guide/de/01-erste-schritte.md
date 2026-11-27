@@ -2,15 +2,20 @@
 
 ## Installieren
 
-Lade ScoreArt von der [Release-Seite](https://github.com/ManuelDell/scoreart/releases)
+**Ohne Installation:** **https://manueldell.github.io/scoreart/** im Browser öffnen.
+
+Oder lade ScoreArt vom [neuesten Release](https://github.com/ManuelDell/scoreart/releases/latest)
 herunter:
 
 | Dein Computer | Download | Dann |
 |---|---|---|
-| **Windows** | `scoreart-…-windows.zip` | Entpacken und `scoreart.exe` starten. Windows warnt evtl. vor einem unbekannten Herausgeber: *Weitere Informationen → Trotzdem ausführen*. |
-| **macOS** | `scoreart-…-macos.tar.gz` | Entpacken, dann beim ersten Mal Rechtsklick auf `scoreart` → *Öffnen* (die App ist noch nicht signiert). |
+| **Windows** | `scoreart-…-windows.zip` | Entpacken und `scoreart.exe` starten. Meldet Windows *„Der Computer wurde durch Windows geschützt“*: *Weitere Informationen → Trotzdem ausführen*. |
+| **macOS** (Apple Silicon und Intel) | `scoreart-…-macos.zip` | Entpacken, **ScoreArt.app** in *Programme* ziehen und öffnen. Beim ersten Mal meldet macOS, dass es die App nicht prüfen kann: *Systemeinstellungen → Datenschutz & Sicherheit → Dennoch öffnen*. |
 | **Linux** | `scoreart-…-linux.tar.gz` | Entpacken und `./scoreart` starten. |
-| **Browser** | `scoreart-…-web.zip` | Eine Web-Version für jeden Webserver; sie läuft komplett im Browser. |
+| **Eigener Webserver** | `scoreart-…-web.zip` | Die Browser-Version zum Selbst-Hosten; sie läuft komplett im Browser. |
+
+Die Warnungen kommen nur, weil ScoreArt nicht mit einem kostenpflichtigen Zertifikat signiert
+ist. In jedem Download liegt eine `START-HERE.txt` mit diesen Schritten.
 
 Du kannst ScoreArt auch selbst aus dem Quellcode bauen — siehe die
 [README](../../../README.md#for-developers).

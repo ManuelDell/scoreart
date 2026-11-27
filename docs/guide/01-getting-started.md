@@ -2,14 +2,19 @@
 
 ## Install
 
-Download ScoreArt from the [Releases page](https://github.com/ManuelDell/scoreart/releases):
+**Without installing:** open **https://manueldell.github.io/scoreart/** in your browser.
+
+Or download ScoreArt from the [latest release](https://github.com/ManuelDell/scoreart/releases/latest):
 
 | Your computer | Download | Then |
 |---|---|---|
-| **Windows** | `scoreart-…-windows.zip` | Unpack it and start `scoreart.exe`. Windows may warn about an unknown publisher: choose *More info → Run anyway*. |
-| **macOS** | `scoreart-…-macos.tar.gz` | Unpack it, then right-click `scoreart` → *Open* the first time (the app is not signed yet). |
+| **Windows** | `scoreart-…-windows.zip` | Unpack it and start `scoreart.exe`. Windows may say *"Windows protected your PC"*: choose *More info → Run anyway*. |
+| **macOS** (Apple Silicon and Intel) | `scoreart-…-macos.zip` | Unpack it, drag **ScoreArt.app** into *Applications* and open it. The first time macOS says it cannot check the app: *System Settings → Privacy & Security → Open Anyway*. |
 | **Linux** | `scoreart-…-linux.tar.gz` | Unpack it and start `./scoreart`. |
-| **Any browser** | `scoreart-…-web.zip` | A web version to put on any web server; it runs entirely in the browser. |
+| **Your own web server** | `scoreart-…-web.zip` | The browser version to host yourself; it runs entirely in the browser. |
+
+The warnings appear only because ScoreArt is not signed with a paid certificate. Every download
+holds a `START-HERE.txt` with these steps.
 
 You can also build it yourself from the source code — see the [README](../../README.md#for-developers).
 

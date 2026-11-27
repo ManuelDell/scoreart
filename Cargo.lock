@@ -3478,7 +3478,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scoreart"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cpal",
  "eframe",
@@ -3492,7 +3492,7 @@ dependencies = [
 
 [[package]]
 name = "scoreart-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "scoreart-engine",
  "scoreart-engrave",
@@ -3503,7 +3503,7 @@ dependencies = [
 
 [[package]]
 name = "scoreart-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "scoreart-engrave",
  "scoreart-midi",
@@ -3520,7 +3520,7 @@ dependencies = [
 
 [[package]]
 name = "scoreart-engrave"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "scoreart-model",
  "scoreart-musicxml",
@@ -3528,7 +3528,7 @@ dependencies = [
 
 [[package]]
 name = "scoreart-midi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "midly",
  "scoreart-model",
@@ -3536,7 +3536,7 @@ dependencies = [
 
 [[package]]
 name = "scoreart-model"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -3544,7 +3544,7 @@ dependencies = [
 
 [[package]]
 name = "scoreart-musicxml"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "quick-xml 0.38.4",
  "scoreart-model",
@@ -3555,7 +3555,7 @@ dependencies = [
 
 [[package]]
 name = "scoreart-pdf"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "hayro",
  "scoreart-engrave",
@@ -3565,7 +3565,7 @@ dependencies = [
 
 [[package]]
 name = "scoreart-render"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "krilla",
  "scoreart-engrave",
@@ -3576,7 +3576,7 @@ dependencies = [
 
 [[package]]
 name = "scoreart-synth"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "claxon",
  "rustysynth",
@@ -3588,7 +3588,7 @@ dependencies = [
 
 [[package]]
 name = "scoreart-ui-egui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "egui",
  "scoreart-engine",
@@ -3602,7 +3602,7 @@ dependencies = [
 
 [[package]]
 name = "scoreart-web"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui",
@@ -5143,7 +5143,7 @@ checksum = "9440ea3e5aeabb0ac63af70daf835274065238cdd0cec83418f417eae38bacee"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "yeslogic-fontconfig-sys"
