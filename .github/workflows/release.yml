@@ -19,7 +19,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # An older Ubuntu, so the program runs on older Linux systems too (glibc 2.35+).
+          - os: ubuntu-22.04
             name: linux
           - os: macos-latest
             name: macos
