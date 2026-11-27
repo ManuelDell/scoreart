@@ -4,6 +4,8 @@ name: Release
 on:
   push:
     tags: ["v*"]
+    # A dry run: builds every download without publishing anything.
+    branches: [release-check]
   release:
     types: [published]
   workflow_dispatch:
