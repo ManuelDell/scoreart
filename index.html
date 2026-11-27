@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ScoreArt</title>
+  <link rel="icon" href="./scoreart-06e27d25d589d162.svg" integrity="sha384-Up6TngCJbw6DhRUtPyZ3q2IwXTk9OGcnjnCZ2/Co4XRinJBehmZE1UUkyJHfFnZY"/>
+  
+<script type="module">
+import init, * as bindings from './scoreart-web-807b034e05d7a71f.js';
+
+const wasm = await init({ module_or_path: './scoreart-web-701d4bf8c3c0f847_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #dfe2e8; }
+    #scoreart_canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    #scoreart_loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: #555; font: 14px system-ui, sans-serif; pointer-events: none; }
+  </style>
+<link rel="modulepreload" href="./scoreart-web-807b034e05d7a71f.js" crossorigin="anonymous" integrity="sha384-fkIld8ML7apvg8LemkfEgY8x99ix8JbE9lOQnf30bN2JkI4RSQ5Iy5q1SQJbprsT"><link rel="preload" href="./scoreart-web-701d4bf8c3c0f847_bg.wasm" crossorigin="anonymous" integrity="sha384-Zi0ZrBxQh5TocrbdHJmt/iKk8ThQdKNAx0aJ5QQCFfzJfuRzi9bDflziNBGt5rzN" as="fetch" type="application/wasm"></head>
+<body>
+  <canvas id="scoreart_canvas"></canvas>
+  <div id="scoreart_loading">Loading ScoreArt&hellip;</div>
+</body>
+</html>
